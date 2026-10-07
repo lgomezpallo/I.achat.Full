@@ -40,7 +40,13 @@ def service_worker():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "component": "iachat"}
+    router_url = os.environ.get("ROUTER_URL", "").strip()
+    return {
+        "status": "ok",
+        "component": "iachat",
+        "router_configured": bool(router_url),
+        "storage": "sqlite",
+    }
 
 @app.post("/api/chat", response_model=MessageOutput)
 def chat(message: MessageInput):
