@@ -24,7 +24,7 @@ def get_backend():
     url = os.environ.get("ROUTER_URL", "").strip()
     if not url:
         raise HTTPException(503, "IAchat requiere configurar ROUTER_URL")
-    return RouterBackend(base_url=url)
+    return RouterBackend(base_url=url, token=os.environ.get("ROUTER_TOKEN", ""))
 
 @app.get("/", response_class=HTMLResponse)
 def home():
