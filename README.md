@@ -1,14 +1,36 @@
 # IAchat
 
-Chat conversacional con historial por conversación, API FastAPI y adaptador de proveedor aislado.
+Chat conversacional independiente de proveedores. Toda inferencia pasa por **Router**; IAchat no conoce modelos ni API keys de proveedores.
+
+## Funciones actuales
+
+- interfaz web responsive e instalable como PWA;
+- API conversacional;
+- historial persistente en SQLite;
+- recuperación y borrado de conversaciones;
+- conexión exclusiva con Router por HTTP;
+- health check;
+- tests automáticos y CI.
 
 ## Arranque
+
 ```sh
 python -m pip install -e .
 export ROUTER_URL='http://localhost:8010'
+export IACHAT_DB='./iachat.db'
 uvicorn iachat.app:app --host 0.0.0.0 --port 8000
 ```
 
-Endpoints: `GET /health`, `POST /api/chat`, `GET /api/conversations/{id}`.
+Abrí `http://localhost:8000`.
 
-**Estado:** base funcional conectada exclusivamente a Router por HTTP. IAchat no conoce proveedores, modelos ni claves. El historial actual es temporal en memoria y no sobrevive reinicios; la persistencia e interfaz web se incorporan en las siguientes capas. Nunca guardar credenciales en Git.
+## API
+
+- `GET /` — cliente web/PWA
+- `GET /health`
+- `POST /api/chat`
+- `GET /api/conversations/{id}`
+- `DELETE /api/conversations/{id}`
+
+## Límite de responsabilidad
+
+IAchat conversa y conserva el hilo. No selecciona proveedores, no administra claves y no implementa lógica de routing. Esa responsabilidad pertenece a Router.
