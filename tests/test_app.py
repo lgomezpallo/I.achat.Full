@@ -12,8 +12,12 @@ class FakeBackend:
 def reset_store():
     module.store = ConversationStore(":memory:")
 
-def test_health():
-    assert client.get("/health").json()["status"] == "ok"
+def test_health(monkeypatch):
+    monkeypatch.delenv("ROUTER_URL", raising=False)
+    body = client.get("/health").json()
+    assert body["status"] == "ok"
+    assert body["router_configured"] is False
+    assert body["storage"] == "sqlite"
 
 def test_home_is_chat_ui():
     response = client.get("/")
