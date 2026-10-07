@@ -2,9 +2,10 @@ from __future__ import annotations
 import httpx
 
 class RouterBackend:
-    def __init__(self, base_url: str, timeout_s: float = 60.0):
+    def __init__(self, base_url: str, timeout_s: float = 60.0, token: str = ""):
         self.base_url = base_url.rstrip("/")
         self.timeout_s = timeout_s
+        self.token = token
 
     def answer(self, messages: list[dict[str, str]]) -> str:
         context_parts: list[str] = []
@@ -16,8 +17,10 @@ class RouterBackend:
                 task = content
             else:
                 context_parts.append(f"{role}: {content}")
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         response = httpx.post(
             self.base_url + "/route",
+            headers=headers,
             json={
                 "task": task,
                 "context": "\n".join(context_parts),
