@@ -13,12 +13,13 @@ class FakeResponse:
 
 def test_router_backend_returns_text(monkeypatch):
     captured = {}
-    def fake_post(url, json, timeout):
+    def fake_post(url, headers, json, timeout):
         captured["url"] = url
+        captured["headers"] = headers
         captured["json"] = json
         return FakeResponse({"ok": True, "text": "respuesta", "provider": "groq", "model": "x"})
     monkeypatch.setattr(module.httpx, "post", fake_post)
-    backend = RouterBackend("http://router:8010")
+    backend = RouterBackend("http://router:8010", token="service-secret")
     answer = backend.answer([
         {"role":"user","content":"hola"},
         {"role":"assistant","content":"buenas"},
@@ -26,6 +27,7 @@ def test_router_backend_returns_text(monkeypatch):
     ])
     assert answer == "respuesta"
     assert captured["url"] == "http://router:8010/route"
+    assert captured["headers"]["Authorization"] == "Bearer service-secret"
     assert captured["json"]["task"] == "seguimos"
     assert "assistant: buenas" in captured["json"]["context"]
 
