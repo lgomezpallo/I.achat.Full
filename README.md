@@ -17,6 +17,7 @@ Chat conversacional independiente de proveedores. Toda inferencia pasa por **Rou
 ```sh
 python -m pip install -e .
 export ROUTER_URL='http://localhost:8010'
+export ROUTER_TOKEN='...'
 export IACHAT_DB='./iachat.db'
 uvicorn iachat.app:app --host 0.0.0.0 --port 8000
 ```
