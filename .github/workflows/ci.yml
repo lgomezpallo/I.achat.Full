@@ -13,3 +13,4 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -e ".[dev]"
       - run: pytest -q
+      - run: docker build -t iachat-ci .
