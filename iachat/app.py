@@ -17,11 +17,11 @@ class MessageOutput(BaseModel):
     history: list[dict[str, str]]
 
 def get_backend():
-    from .backend import GroqBackend
-    key = os.environ.get("IACHAT_API_KEY", "")
-    if not key:
-        raise HTTPException(503, "IAchat requiere configurar IACHAT_API_KEY")
-    return GroqBackend(key=key, model=os.getenv("IACHAT_MODEL", "llama-3.3-70b-versatile"))
+    from .backend import RouterBackend
+    url = os.environ.get("ROUTER_URL", "").strip()
+    if not url:
+        raise HTTPException(503, "IAchat requiere configurar ROUTER_URL")
+    return RouterBackend(base_url=url)
 
 @app.get("/health")
 def health():
