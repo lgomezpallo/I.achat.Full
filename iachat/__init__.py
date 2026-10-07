@@ -1,0 +1,1 @@
+"""Interfaz de conversación desacoplada del proveedor de IA."""
