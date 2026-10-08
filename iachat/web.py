@@ -1,42 +1,74 @@
 HTML = r"""<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#111827">
-<link rel="manifest" href="/manifest.webmanifest">
+<html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#10151e"><link rel="manifest" href="/manifest.webmanifest">
 <title>IAchat</title>
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:system-ui;background:#0b1020;color:#e5e7eb}
-main{max-width:820px;height:100dvh;margin:auto;display:grid;grid-template-rows:auto 1fr auto}
-header{padding:16px 18px;border-bottom:1px solid #253047;font-weight:700}
-#messages{overflow:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
-.msg{max-width:85%;padding:11px 13px;border-radius:15px;white-space:pre-wrap;line-height:1.4}
-.user{align-self:flex-end;background:#334155}.assistant{align-self:flex-start;background:#182235}
-form{display:flex;gap:8px;padding:12px;border-top:1px solid #253047;background:#0b1020}
-textarea{flex:1;resize:none;border:1px solid #334155;border-radius:12px;padding:12px;background:#111827;color:white;min-height:48px;max-height:140px}
-button{border:0;border-radius:12px;padding:0 18px;font-weight:700;cursor:pointer}
-small{opacity:.65;font-weight:400}
-</style></head>
-<body><main><header>IAchat <small>· Router desacoplado</small></header>
-<section id="messages"></section>
-<form id="form"><textarea id="input" rows="1" placeholder="Escribí un mensaje…" required></textarea><button>Enviar</button></form>
-</main>
+:root{color-scheme:dark;--bg:#10151e;--panel:#181f2b;--edge:#303949;--txt:#f0f3fb;--muted:#aab6cb;--accent:#759bf7;--bubble:#304363}
+*{box-sizing:border-box}html,body{margin:0;height:100%;font:15px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--txt)}
+button,textarea,input{font:inherit}button{cursor:pointer;border:0;color:inherit}
+.shell{max-width:940px;margin:0 auto;height:100dvh;display:flex;flex-direction:column;position:relative}
+header{height:62px;min-height:62px;display:flex;align-items:center;justify-content:space-between;padding:6px 17px;border-bottom:1px solid var(--edge)}
+.brand{text-align:center}.brand strong{font-size:19px;font-weight:650;letter-spacing:.1px}.brand small{display:block;font-size:11px;color:var(--muted);line-height:15px}
+.iconbtn{width:43px;height:43px;border-radius:15px;background:#222c3b;font-size:25px}
+#messages{flex:1;min-height:0;overflow-y:auto;padding:18px 18px 12px;display:flex;flex-direction:column;gap:17px;scrollbar-width:thin}
+.msg{max-width:88%;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.56;font-size:15px}
+.user{align-self:flex-end;background:var(--bubble);border-radius:20px 20px 6px 20px;padding:12px 16px}
+.assistant{align-self:flex-start;padding:4px 4px 4px 33px;position:relative}
+.assistant:before{content:'✦';position:absolute;top:5px;left:0;width:24px;height:24px;border-radius:9px;background:#263851;color:#b6d1ff;display:grid;place-items:center;font-size:12px}
+.error{color:#ff9da7}.waiting{color:var(--muted)}.empty{margin:auto;text-align:center;color:var(--muted);font-size:17px}
+.bottom{border-top:1px solid var(--edge);background:var(--bg);padding:9px 16px max(13px,env(safe-area-inset-bottom))}
+.modes{display:flex;align-items:center;gap:6px;margin-bottom:9px}
+.mode{padding:9px 13px;border-radius:13px;background:transparent;color:var(--muted);font-size:13px}.mode.active{background:#283b55;color:#e3edff}
+.composer{display:flex;gap:8px;align-items:flex-end;padding:8px;border:1px solid var(--edge);border-radius:22px;background:var(--panel)}
+#input{flex:1;min-width:0;resize:none;min-height:39px;max-height:134px;padding:9px 5px;border:0;outline:0;background:transparent;color:var(--txt)}
+#input::placeholder{color:var(--muted)}.attach{width:36px;height:38px;background:transparent;color:var(--muted);font-size:25px}
+.send{width:39px;height:39px;border-radius:14px;background:var(--accent);color:#091326;font-size:23px;font-weight:700}.send:disabled{opacity:.45}
+.note{text-align:center;color:#8897af;font-size:10px;margin:7px 0 0}
+#drawer{position:absolute;z-index:8;top:0;bottom:0;left:0;width:min(85vw,320px);background:#1b2432;border-right:1px solid var(--edge);padding:19px;box-shadow:12px 0 60px #0008;display:none;overflow:auto}
+#drawer.open{display:block}.drawer-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.history-item{width:100%;padding:12px;text-align:left;background:#293447;border-radius:12px;margin-bottom:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#login{position:absolute;inset:0;z-index:12;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px}
+.loginbox{width:min(100%,370px);padding:24px;background:var(--panel);border-radius:22px;border:1px solid var(--edge);display:grid;gap:14px}
+.loginbox h2{margin:0;font-size:24px}.loginbox p{color:var(--muted);margin:0}
+.loginbox input{border:1px solid var(--edge);background:var(--bg);color:var(--txt);padding:13px;border-radius:12px;width:100%}
+.loginbox button{background:var(--accent);color:#111b2b;border-radius:12px;padding:12px;font-weight:650}
+#loginError{color:#ff9da7;font-size:12px}
+.hidden{display:none!important}
+</style></head><body>
+<div class="shell">
+<header><button id="history" class="iconbtn" aria-label="Conversaciones">☰</button><div class="brand"><strong>IAchat</strong><small>Tu espacio de ideas</small></div><button id="new" class="iconbtn" aria-label="Nuevo chat">+</button></header>
+<main id="messages" aria-live="polite"><div class="empty" id="empty">¿En qué te puedo ayudar?</div></main>
+<div class="bottom"><nav class="modes"><button class="mode active" data-mode="chat">Chat</button><button class="mode" data-mode="image">Imagen</button><button class="mode" data-mode="document">Documento</button></nav>
+<form id="form" class="composer"><button type="button" class="attach" title="Adjuntos: próximamente" aria-label="Adjuntar">+</button><textarea id="input" rows="1" placeholder="Escribí un mensaje…" required></textarea><button class="send" aria-label="Enviar">↑</button></form>
+<p id="note" class="note">Revisá la información importante antes de usarla.</p></div>
+<aside id="drawer"><div class="drawer-head"><strong>Conversaciones</strong><button id="close" class="iconbtn">×</button></div><button class="history-item" id="drawerNew">+ Nueva conversación</button><div id="historyList"></div><button class="history-item" id="logout">Cerrar sesión</button></aside>
+<div id="login" class="hidden"><form class="loginbox" id="loginForm"><h2>IAchat</h2><p>Tu espacio privado de conversación.</p><input id="password" type="password" autocomplete="current-password" placeholder="Contraseña" required><button>Entrar</button><span id="loginError"></span></form></div>
+</div>
 <script>
-let conversationId=localStorage.getItem("iachat.conversation");
-const messages=document.getElementById("messages"), input=document.getElementById("input"), form=document.getElementById("form");
-function add(role,text){const e=document.createElement("div");e.className="msg "+role;e.textContent=text;messages.appendChild(e);messages.scrollTop=messages.scrollHeight}
-async function restore(){if(!conversationId)return;const r=await fetch("/api/conversations/"+conversationId);if(!r.ok){localStorage.removeItem("iachat.conversation");conversationId=null;return}const d=await r.json();for(const m of d.history)add(m.role,m.content)}
-form.addEventListener("submit",async e=>{e.preventDefault();const text=input.value.trim();if(!text)return;input.value="";add("user",text);const payload={text};if(conversationId)payload.conversation_id=conversationId;try{const r=await fetch("/api/chat",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});const d=await r.json();if(!r.ok){input.value=text;add("assistant","No se pudo enviar el mensaje ("+(d.detail||"error de servidor")+"). Podés reintentarlo.");return}conversationId=d.conversation_id;localStorage.setItem("iachat.conversation",conversationId);add("assistant",d.answer)}catch(err){input.value=text;add("assistant","No hay conexión con IAchat. El mensaje sigue disponible para reintentar.")}});
-restore(); if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
+var conversationId=null,busy=false;
+var messages=document.getElementById('messages'),input=document.getElementById('input'),drawer=document.getElementById('drawer');
+var ids=[];try{ids=JSON.parse(localStorage.getItem('iachat.history')||'[]');if(!Array.isArray(ids))ids=[]}catch(e){ids=[]}
+function saveIds(){localStorage.setItem('iachat.history',JSON.stringify(ids.slice(0,80)))}
+function add(role,text,error){document.getElementById('empty')?.remove();var e=document.createElement('div');e.className='msg '+role+(error?' error':'');e.textContent=text;messages.appendChild(e);messages.scrollTop=messages.scrollHeight;return e}
+function reset(){conversationId=null;messages.innerHTML='<div class="empty" id="empty">¿En qué te puedo ayudar?</div>';input.value='';drawer.classList.remove('open');}
+function renderHistory(){var list=document.getElementById('historyList');list.replaceChildren();ids.forEach(function(item){var b=document.createElement('button');b.className='history-item';b.textContent=item.title||'Conversación';b.onclick=function(){openConversation(item.id)};list.appendChild(b)})}
+async function openConversation(id){try{var r=await fetch('/api/conversations/'+encodeURIComponent(id));if(r.status===401){showLogin();return}if(!r.ok)throw Error('No se pudo recuperar la conversación');var d=await r.json();conversationId=id;messages.replaceChildren();if(!d.history.length)reset();else d.history.forEach(function(m){add(m.role,m.content)});drawer.classList.remove('open')}catch(e){add('assistant',String(e.message||e),true)}}
+function showLogin(){document.getElementById('login').classList.remove('hidden')}
+async function init(){try{var r=await fetch('/auth/status');var d=await r.json();if(!d.authenticated){showLogin();return}renderHistory();if(ids.length)await openConversation(ids[0].id)}catch(e){showLogin()}}
+document.getElementById('loginForm').onsubmit=async function(e){e.preventDefault();var r=await fetch('/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:document.getElementById('password').value})});if(r.ok){document.getElementById('password').value='';document.getElementById('login').classList.add('hidden');init()}else document.getElementById('loginError').textContent='Contraseña incorrecta'};
+document.getElementById('history').onclick=function(){renderHistory();drawer.classList.toggle('open')};
+document.getElementById('close').onclick=function(){drawer.classList.remove('open')};
+document.getElementById('new').onclick=reset;document.getElementById('drawerNew').onclick=reset;
+document.getElementById('logout').onclick=async function(){await fetch('/auth/logout',{method:'POST'});reset();showLogin()};
+document.querySelectorAll('.mode').forEach(function(b){b.onclick=function(){if(b.dataset.mode!=='chat'){document.getElementById('note').textContent='Imagen y Documento estarán disponibles más adelante.';return}document.getElementById('note').textContent='Revisá la información importante antes de usarla.'}});
+document.querySelector('.attach').onclick=function(){document.getElementById('note').textContent='Los archivos adjuntos estarán disponibles más adelante.'};
+document.getElementById('form').onsubmit=async function(e){e.preventDefault();if(busy)return;var text=input.value.trim();if(!text)return;busy=true;input.value='';add('user',text);var waiting=add('assistant','Pensando…');var payload={text:text};if(conversationId)payload.conversation_id=conversationId;
+try{var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var d=await r.json();waiting.remove();if(!r.ok){input.value=text;add('assistant',d.detail||'No se pudo enviar. Podés reintentarlo.',true);if(r.status===401)showLogin();return}conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55)});saveIds();add('assistant',d.answer)}
+catch(err){waiting.remove();input.value=text;add('assistant','No hay conexión. El mensaje sigue en la caja para reintentar.',true)}finally{busy=false}};
+input.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('form').requestSubmit()}});
+init();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
 </script></body></html>"""
 
-MANIFEST = {
-    "name": "IAchat",
-    "short_name": "IAchat",
-    "start_url": "/",
-    "display": "standalone",
-    "background_color": "#0b1020",
-    "theme_color": "#111827",
-}
-
-SERVICE_WORKER = """const CACHE='iachat-v1';self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/','/manifest.webmanifest']))));self.addEventListener('fetch',e=>{if(e.request.method==='GET')e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))})"""
+MANIFEST = {"name":"IAchat","short_name":"IAchat","start_url":"/","display":"standalone","background_color":"#10151e","theme_color":"#10151e"}
+SERVICE_WORKER = """const CACHE='iachat-v2';self.addEventListener('install',e=>{self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(self.clients.claim())});self.addEventListener('fetch',e=>{if(e.request.method==='GET'&&new URL(e.request.url).pathname==='/manifest.webmanifest')e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))})"""
