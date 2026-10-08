@@ -48,3 +48,18 @@ def test_delete_conversation(monkeypatch):
 def test_unknown_session():
     reset_store()
     assert client.post("/api/chat", json={"conversation_id":"missing","text":"Hola"}).status_code == 404
+
+
+def test_router_failure_does_not_create_fake_answer(monkeypatch):
+    import httpx
+    reset_store()
+
+    class FailingBackend:
+        def answer(self, messages):
+            raise httpx.ConnectError("router offline")
+
+    monkeypatch.setattr(module, "get_backend", lambda: FailingBackend())
+    response = client.post("/api/chat", json={"text": "Hola"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "router_unavailable"
+    assert module.store._db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
