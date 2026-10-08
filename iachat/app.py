@@ -26,7 +26,7 @@ def _valid_session(value: str) -> bool:
 @app.middleware("http")
 async def restrict_private_api(request: Request, call_next):
     path = request.url.path
-    if path.startswith("/api/") and not _valid_session(request.cookies.get("iachat_session", "")):
+    if os.getenv("IACHAT_PASSWORD") and path.startswith("/api/") and not _valid_session(request.cookies.get("iachat_session", "")):
         return JSONResponse({"detail": "authentication_required"}, status_code=401)
     return await call_next(request)
 
