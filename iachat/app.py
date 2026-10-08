@@ -49,6 +49,22 @@ def health():
         "storage": "sqlite",
     }
 
+@app.get("/ready")
+def ready():
+    url = os.environ.get("ROUTER_URL", "").strip().rstrip("/")
+    if not url:
+        raise HTTPException(503, "router_not_configured")
+    try:
+        response = httpx.get(url + "/health", timeout=5.0)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("status") != "ok":
+            raise HTTPException(503, "router_not_ready")
+    except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as exc:
+        raise HTTPException(503, "router_unavailable") from exc
+    return {"status": "ready", "component": "iachat", "router": "reachable"}
+
+
 @app.post("/api/chat", response_model=MessageOutput)
 def chat(message: MessageInput):
     conversation_id = message.conversation_id or str(uuid4())
