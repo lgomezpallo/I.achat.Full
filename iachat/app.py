@@ -65,11 +65,8 @@ class MessageOutput(BaseModel):
     history: list[dict[str, str]]
 
 def get_backend():
-    from .backend import RouterBackend
-    url = os.environ.get("ROUTER_URL", "").strip()
-    if not url:
-        raise HTTPException(503, "IAchat requiere configurar ROUTER_URL")
-    return RouterBackend(base_url=url, token=os.environ.get("ROUTER_TOKEN", ""))
+    from .backend import ProviderBackend
+    return ProviderBackend()
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -85,37 +82,14 @@ def service_worker():
 
 @app.get("/health")
 def health():
-    router_url = os.environ.get("ROUTER_URL", "").strip()
-    return {
-        "status": "ok",
-        "component": "iachat",
-        "router_configured": bool(router_url),
-        "storage": "sqlite",
-    }
+    return {"status": "ok", "component": "iachat", "storage": "sqlite"}
 
 @app.get("/ready")
 def ready():
-    url = os.environ.get("ROUTER_URL", "").strip().rstrip("/")
-    if not url:
-        raise HTTPException(503, "router_not_configured")
-    try:
-        response = httpx.get(url + "/health", timeout=5.0)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("status") != "ok":
-            raise HTTPException(503, "router_not_ready")
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(503, f"router_http_{exc.response.status_code}") from exc
-    except httpx.ConnectTimeout as exc:
-        raise HTTPException(503, "router_connect_timeout") from exc
-    except httpx.ReadTimeout as exc:
-        raise HTTPException(503, "router_read_timeout") from exc
-    except httpx.ConnectError as exc:
-        raise HTTPException(503, "router_connect_error") from exc
-    except (httpx.RequestError, ValueError) as exc:
-        raise HTTPException(503, "router_transport_error") from exc
-    return {"status": "ready", "component": "iachat", "router": "reachable"}
-
+    configured = any(os.getenv(key, "").strip() for key in ("GROQ_API_KEY", "OPENROUTER_API_KEY"))
+    if not configured:
+        raise HTTPException(503, "providers_not_configured")
+    return {"status": "ready", "component": "iachat", "mode": "direct"}
 
 @app.post("/api/chat", response_model=MessageOutput)
 def chat(message: MessageInput):
@@ -127,14 +101,12 @@ def chat(message: MessageInput):
     try:
         answer = get_backend().answer([*history, {"role": "user", "content": message.text}])
     except httpx.HTTPStatusError as exc:
-        status = exc.response.status_code
-        if status in (401, 403):
-            raise HTTPException(502, "router_auth_rejected") from exc
-        if status in (502, 503, 504):
-            raise HTTPException(503, "router_gateway_unavailable") from exc
-        raise HTTPException(502, f"router_http_{status}") from exc
+        raise HTTPException(503, "providers_http_error") from exc
     except (httpx.RequestError, RuntimeError) as exc:
-        raise HTTPException(503, "router_unavailable") from exc
+        detail = str(exc) if isinstance(exc, RuntimeError) else "providers_unavailable"
+        if detail not in ("providers_not_configured", "providers_unavailable", "providers_failed"):
+            detail = "providers_unavailable"
+        raise HTTPException(503, detail) from exc
     updated = [*history, {"role": "user", "content": message.text}, {"role": "assistant", "content": answer}]
     store.put(conversation_id, updated)
     return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
