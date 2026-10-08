@@ -63,3 +63,28 @@ def test_router_failure_does_not_create_fake_answer(monkeypatch):
     assert response.status_code == 503
     assert response.json()["detail"] == "router_unavailable"
     assert module.store._db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
+
+
+def test_readiness_requires_router_connection(monkeypatch):
+    import httpx
+    monkeypatch.delenv("ROUTER_URL", raising=False)
+    assert client.get("/ready").status_code == 503
+    monkeypatch.setenv("ROUTER_URL", "http://router:8010")
+
+    class HealthyResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"status": "ok"}
+
+    monkeypatch.setattr(module.httpx, "get", lambda *args, **kwargs: HealthyResponse())
+    ready = client.get("/ready")
+    assert ready.status_code == 200
+    assert ready.json()["router"] == "reachable"
+
+    def no_router(*args, **kwargs):
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr(module.httpx, "get", no_router)
+    assert client.get("/ready").status_code == 503
