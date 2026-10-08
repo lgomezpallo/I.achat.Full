@@ -1,14 +1,58 @@
 from __future__ import annotations
 import os
+import hmac
+import hashlib
+import time
 import httpx
 from uuid import uuid4
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from .store import ConversationStore
 from .web import HTML, MANIFEST, SERVICE_WORKER
 
-app = FastAPI(title="IAchat", version="0.2.0")
+app = FastAPI(title="IAchat", version="0.3.0")
+
+def _valid_session(value: str) -> bool:
+    secret = os.getenv("IACHAT_AUTH_SECRET", "")
+    if not secret or not value or "." not in value:
+        return False
+    expiry, signature = value.split(".", 1)
+    if not expiry.isdigit() or int(expiry) < int(time.time()):
+        return False
+    expected = hmac.new(secret.encode(), expiry.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+@app.middleware("http")
+async def restrict_private_api(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/") and not _valid_session(request.cookies.get("iachat_session", "")):
+        return JSONResponse({"detail": "authentication_required"}, status_code=401)
+    return await call_next(request)
+
+class LoginInput(BaseModel):
+    password: str
+
+@app.post("/auth/login")
+def login(payload: LoginInput, response: Response):
+    expected = os.getenv("IACHAT_PASSWORD", "")
+    secret = os.getenv("IACHAT_AUTH_SECRET", "")
+    if not expected or not secret or not hmac.compare_digest(payload.password, expected):
+        raise HTTPException(401, "invalid_credentials")
+    expiry = str(int(time.time()) + 60 * 60 * 24 * 30)
+    signature = hmac.new(secret.encode(), expiry.encode(), hashlib.sha256).hexdigest()
+    response.set_cookie("iachat_session", expiry + "." + signature, httponly=True, secure=True, samesite="lax", max_age=2592000)
+    return {"ok": True}
+
+@app.get("/auth/status")
+def auth_status(request: Request):
+    return {"authenticated": _valid_session(request.cookies.get("iachat_session", ""))}
+
+@app.post("/auth/logout")
+def logout(response: Response):
+    response.delete_cookie("iachat_session")
+    return {"ok": True}
+
 store = ConversationStore(os.getenv("IACHAT_DB", "iachat.db"))
 
 class MessageInput(BaseModel):
