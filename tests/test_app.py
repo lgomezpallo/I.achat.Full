@@ -13,10 +13,11 @@ def reset_store():
     module.store = ConversationStore(":memory:")
 
 def test_health(monkeypatch):
-    monkeypatch.delenv("ROUTER_URL", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     body = client.get("/health").json()
     assert body["status"] == "ok"
-    assert body["router_configured"] is False
+    assert body["component"] == "iachat"
     assert body["storage"] == "sqlite"
 
 def test_home_is_chat_ui():
@@ -65,29 +66,12 @@ def test_router_failure_does_not_create_fake_answer(monkeypatch):
     assert module.store._db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
 
 
-def test_readiness_requires_router_connection(monkeypatch):
-    import httpx
-    monkeypatch.delenv("ROUTER_URL", raising=False)
+def test_readiness_requires_provider_key(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     assert client.get("/ready").status_code == 503
-    monkeypatch.setenv("ROUTER_URL", "http://router:8010")
-
-    class HealthyResponse:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"status": "ok"}
-
-    monkeypatch.setattr(module.httpx, "get", lambda *args, **kwargs: HealthyResponse())
-    ready = client.get("/ready")
-    assert ready.status_code == 200
-    assert ready.json()["router"] == "reachable"
-
-    def no_router(*args, **kwargs):
-        raise httpx.ConnectError("offline")
-
-    monkeypatch.setattr(module.httpx, "get", no_router)
-    assert client.get("/ready").status_code == 503
+    monkeypatch.setenv("GROQ_API_KEY", "test-value")
+    assert client.get("/ready").json()["mode"] == "direct"
 
 def test_private_api_rejects_missing_session(monkeypatch):
     monkeypatch.setenv("IACHAT_PASSWORD", "test-pass")
