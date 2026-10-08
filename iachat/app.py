@@ -104,8 +104,16 @@ def ready():
         data = response.json()
         if data.get("status") != "ok":
             raise HTTPException(503, "router_not_ready")
-    except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as exc:
-        raise HTTPException(503, "router_unavailable") from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(503, f"router_http_{exc.response.status_code}") from exc
+    except httpx.ConnectTimeout as exc:
+        raise HTTPException(503, "router_connect_timeout") from exc
+    except httpx.ReadTimeout as exc:
+        raise HTTPException(503, "router_read_timeout") from exc
+    except httpx.ConnectError as exc:
+        raise HTTPException(503, "router_connect_error") from exc
+    except (httpx.RequestError, ValueError) as exc:
+        raise HTTPException(503, "router_transport_error") from exc
     return {"status": "ready", "component": "iachat", "router": "reachable"}
 
 
