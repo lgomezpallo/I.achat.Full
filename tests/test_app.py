@@ -88,3 +88,20 @@ def test_readiness_requires_router_connection(monkeypatch):
 
     monkeypatch.setattr(module.httpx, "get", no_router)
     assert client.get("/ready").status_code == 503
+
+def test_private_api_rejects_missing_session(monkeypatch):
+    monkeypatch.setenv("IACHAT_PASSWORD", "test-pass")
+    monkeypatch.setenv("IACHAT_AUTH_SECRET", "test-secret")
+    unauthenticated = client.get("/api/conversations/unknown")
+    assert unauthenticated.status_code == 401
+    authenticated = client.post("/auth/login", json={"password": "test-pass"})
+    assert authenticated.status_code == 200
+    assert client.get("/api/conversations/unknown").status_code == 404
+    client.post("/auth/logout")
+    monkeypatch.delenv("IACHAT_PASSWORD")
+    monkeypatch.delenv("IACHAT_AUTH_SECRET")
+
+def test_login_rejects_wrong_password(monkeypatch):
+    monkeypatch.setenv("IACHAT_PASSWORD", "correct")
+    monkeypatch.setenv("IACHAT_AUTH_SECRET", "secret")
+    assert client.post("/auth/login", json={"password": "wrong"}).status_code == 401
