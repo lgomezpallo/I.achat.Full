@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import httpx
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
@@ -55,7 +56,12 @@ def chat(message: MessageInput):
     if message.conversation_id and history is None:
         raise HTTPException(404, "conversation_not_found")
     history = history or []
-    answer = get_backend().answer([*history, {"role": "user", "content": message.text}])
+    try:
+        answer = get_backend().answer([*history, {"role": "user", "content": message.text}])
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(502, "router_http_error") from exc
+    except (httpx.RequestError, RuntimeError) as exc:
+        raise HTTPException(503, "router_unavailable") from exc
     updated = [*history, {"role": "user", "content": message.text}, {"role": "assistant", "content": answer}]
     store.put(conversation_id, updated)
     return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
