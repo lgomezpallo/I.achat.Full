@@ -119,7 +119,12 @@ def chat(message: MessageInput):
     try:
         answer = get_backend().answer([*history, {"role": "user", "content": message.text}])
     except httpx.HTTPStatusError as exc:
-        raise HTTPException(502, "router_http_error") from exc
+        status = exc.response.status_code
+        if status in (401, 403):
+            raise HTTPException(502, "router_auth_rejected") from exc
+        if status in (502, 503, 504):
+            raise HTTPException(503, "router_gateway_unavailable") from exc
+        raise HTTPException(502, f"router_http_{status}") from exc
     except (httpx.RequestError, RuntimeError) as exc:
         raise HTTPException(503, "router_unavailable") from exc
     updated = [*history, {"role": "user", "content": message.text}, {"role": "assistant", "content": answer}]
