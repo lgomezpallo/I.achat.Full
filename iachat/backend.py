@@ -1,49 +1,58 @@
 from __future__ import annotations
+import os
 import httpx
 
-
-class RouterBackend:
-    def __init__(self, base_url: str, timeout_s: float = 60.0, token: str = ""):
-        self.base_url = base_url.rstrip("/")
+class ProviderBackend:
+    """Direct provider client. Credentials remain server-side."""
+    def __init__(self, timeout_s: float = 60.0):
         self.timeout_s = timeout_s
-        self.token = token
 
     def answer(self, messages: list[dict[str, str]]) -> str:
         if not messages or messages[-1].get("role") != "user":
             raise ValueError("last_message_must_be_user")
-
-        # Mantener los dos lados del diálogo, en orden: no sólo las respuestas
-        # del asistente. La última consulta se envía como tarea actual.
-        previous = messages[:-1]
-        context = "\n".join(
-            f"{item['role']}: {item['content']}"
-            for item in previous
-            if item.get("role") in {"user", "assistant", "system"}
-            and isinstance(item.get("content"), str)
-        )
-        task = messages[-1].get("content", "")
-        if not isinstance(task, str) or not task.strip():
-            raise ValueError("empty_user_message")
-
-        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-        response = httpx.post(
-            self.base_url + "/route",
-            headers=headers,
-            json={
-                "task": task,
-                "context": context,
-                "required_capabilities": ["chat"],
-                "requirements": ["Responder como chat conversacional preservando el contexto recibido."],
-                "application_name": "iachat",
-                "decompose": False,
-            },
-            timeout=self.timeout_s,
-        )
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("ok"):
-            raise RuntimeError(data.get("error") or "router_failed")
-        answer = data.get("text")
-        if not isinstance(answer, str) or not answer.strip():
-            raise RuntimeError("empty_router_response")
-        return answer
+        providers = [
+            ("groq", "GROQ_API_KEY", "https://api.groq.com/openai/v1",
+             ["openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]),
+            ("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1",
+             ["openai/gpt-oss-20b:free", "meta-llama/llama-3.3-70b-instruct:free"]),
+        ]
+        attempted = False
+        temporary_failure = False
+        for name, env, base, defaults in providers:
+            key = os.getenv(env, "").strip()
+            if not key:
+                continue
+            attempted = True
+            custom = os.getenv(name.upper() + "_MODELS", "").strip()
+            models = [x.strip() for x in custom.split(",") if x.strip()] if custom else defaults
+            for model in models:
+                try:
+                    response = httpx.post(
+                        base + "/chat/completions",
+                        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+                        json={"model": model, "messages": [
+                            {"role": "system", "content": "Sos IAchat. Respondé con claridad, en el idioma del usuario, respetando el contexto."},
+                            *messages,
+                        ], "stream": False},
+                        timeout=self.timeout_s,
+                    )
+                    if response.status_code in (401, 403):
+                        # Invalid credentials: no value is ever logged or sent to the client.
+                        break
+                    if response.status_code in (408, 429, 500, 502, 503, 504):
+                        temporary_failure = True
+                        continue
+                    if response.status_code >= 400:
+                        continue
+                    result = response.json()
+                    answer = result["choices"][0]["message"]["content"]
+                    if isinstance(answer, str) and answer.strip():
+                        return answer.strip()
+                except (httpx.RequestError, ValueError, KeyError, IndexError, TypeError):
+                    temporary_failure = True
+                    continue
+        if not attempted:
+            raise RuntimeError("providers_not_configured")
+        if temporary_failure:
+            raise RuntimeError("providers_unavailable")
+        raise RuntimeError("providers_failed")
