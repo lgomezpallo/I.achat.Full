@@ -1,0 +1,42 @@
+name: Migrar proveedores a Oracle
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Transferir claves existentes por SSH
+        env:
+          ORACLE_HOST: ${{ vars.ORACLE_SSH_HOST }}
+          ORACLE_USER: ${{ vars.ORACLE_SSH_USER }}
+          ORACLE_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+          ORACLE_SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ORACLE_HOST:?Missing ORACLE_SSH_HOST}"
+          : "${ORACLE_USER:?Missing ORACLE_SSH_USER}"
+          : "${ORACLE_KNOWN_HOSTS:?Missing host key}"
+          : "${ORACLE_SSH_PRIVATE_KEY:?Missing SSH private key}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$ORACLE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$ORACLE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/known_hosts ~/.ssh/id_ed25519
+          python3 - <<'PY' | ssh -T -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'python3 -c '"'"'import sys,json,pathlib,os,tempfile; d=pathlib.Path.home()/".config/router"; d.mkdir(mode=0o700,parents=True,exist_ok=True); obj=json.load(sys.stdin); assert obj, "No provider keys in this repository"; f=tempfile.NamedTemporaryFile(mode="w",dir=d,delete=False,prefix=".providers-",encoding="utf-8"); os.chmod(f.name,0o600); f.write("".join(k+"="+json.dumps(v)+"\\n" for k,v in obj.items())); f.close(); os.replace(f.name,d/"providers.env"); print("Migrated provider keys:",", ".join(obj))'"'"''
+          import os, json, sys
+          names=("GROQ","NVIDIA","OPENROUTER","MISTRAL","CEREBRAS","SAMBANOVA")
+          keys={n+"_API_KEY":os.environ[n+"_API_KEY"] for n in names if os.environ.get(n+"_API_KEY")}
+          if not keys:
+              sys.stderr.write("No provider API key secrets are defined in IAchat repository. No remote changes.\n")
+              sys.exit(1)
+          json.dump(keys,sys.stdout)
+          PY
