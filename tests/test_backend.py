@@ -33,9 +33,9 @@ def test_router_backend_returns_text(monkeypatch):
 
 def test_router_backend_propagates_router_failure(monkeypatch):
     monkeypatch.setattr(module.httpx, "post", lambda *a, **k: FakeResponse({"ok": False, "error": "no_eligible_provider"}))
-    backend = RouterBackend("http://router:8010")
+    backend = RouterBackend("http://router:8010", token="test-token")
     try:
         backend.answer([{"role":"user","content":"hola"}])
         assert False, "expected failure"
     except RuntimeError as exc:
-        assert "no_eligible_provider" in str(exc)
+        assert str(exc) == "router_failed"
