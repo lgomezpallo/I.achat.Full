@@ -68,6 +68,22 @@ def get_backend():
     from .backend import RouterFirstBackend
     return RouterFirstBackend()
 
+@app.on_event("startup")
+def check_router_on_startup():
+    # Probe the real application path without exposing credentials or response content.
+    import threading
+    def probe():
+        try:
+            get_backend().answer([{"role": "user", "content": "Respondé únicamente OK."}])
+            print("IACHAT_ROUTER_PROBE status=ok", flush=True)
+        except Exception as exc:
+            reason = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+            if reason not in {"router_not_configured", "router_auth_rejected", "router_unavailable",
+                              "router_http_error", "router_invalid_response", "router_failed"}:
+                reason = "unexpected_error"
+            print(f"IACHAT_ROUTER_PROBE status=failed reason={reason}", flush=True)
+    threading.Thread(target=probe, daemon=True).start()
+
 @app.get("/", response_class=HTMLResponse)
 def home():
     return HTML
