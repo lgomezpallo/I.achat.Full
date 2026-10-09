@@ -2,6 +2,43 @@ from __future__ import annotations
 import os
 import httpx
 
+class RouterFirstBackend:
+    """Use independent Router first; preserve direct providers as failover."""
+    def __init__(self, timeout_s: float = 25.0):
+        self.timeout_s = timeout_s
+
+    def answer(self, messages: list[dict[str, str]]) -> str:
+        url = os.getenv("ROUTER_URL", "").strip().rstrip("/")
+        token = os.getenv("ROUTER_TOKEN", "").strip()
+        if url and token:
+            context = "\\n".join(
+                f"{item['role']}: {item['content']}"
+                for item in messages[:-1]
+                if item.get("role") in ("user", "assistant", "system")
+            )
+            try:
+                response = httpx.post(
+                    url + "/route",
+                    headers={"Authorization": "Bearer " + token},
+                    json={
+                        "task": messages[-1]["content"],
+                        "context": context,
+                        "required_capabilities": ["chat"],
+                        "application_name": "iachat",
+                        "decompose": False
+                    },
+                    timeout=self.timeout_s,
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    answer = result.get("text")
+                    if result.get("ok") and isinstance(answer, str) and answer.strip():
+                        return answer.strip()
+            except (httpx.RequestError, ValueError, KeyError, TypeError):
+                pass
+        return ProviderBackend().answer(messages)
+
+
 class ProviderBackend:
     """Direct provider client. Credentials remain server-side."""
     def __init__(self, timeout_s: float = 60.0):
