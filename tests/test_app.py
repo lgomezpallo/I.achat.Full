@@ -149,3 +149,29 @@ def test_server_history_survives_new_store_instance_and_deletes(monkeypatch, tmp
     assert client.get(f"/api/conversations/{cid}").status_code == 200
     assert client.delete(f"/api/conversations/{cid}").status_code == 200
     assert client.get("/api/conversations").json()["conversations"] == []
+
+
+def test_memories_survive_restart_and_are_sent_as_context(monkeypatch, tmp_path):
+    db = str(tmp_path / "memory.db")
+    module.store = ConversationStore(db)
+    created = client.post("/api/memories", json={"content": "Prefiero respuestas en español"})
+    assert created.status_code == 201
+    mid = created.json()["id"]
+    module.store = ConversationStore(db)
+    assert client.get("/api/memories").json()["memories"][0]["id"] == mid
+    captured = []
+    class CaptureBackend:
+        def answer(self, messages):
+            captured.extend(messages)
+            return "OK"
+    monkeypatch.setattr(module, "get_backend", lambda: CaptureBackend())
+    response = client.post("/api/chat", json={"text": "Hola"})
+    assert response.status_code == 200
+    assert captured[0]["role"] == "system"
+    assert "Prefiero respuestas en español" in captured[0]["content"]
+    assert captured[-1] == {"role": "user", "content": "Hola"}
+    assert client.put(f"/api/memories/{mid}", json={"content":"Prefiero mensajes breves"}).status_code == 200
+    assert client.get("/api/memories").json()["memories"][0]["content"] == "Prefiero mensajes breves"
+    assert client.delete(f"/api/memories/{mid}").status_code == 200
+    assert client.get("/api/memories").json()["memories"] == []
+    assert client.delete(f"/api/memories/{mid}").status_code == 404
