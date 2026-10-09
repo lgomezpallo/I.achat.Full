@@ -11,6 +11,7 @@ class ConversationStore:
             "CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, history TEXT NOT NULL)"
         )
         self._db.execute("CREATE TABLE IF NOT EXISTS conversation_index (id TEXT PRIMARY KEY, title TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)")
         self._db.commit()
         self._lock = Lock()
 
@@ -56,3 +57,23 @@ class ConversationStore:
             self._db.execute("DELETE FROM conversation_index WHERE id=?", (conversation_id,))
             self._db.commit()
         return cursor.rowcount > 0
+
+    def list_memories(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute("SELECT id, content, updated_at FROM memories ORDER BY updated_at DESC, id").fetchall()
+        return [{"id": row[0], "content": row[1], "updated_at": row[2]} for row in rows]
+
+    def save_memory(self, memory_id: str, content: str) -> None:
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO memories (id, content, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at",
+                (memory_id, content, int(time.time())),
+            )
+            self._db.commit()
+
+    def delete_memory(self, memory_id: str) -> bool:
+        with self._lock:
+            cursor = self._db.execute("DELETE FROM memories WHERE id=?", (memory_id,))
+            self._db.commit()
+            return cursor.rowcount > 0
