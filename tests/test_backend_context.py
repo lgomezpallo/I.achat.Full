@@ -5,6 +5,7 @@ from iachat.backend import RouterBackend
 
 
 class FakeResponse:
+    status_code = 200
     def raise_for_status(self):
         pass
 
