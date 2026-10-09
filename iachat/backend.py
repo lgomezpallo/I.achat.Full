@@ -4,14 +4,16 @@ import httpx
 
 class RouterFirstBackend:
     """Strict Router transport. Never claim Router success from a direct-provider fallback."""
-    def __init__(self, timeout_s: float = 65.0):
+    def __init__(self, url: str | None = None, token: str | None = None, timeout_s: float = 65.0):
+        self.url = url
+        self.token = token
         self.timeout_s = timeout_s
 
     def answer(self, messages: list[dict[str, str]]) -> str:
         if not messages or messages[-1].get("role") != "user":
             raise ValueError("last_message_must_be_user")
-        url = os.getenv("ROUTER_URL", "").strip().rstrip("/")
-        token = os.getenv("ROUTER_TOKEN", "").strip()
+        url = (self.url if self.url is not None else os.getenv("ROUTER_URL", "")).strip().rstrip("/")
+        token = (self.token if self.token is not None else os.getenv("ROUTER_TOKEN", "")).strip()
         if not url or not token:
             raise RuntimeError("router_not_configured")
         context = "\n".join(
@@ -46,6 +48,10 @@ class RouterFirstBackend:
         if not result.get("ok") or not isinstance(answer, str) or not answer.strip():
             raise RuntimeError("router_failed")
         return answer.strip()
+
+
+# Backwards-compatible name used by the integration test suite.
+RouterBackend = RouterFirstBackend
 
 
 class ProviderBackend:
