@@ -33,6 +33,7 @@ Abrí `http://localhost:8000`.
 - `GET /api/conversations` — listado desde SQLite
 - `GET /api/conversations/{id}`
 - `DELETE /api/conversations/{id}`
+- `POST /api/memories/suggest` — sugerencias de recuerdos a partir de `conversation_id` (pasa por Router, no se guarda automáticamente)
 - `GET /api/memories` — consultar recuerdos
 - `POST /api/memories` — crear un recuerdo (`content`)
 - `PUT /api/memories/{id}` — editar recuerdo
@@ -49,3 +50,7 @@ IAchat conversa y conserva el hilo. No selecciona proveedores, no administra cla
 La memoria actual se guarda **explícitamente** desde el panel Memoria de la PWA. No extrae recuerdos automáticamente, ni resume conversaciones, ni promete búsqueda semántica. Hasta 30 recuerdos (máximo 6000 caracteres combinados de contexto) se envían como referencias al Router en cada mensaje. El historial guardado y los recuerdos son entidades independientes.
 
 **Seguridad:** habilitar `IACHAT_PASSWORD` y `IACHAT_AUTH_SECRET` (valor secreto fuerte) y usar HTTPS en producción. El acceso sin configurar contraseña deja las API privadas sin autenticación. Nunca publicar claves ni el archivo SQLite.
+
+## Sugerencias de memoria
+
+Desde el panel de Memoria, abrí una conversación y tocá «Sugerir recuerdos de este chat». IAchat pide a Router que proponga hasta tres datos estables; podés editar, aprobar o descartar. Nada queda registrado sin aprobación. Las sugerencias generadas por IA pueden ser erróneas: revisarlas antes de guardar. Esta función todavía no genera sugerencias automáticamente al terminar cada chat.
