@@ -3,40 +3,49 @@ import os
 import httpx
 
 class RouterFirstBackend:
-    """Use independent Router first; preserve direct providers as failover."""
-    def __init__(self, timeout_s: float = 25.0):
+    """Strict Router transport. Never claim Router success from a direct-provider fallback."""
+    def __init__(self, timeout_s: float = 65.0):
         self.timeout_s = timeout_s
 
     def answer(self, messages: list[dict[str, str]]) -> str:
+        if not messages or messages[-1].get("role") != "user":
+            raise ValueError("last_message_must_be_user")
         url = os.getenv("ROUTER_URL", "").strip().rstrip("/")
         token = os.getenv("ROUTER_TOKEN", "").strip()
-        if url and token:
-            context = "\n".join(
-                f"{item['role']}: {item['content']}"
-                for item in messages[:-1]
-                if item.get("role") in ("user", "assistant", "system")
+        if not url or not token:
+            raise RuntimeError("router_not_configured")
+        context = "\n".join(
+            f"{item['role']}: {item['content']}"
+            for item in messages[:-1]
+            if item.get("role") in ("user", "assistant", "system")
+        )
+        try:
+            response = httpx.post(
+                url + "/route",
+                headers={"Authorization": "Bearer " + token},
+                json={
+                    "task": messages[-1]["content"],
+                    "context": context,
+                    "required_capabilities": ["chat"],
+                    "application_name": "iachat",
+                    "decompose": False
+                },
+                timeout=self.timeout_s,
             )
-            try:
-                response = httpx.post(
-                    url + "/route",
-                    headers={"Authorization": "Bearer " + token},
-                    json={
-                        "task": messages[-1]["content"],
-                        "context": context,
-                        "required_capabilities": ["chat"],
-                        "application_name": "iachat",
-                        "decompose": False
-                    },
-                    timeout=self.timeout_s,
-                )
-                if response.status_code == 200:
-                    result = response.json()
-                    answer = result.get("text")
-                    if result.get("ok") and isinstance(answer, str) and answer.strip():
-                        return answer.strip()
-            except (httpx.RequestError, ValueError, KeyError, TypeError):
-                pass
-        return ProviderBackend().answer(messages)
+        except httpx.RequestError as exc:
+            raise RuntimeError("router_unavailable") from exc
+        if response.status_code in (401, 403):
+            raise RuntimeError("router_auth_rejected")
+        if response.status_code != 200:
+            raise RuntimeError("router_http_error")
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise RuntimeError("router_invalid_response") from exc
+        answer = result.get("text")
+        if not result.get("ok") or not isinstance(answer, str) or not answer.strip():
+            raise RuntimeError("router_failed")
+        return answer.strip()
 
 
 class ProviderBackend:
