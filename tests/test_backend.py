@@ -39,3 +39,36 @@ def test_router_backend_propagates_router_failure(monkeypatch):
         assert False, "expected failure"
     except RuntimeError as exc:
         assert str(exc) == "router_failed"
+
+
+def test_gateway_502_wakes_router_then_retries(monkeypatch):
+    from iachat.backend import RouterFirstBackend
+    calls = []
+    class Reply:
+        def __init__(self, status, body=None):
+            self.status_code = status
+            self.body = body or {}
+        def json(self):
+            return self.body
+    def fake_post(url, **kwargs):
+        calls.append(("post", url))
+        return Reply(502) if len([c for c in calls if c[0] == "post"]) == 1 else Reply(200, {"ok": True, "text": "Funciona por Router"})
+    def fake_get(url, **kwargs):
+        calls.append(("get", url))
+        return Reply(200, {"status": "ok"})
+    monkeypatch.setattr(module.httpx, "post", fake_post)
+    monkeypatch.setattr(module.httpx, "get", fake_get)
+    assert RouterFirstBackend("https://router.example", token="x").answer([{"role":"user","content":"Hola"}]) == "Funciona por Router"
+    assert [x[0] for x in calls] == ["post", "get", "post"]
+
+def test_gateway_502_does_not_retry_forever(monkeypatch):
+    from iachat.backend import RouterFirstBackend
+    class Reply:
+        status_code = 502
+    calls = []
+    monkeypatch.setattr(module.httpx, "post", lambda *args, **kwargs: (calls.append("post") or Reply()))
+    monkeypatch.setattr(module.httpx, "get", lambda *args, **kwargs: (calls.append("get") or Reply()))
+    import pytest
+    with pytest.raises(RuntimeError, match="router_http_502"):
+        RouterFirstBackend("https://router.example", token="x").answer([{"role":"user","content":"Hola"}])
+    assert calls == ["post", "get", "post"]
