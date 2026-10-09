@@ -154,6 +154,21 @@ def ready():
         raise HTTPException(503, "router_not_configured")
     return {"status": "ready", "component": "iachat", "mode": "router_only", "router_configured": True}
 
+@app.get("/api/router/status")
+def router_status():
+    url = os.getenv("ROUTER_URL", "").strip().rstrip("/")
+    token = os.getenv("ROUTER_TOKEN", "").strip()
+    if not url or not token:
+        return {"configured": False, "reachable": False, "routing_verified": False, "reason": "router_not_configured"}
+    try:
+        response = httpx.get(url + "/health", timeout=8.0, follow_redirects=False)
+        if response.status_code != 200 or response.json().get("status") != "ok":
+            return {"configured": True, "reachable": False, "routing_verified": False, "reason": "router_health_failed"}
+    except (httpx.RequestError, ValueError, TypeError):
+        return {"configured": True, "reachable": False, "routing_verified": False, "reason": "router_unavailable"}
+    return {"configured": True, "reachable": True, "routing_verified": False,
+            "reason": "health_only_not_end_to_end"}
+
 @app.post("/api/chat", response_model=MessageOutput)
 def chat(message: MessageInput):
     conversation_id = message.conversation_id or str(uuid4())
