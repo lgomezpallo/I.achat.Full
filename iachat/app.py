@@ -6,7 +6,7 @@ import time
 import httpx
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response as RawResponse
 from pydantic import BaseModel, Field
 from .store import ConversationStore
 from .web import HTML, MANIFEST, SERVICE_WORKER
@@ -87,6 +87,50 @@ def check_router_on_startup():
 @app.get("/", response_class=HTMLResponse)
 def home():
     return HTML
+
+def _pwa_icon(size: int) -> bytes:
+    import struct
+    import zlib
+    from functools import lru_cache
+    # Self-contained PNG icons: no asset hosting, extra libraries or binary commits.
+    bg = (16, 21, 30)
+    panel = (48, 67, 99)
+    blue = (117, 155, 247)
+    glyphs = {
+        "I": ("11111", "00100", "00100", "00100", "00100", "00100", "11111"),
+        "A": ("01110", "10001", "10001", "11111", "10001", "10001", "10001")
+    }
+    rows = []
+    for y in range(size):
+        row = bytearray()
+        for x in range(size):
+            u, v = x / size, y / size
+            cx = max(.18-u, 0, u-.82)
+            cy = max(.18-v, 0, v-.82)
+            col = panel if cx*cx+cy*cy < .13*.13 else bg
+            # IA monogram rendered into a unified 11x7 pixel glyph grid.
+            gx = int((u-.255)/.045)
+            gy = int((v-.345)/.045)
+            if 0 <= gy < 7 and 0 <= gx < 11:
+                if gx < 5 and glyphs["I"][gy][gx] == "1":
+                    col = blue
+                if gx >= 6 and glyphs["A"][gy][gx-6] == "1":
+                    col = blue
+            row.extend(col)
+        rows.append(b"\\x00" + bytes(row))
+    def chunk(name, data):
+        return struct.pack(">I", len(data)) + name + data + struct.pack(">I", zlib.crc32(name+data)&0xffffffff)
+    return (b"\\x89PNG\\r\\n\\x1a\\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows), 6))
+            + chunk(b"IEND", b""))
+
+@app.get("/icons/icon-{size}.png")
+def pwa_icon(size: int):
+    if size not in (192, 512):
+        raise HTTPException(404, "icon_not_found")
+    return RawResponse(_pwa_icon(size), media_type="image/png",
+                       headers={"Cache-Control": "public, max-age=86400"})
 
 @app.get("/manifest.webmanifest")
 def manifest():
