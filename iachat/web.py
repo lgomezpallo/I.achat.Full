@@ -50,21 +50,22 @@ var conversationId=null,busy=false;
 var messages=document.getElementById('messages'),input=document.getElementById('input'),drawer=document.getElementById('drawer');
 var ids=[];try{ids=JSON.parse(localStorage.getItem('iachat.history')||'[]');if(!Array.isArray(ids))ids=[]}catch(e){ids=[]}
 function saveIds(){localStorage.setItem('iachat.history',JSON.stringify(ids.slice(0,80)))}
+async function syncHistory(){var r=await fetch('/api/conversations');if(r.status===401){showLogin();return false}if(!r.ok)throw Error('No se pudo cargar el historial');var d=await r.json();ids=d.conversations||[];saveIds();renderHistory();return true}
 function add(role,text,error){document.getElementById('empty')?.remove();var e=document.createElement('div');e.className='msg '+role+(error?' error':'');e.textContent=text;messages.appendChild(e);messages.scrollTop=messages.scrollHeight;return e}
 function reset(){conversationId=null;messages.innerHTML='<div class="empty" id="empty">¿En qué te puedo ayudar?</div>';input.value='';drawer.classList.remove('open');}
-function renderHistory(){var list=document.getElementById('historyList');list.replaceChildren();ids.forEach(function(item){var b=document.createElement('button');b.className='history-item';b.textContent=item.title||'Conversación';b.onclick=function(){openConversation(item.id)};list.appendChild(b)})}
+function renderHistory(){var list=document.getElementById('historyList');list.replaceChildren();ids.forEach(function(item){var wrap=document.createElement('div');wrap.style.cssText='display:flex;align-items:center;gap:4px';var b=document.createElement('button');b.className='history-item';b.style.flex='1';b.textContent=item.title||'Conversación';b.onclick=function(){openConversation(item.id)};var del=document.createElement('button');del.textContent='×';del.title='Borrar conversación';del.setAttribute('aria-label','Borrar conversación');del.style.cssText='background:transparent;padding:10px';del.onclick=async function(){if(!confirm('¿Borrar esta conversación?'))return;var r=await fetch('/api/conversations/'+encodeURIComponent(item.id),{method:'DELETE'});if(r.ok){if(conversationId===item.id)reset();await syncHistory()}};wrap.append(b,del);list.appendChild(wrap)})}
 async function openConversation(id){try{var r=await fetch('/api/conversations/'+encodeURIComponent(id));if(r.status===401){showLogin();return}if(!r.ok)throw Error('No se pudo recuperar la conversación');var d=await r.json();conversationId=id;messages.replaceChildren();if(!d.history.length)reset();else d.history.forEach(function(m){add(m.role,m.content)});drawer.classList.remove('open')}catch(e){add('assistant',String(e.message||e),true)}}
 function showLogin(){document.getElementById('login').classList.remove('hidden')}
-async function init(){try{var r=await fetch('/auth/status');var d=await r.json();if(!d.authenticated){showLogin();return}renderHistory();if(ids.length)await openConversation(ids[0].id)}catch(e){showLogin()}}
+async function init(){try{var r=await fetch('/auth/status');var d=await r.json();if(!d.authenticated){showLogin();return}if(await syncHistory()&&ids.length)await openConversation(ids[0].id)}catch(e){showLogin()}}
 document.getElementById('loginForm').onsubmit=async function(e){e.preventDefault();var r=await fetch('/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:document.getElementById('password').value})});if(r.ok){document.getElementById('password').value='';document.getElementById('login').classList.add('hidden');init()}else document.getElementById('loginError').textContent='Contraseña incorrecta'};
-document.getElementById('history').onclick=function(){renderHistory();drawer.classList.toggle('open')};
+document.getElementById('history').onclick=async function(){await syncHistory();drawer.classList.toggle('open')};
 document.getElementById('close').onclick=function(){drawer.classList.remove('open')};
 document.getElementById('new').onclick=reset;document.getElementById('drawerNew').onclick=reset;
 document.getElementById('logout').onclick=async function(){await fetch('/auth/logout',{method:'POST'});reset();showLogin()};
 document.querySelectorAll('.mode').forEach(function(b){b.onclick=function(){if(b.dataset.mode!=='chat'){document.getElementById('note').textContent='Imagen y Documento estarán disponibles más adelante.';return}document.getElementById('note').textContent='Revisá la información importante antes de usarla.'}});
 document.querySelector('.attach').onclick=function(){document.getElementById('note').textContent='Los archivos adjuntos estarán disponibles más adelante.'};
 document.getElementById('form').onsubmit=async function(e){e.preventDefault();if(busy)return;var text=input.value.trim();if(!text)return;busy=true;input.value='';add('user',text);var waiting=add('assistant','Pensando…');var payload={text:text};if(conversationId)payload.conversation_id=conversationId;
-try{var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var d=await r.json();waiting.remove();if(!r.ok){input.value=text;add('assistant',d.detail||'No se pudo enviar. Podés reintentarlo.',true);if(r.status===401)showLogin();return}conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55)});saveIds();add('assistant',d.answer)}
+try{var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var d=await r.json();waiting.remove();if(!r.ok){input.value=text;add('assistant',d.detail||'No se pudo enviar. Podés reintentarlo.',true);if(r.status===401)showLogin();return}conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55)});saveIds();syncHistory().catch(function(){});add('assistant',d.answer)}
 catch(err){waiting.remove();input.value=text;add('assistant','No hay conexión. El mensaje sigue en la caja para reintentar.',true)}finally{busy=false}};
 input.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('form').requestSubmit()}});
 init();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
@@ -80,7 +81,7 @@ MANIFEST = {
         {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
     ]
 }
-SERVICE_WORKER = """const CACHE='iachat-shell-v3';
+SERVICE_WORKER = """const CACHE='iachat-shell-v4';
 const ASSETS=['/','/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png'];
 self.addEventListener('install',event=>{
  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
