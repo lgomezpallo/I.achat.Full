@@ -1,0 +1,36 @@
+name: Oracle SSH connectivity check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Verify dedicated Oracle SSH connection (read-only)
+        env:
+          ORACLE_HOST: ${{ vars.ORACLE_SSH_HOST }}
+          ORACLE_USER: ${{ vars.ORACLE_SSH_USER }}
+          ORACLE_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+          ORACLE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ORACLE_HOST:?Configure ORACLE_SSH_HOST repository variable}"
+          : "${ORACLE_USER:?Configure ORACLE_SSH_USER repository variable}"
+          : "${ORACLE_KNOWN_HOSTS:?Configure ORACLE_SSH_KNOWN_HOSTS secret}"
+          : "${ORACLE_KEY:?Configure ORACLE_SSH_PRIVATE_KEY secret}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$ORACLE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          printf '%s\n' "$ORACLE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o IdentitiesOnly=yes \
+            -o ConnectTimeout=15 \
+            "$ORACLE_USER@$ORACLE_HOST" \
+            'printf "SSH_OK\n"; id -un; uname -m; free -h; df -h /; ls -ld /home/ubuntu/S.istema.Full /home/ubuntu/S.istema.Full/I.achat.Full /home/ubuntu/S.istema.Full/R.outer.Full'
