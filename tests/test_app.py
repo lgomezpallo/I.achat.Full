@@ -133,3 +133,19 @@ def test_pwa_icons_are_png():
         assert response.content.startswith(bytes.fromhex("89504e470d0a1a0a"))
         assert int.from_bytes(response.content[16:20], "big") == size
     assert client.get("/icons/icon-999.png").status_code == 404
+
+
+def test_server_history_survives_new_store_instance_and_deletes(monkeypatch, tmp_path):
+    db = str(tmp_path / "shared.db")
+    module.store = ConversationStore(db)
+    monkeypatch.setattr(module, "get_backend", lambda: FakeBackend())
+    first = client.post("/api/chat", json={"text": "Tema persistente"}).json()
+    cid = first["conversation_id"]
+    module.store = ConversationStore(db)
+    listing = client.get("/api/conversations")
+    assert listing.status_code == 200
+    assert listing.json()["conversations"][0]["id"] == cid
+    assert listing.json()["conversations"][0]["title"] == "Tema persistente"
+    assert client.get(f"/api/conversations/{cid}").status_code == 200
+    assert client.delete(f"/api/conversations/{cid}").status_code == 200
+    assert client.get("/api/conversations").json()["conversations"] == []
