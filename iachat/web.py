@@ -1,7 +1,7 @@
 HTML = r"""<!doctype html>
 <html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#10151e"><link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#10151e"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="IAchat"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png"><link rel="apple-touch-icon" href="/icons/icon-192.png">
 <title>IAchat</title>
 <style>
 :root{color-scheme:dark;--bg:#10151e;--panel:#181f2b;--edge:#303949;--txt:#f0f3fb;--muted:#aab6cb;--accent:#759bf7;--bubble:#304363}
@@ -70,5 +70,33 @@ input.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.
 init();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
 </script></body></html>"""
 
-MANIFEST = {"name":"IAchat","short_name":"IAchat","start_url":"/","display":"standalone","background_color":"#10151e","theme_color":"#10151e"}
-SERVICE_WORKER = """const CACHE='iachat-v2';self.addEventListener('install',e=>{self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(self.clients.claim())});self.addEventListener('fetch',e=>{if(e.request.method==='GET'&&new URL(e.request.url).pathname==='/manifest.webmanifest')e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))})"""
+MANIFEST = {
+    "id": "/", "name": "IAchat", "short_name": "IAchat",
+    "description": "Tu espacio privado de conversación",
+    "start_url": "/", "scope": "/", "display": "standalone",
+    "background_color": "#10151e", "theme_color": "#10151e",
+    "icons": [
+        {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+        {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+    ]
+}
+SERVICE_WORKER = """const CACHE='iachat-shell-v3';
+const ASSETS=['/','/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png'];
+self.addEventListener('install',event=>{
+ event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
+});
+self.addEventListener('activate',event=>{
+ event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));
+});
+self.addEventListener('fetch',event=>{
+ const url=new URL(event.request.url);
+ if(event.request.method!=='GET'||url.origin!==self.location.origin)return;
+ if(url.pathname.startsWith('/api/')||url.pathname.startsWith('/auth/'))return;
+ if(url.pathname==='/' ){
+  event.respondWith(fetch(event.request).catch(()=>caches.match('/')));
+  return;
+ }
+ if(ASSETS.includes(url.pathname)){
+  event.respondWith(caches.match(event.request).then(cached=>cached||fetch(event.request)));
+ }
+});"""
