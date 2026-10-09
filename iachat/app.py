@@ -117,10 +117,10 @@ def _pwa_icon(size: int) -> bytes:
                 if gx >= 6 and glyphs["A"][gy][gx-6] == "1":
                     col = blue
             row.extend(col)
-        rows.append(b"\\x00" + bytes(row))
+        rows.append(b"\x00" + bytes(row))
     def chunk(name, data):
         return struct.pack(">I", len(data)) + name + data + struct.pack(">I", zlib.crc32(name+data)&0xffffffff)
-    return (b"\\x89PNG\\r\\n\\x1a\\n"
+    return (b"\x89PNG\r\n\x1a\n"
             + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(b"".join(rows), 6))
             + chunk(b"IEND", b""))
