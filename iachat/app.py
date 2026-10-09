@@ -83,7 +83,7 @@ def check_router_on_startup():
         except Exception as exc:
             reason = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
             if reason not in {"router_not_configured", "router_auth_rejected", "router_unavailable",
-                              "router_http_error", "router_invalid_response", "router_failed"}:
+                              "router_http_error", "router_invalid_response", "router_failed"} and not (reason.startswith("router_http_") and reason[12:].isdigit()):
                 reason = "unexpected_error"
             print(f"IACHAT_ROUTER_PROBE status=failed reason={reason}", flush=True)
     threading.Thread(target=probe, daemon=True).start()
