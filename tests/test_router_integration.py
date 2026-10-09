@@ -6,6 +6,7 @@ from iachat.store import ConversationStore
 
 
 class RealFormatRouterResponse:
+    status_code = 200
     def __init__(self, text):
         self.text = text
 
