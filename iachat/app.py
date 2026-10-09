@@ -86,10 +86,9 @@ def health():
 
 @app.get("/ready")
 def ready():
-    configured = any(os.getenv(key, "").strip() for key in ("GROQ_API_KEY", "OPENROUTER_API_KEY"))
-    if not configured:
-        raise HTTPException(503, "providers_not_configured")
-    return {"status": "ready", "component": "iachat", "mode": "router-first-with-direct-fallback"}
+    if not os.getenv("ROUTER_URL", "").strip() or not os.getenv("ROUTER_TOKEN", "").strip():
+        raise HTTPException(503, "router_not_configured")
+    return {"status": "ready", "component": "iachat", "mode": "router_only", "router_configured": True}
 
 @app.post("/api/chat", response_model=MessageOutput)
 def chat(message: MessageInput):
@@ -104,8 +103,8 @@ def chat(message: MessageInput):
         raise HTTPException(503, "providers_http_error") from exc
     except (httpx.RequestError, RuntimeError) as exc:
         detail = str(exc) if isinstance(exc, RuntimeError) else "providers_unavailable"
-        if detail not in ("providers_not_configured", "providers_unavailable", "providers_failed"):
-            detail = "providers_unavailable"
+        if detail not in ("router_not_configured", "router_auth_rejected", "router_unavailable", "router_http_error", "router_invalid_response", "router_failed"):
+            detail = "router_unavailable"
         raise HTTPException(503, detail) from exc
     updated = [*history, {"role": "user", "content": message.text}, {"role": "assistant", "content": answer}]
     store.put(conversation_id, updated)
