@@ -62,7 +62,7 @@ def test_router_failure_does_not_create_fake_answer(monkeypatch):
     monkeypatch.setattr(module, "get_backend", lambda: FailingBackend())
     response = client.post("/api/chat", json={"text": "Hola"})
     assert response.status_code == 503
-    assert response.json()["detail"] == "router_unavailable"
+    assert response.json()["detail"] == "providers_unavailable"
     assert module.store._db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
 
 
@@ -71,7 +71,7 @@ def test_readiness_requires_provider_key(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     assert client.get("/ready").status_code == 503
     monkeypatch.setenv("GROQ_API_KEY", "test-value")
-    assert client.get("/ready").json()["mode"] == "direct"
+    assert client.get("/ready").json()["mode"] == "router-first-with-direct-fallback"
 
 def test_private_api_rejects_missing_session(monkeypatch):
     monkeypatch.setenv("IACHAT_PASSWORD", "test-pass")
