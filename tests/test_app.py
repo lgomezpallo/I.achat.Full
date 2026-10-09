@@ -62,16 +62,39 @@ def test_router_failure_does_not_create_fake_answer(monkeypatch):
     monkeypatch.setattr(module, "get_backend", lambda: FailingBackend())
     response = client.post("/api/chat", json={"text": "Hola"})
     assert response.status_code == 503
-    assert response.json()["detail"] == "providers_unavailable"
+    assert response.json()["detail"] == "router_unavailable"
     assert module.store._db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
 
 
-def test_readiness_requires_provider_key(monkeypatch):
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+def test_readiness_requires_router_credentials(monkeypatch):
+    monkeypatch.delenv("ROUTER_URL", raising=False)
+    monkeypatch.delenv("ROUTER_TOKEN", raising=False)
     assert client.get("/ready").status_code == 503
-    monkeypatch.setenv("GROQ_API_KEY", "test-value")
-    assert client.get("/ready").json()["mode"] == "router-first-with-direct-fallback"
+    monkeypatch.setenv("ROUTER_URL", "https://router.example")
+    monkeypatch.setenv("ROUTER_TOKEN", "test-token")
+    assert client.get("/ready").json()["mode"] == "router_only"
+
+def test_router_backend_success_and_auth_failure(monkeypatch):
+    from iachat.backend import RouterFirstBackend
+    monkeypatch.setenv("ROUTER_URL", "https://router.example")
+    monkeypatch.setenv("ROUTER_TOKEN", "test-token")
+    class Response:
+        status_code = 200
+        def json(self):
+            return {"ok": True, "text": "Respuesta de Router"}
+    seen = []
+    def reply(url, **kwargs):
+        seen.append((url, kwargs["json"]["application_name"]))
+        return Response()
+    monkeypatch.setattr("iachat.backend.httpx.post", reply)
+    assert RouterFirstBackend().answer([{"role": "user", "content": "Hola"}]) == "Respuesta de Router"
+    assert seen == [("https://router.example/route", "iachat")]
+    class Unauthorized:
+        status_code = 401
+    monkeypatch.setattr("iachat.backend.httpx.post", lambda *args, **kwargs: Unauthorized())
+    import pytest
+    with pytest.raises(RuntimeError, match="router_auth_rejected"):
+        RouterFirstBackend().answer([{"role": "user", "content": "Hola"}])
 
 def test_private_api_rejects_missing_session(monkeypatch):
     monkeypatch.setenv("IACHAT_PASSWORD", "test-pass")
