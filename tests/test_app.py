@@ -205,3 +205,25 @@ def test_memory_suggestions_reject_invalid_router_output(monkeypatch):
     cid = client.post("/api/chat", json={"text":"Hola"}).json()["conversation_id"]
     assert client.post("/api/memories/suggest", json={"conversation_id":cid}).status_code == 502
     assert client.post("/api/memories/suggest", json={"conversation_id":"missing"}).status_code == 404
+
+
+def test_router_status_does_not_confuse_health_with_routing(monkeypatch):
+    monkeypatch.delenv("ROUTER_URL", raising=False)
+    monkeypatch.delenv("ROUTER_TOKEN", raising=False)
+    missing = client.get("/api/router/status")
+    assert missing.status_code == 200
+    assert missing.json()["configured"] is False
+    monkeypatch.setenv("ROUTER_URL", "https://router.example")
+    monkeypatch.setenv("ROUTER_TOKEN", "secret")
+    class Healthy:
+        status_code = 200
+        def json(self):
+            return {"status": "ok", "providers": []}
+    monkeypatch.setattr("iachat.app.httpx.get", lambda *args, **kwargs: Healthy())
+    result = client.get("/api/router/status").json()
+    assert result["reachable"] is True
+    assert result["routing_verified"] is False
+    class Failed:
+        status_code = 503
+    monkeypatch.setattr("iachat.app.httpx.get", lambda *args, **kwargs: Failed())
+    assert client.get("/api/router/status").json()["reachable"] is False
