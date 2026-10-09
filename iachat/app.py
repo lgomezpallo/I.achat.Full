@@ -65,8 +65,8 @@ class MessageOutput(BaseModel):
     history: list[dict[str, str]]
 
 def get_backend():
-    from .backend import ProviderBackend
-    return ProviderBackend()
+    from .backend import RouterFirstBackend
+    return RouterFirstBackend()
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -89,7 +89,7 @@ def ready():
     configured = any(os.getenv(key, "").strip() for key in ("GROQ_API_KEY", "OPENROUTER_API_KEY"))
     if not configured:
         raise HTTPException(503, "providers_not_configured")
-    return {"status": "ready", "component": "iachat", "mode": "direct"}
+    return {"status": "ready", "component": "iachat", "mode": "router-first-with-direct-fallback"}
 
 @app.post("/api/chat", response_model=MessageOutput)
 def chat(message: MessageInput):
