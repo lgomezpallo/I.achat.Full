@@ -11,7 +11,7 @@ class RouterFirstBackend:
         url = os.getenv("ROUTER_URL", "").strip().rstrip("/")
         token = os.getenv("ROUTER_TOKEN", "").strip()
         if url and token:
-            context = "\\n".join(
+            context = "\n".join(
                 f"{item['role']}: {item['content']}"
                 for item in messages[:-1]
                 if item.get("role") in ("user", "assistant", "system")
