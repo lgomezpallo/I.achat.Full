@@ -175,3 +175,33 @@ def test_memories_survive_restart_and_are_sent_as_context(monkeypatch, tmp_path)
     assert client.delete(f"/api/memories/{mid}").status_code == 200
     assert client.get("/api/memories").json()["memories"] == []
     assert client.delete(f"/api/memories/{mid}").status_code == 404
+
+
+def test_memory_suggestions_require_review_and_do_not_auto_save(monkeypatch):
+    module.store = ConversationStore(":memory:")
+    class ConversationBackend:
+        def answer(self, messages):
+            if "máximo de 3 recuerdos" in messages[-1]["content"]:
+                return '["Prefiere respuestas breves", "Usa IAchat en el teléfono"]'
+            return "Respuesta"
+    monkeypatch.setattr(module, "get_backend", lambda: ConversationBackend())
+    cid = client.post("/api/chat", json={"text":"Prefiero respuestas breves"}).json()["conversation_id"]
+    result = client.post("/api/memories/suggest", json={"conversation_id":cid})
+    assert result.status_code == 200
+    assert result.json()["suggestions"] == ["Prefiere respuestas breves", "Usa IAchat en el teléfono"]
+    assert client.get("/api/memories").json()["memories"] == []
+    assert client.post("/api/memories",json={"content":result.json()["suggestions"][0]}).status_code == 201
+    second = client.post("/api/memories/suggest", json={"conversation_id":cid})
+    assert second.json()["suggestions"] == ["Usa IAchat en el teléfono"]
+
+def test_memory_suggestions_reject_invalid_router_output(monkeypatch):
+    module.store = ConversationStore(":memory:")
+    class InvalidBackend:
+        def answer(self, messages):
+            if "máximo de 3 recuerdos" in messages[-1]["content"]:
+                return "I cannot produce JSON"
+            return "OK"
+    monkeypatch.setattr(module, "get_backend", lambda: InvalidBackend())
+    cid = client.post("/api/chat", json={"text":"Hola"}).json()["conversation_id"]
+    assert client.post("/api/memories/suggest", json={"conversation_id":cid}).status_code == 502
+    assert client.post("/api/memories/suggest", json={"conversation_id":"missing"}).status_code == 404
