@@ -21,21 +21,32 @@ class RouterFirstBackend:
             for item in messages[:-1]
             if item.get("role") in ("user", "assistant", "system")
         )
-        try:
-            response = httpx.post(
-                url + "/route",
-                headers={"Authorization": "Bearer " + token},
-                json={
-                    "task": messages[-1]["content"],
-                    "context": context,
-                    "required_capabilities": ["chat"],
-                    "application_name": "iachat",
-                    "decompose": False
-                },
-                timeout=self.timeout_s,
-            )
-        except httpx.RequestError as exc:
-            raise RuntimeError("router_unavailable") from exc
+        # Render Free can cold-start after idle. Retry gateway errors only;
+        # no fallback to a provider and never retry authentication failures.
+        for attempt in range(2):
+            try:
+                response = httpx.post(
+                    url + "/route",
+                    headers={"Authorization": "Bearer " + token},
+                    json={
+                        "task": messages[-1]["content"],
+                        "context": context,
+                        "required_capabilities": ["chat"],
+                        "application_name": "iachat",
+                        "decompose": False,
+                    },
+                    timeout=max(self.timeout_s, 90.0) if attempt == 0 else self.timeout_s,
+                )
+            except httpx.RequestError as exc:
+                raise RuntimeError("router_unavailable") from exc
+            if response.status_code not in (502, 503, 504) or attempt:
+                break
+            # Wake the upstream without submitting the user message twice
+            # until an explicit gateway error has already been received.
+            try:
+                httpx.get(url + "/health", timeout=65.0)
+            except httpx.RequestError:
+                pass
         if response.status_code in (401, 403):
             raise RuntimeError("router_auth_rejected")
         if response.status_code != 200:
