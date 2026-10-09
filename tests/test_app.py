@@ -112,3 +112,24 @@ def test_login_rejects_wrong_password(monkeypatch):
     monkeypatch.setenv("IACHAT_PASSWORD", "correct")
     monkeypatch.setenv("IACHAT_AUTH_SECRET", "secret")
     assert client.post("/auth/login", json={"password": "wrong"}).status_code == 401
+
+def test_installable_pwa():
+    manifest = client.get("/manifest.webmanifest")
+    assert manifest.status_code == 200
+    info = manifest.json()
+    assert info["display"] == "standalone"
+    assert {i["sizes"] for i in info["icons"]} == {"192x192", "512x512"}
+    assert 'rel="manifest"' in client.get("/").text
+    worker = client.get("/sw.js")
+    assert worker.status_code == 200
+    assert "cache.addAll" in worker.text
+    assert "/api/" in worker.text
+
+def test_pwa_icons_are_png():
+    for size in (192, 512):
+        response = client.get(f"/icons/icon-{size}.png")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("image/png")
+        assert response.content.startswith(bytes.fromhex("89504e470d0a1a0a"))
+        assert int.from_bytes(response.content[16:20], "big") == size
+    assert client.get("/icons/icon-999.png").status_code == 404
