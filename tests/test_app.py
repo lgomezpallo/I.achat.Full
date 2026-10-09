@@ -3,7 +3,7 @@ from iachat.app import app
 from iachat.store import ConversationStore
 import iachat.app as module
 
-client = TestClient(app)
+client = TestClient(app, base_url="https://testserver"
 
 class FakeBackend:
     def answer(self, messages):
