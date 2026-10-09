@@ -34,3 +34,5 @@ jobs:
             -o ConnectTimeout=15 \
             "$ORACLE_USER@$ORACLE_HOST" \
             'printf "SSH_OK\n"; id -un; uname -m; free -h; df -h /; ls -ld /home/ubuntu/S.istema.Full /home/ubuntu/S.istema.Full/I.achat.Full /home/ubuntu/S.istema.Full/R.outer.Full'
+
+# Stable Oracle connection check.
