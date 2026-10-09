@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import sqlite3
+import time
 from threading import Lock
 
 class ConversationStore:
@@ -9,6 +10,7 @@ class ConversationStore:
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, history TEXT NOT NULL)"
         )
+        self._db.execute("CREATE TABLE IF NOT EXISTS conversation_index (id TEXT PRIMARY KEY, title TEXT NOT NULL, updated_at INTEGER NOT NULL)")
         self._db.commit()
         self._lock = Lock()
 
@@ -23,6 +25,15 @@ class ConversationStore:
         data = json.loads(row[0])
         return [{"role": str(item["role"]), "content": str(item["content"])} for item in data]
 
+    def list_conversations(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT c.id, COALESCE(i.title, 'Conversación'), COALESCE(i.updated_at, 0) "
+                "FROM conversations c LEFT JOIN conversation_index i ON i.id=c.id "
+                "ORDER BY COALESCE(i.updated_at, 0) DESC, c.rowid DESC"
+            ).fetchall()
+        return [{"id": r[0], "title": r[1], "updated_at": r[2]} for r in rows]
+
     def put(self, conversation_id: str, history: list[dict[str, str]]) -> None:
         payload = json.dumps(history, ensure_ascii=False)
         with self._lock:
@@ -31,10 +42,17 @@ class ConversationStore:
                 "ON CONFLICT(id) DO UPDATE SET history=excluded.history",
                 (conversation_id, payload),
             )
+            title = next((m["content"][:80] for m in history if m.get("role") == "user"), "Conversación")
+            self._db.execute(
+                "INSERT INTO conversation_index(id, title, updated_at) VALUES(?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at",
+                (conversation_id, title, int(time.time())),
+            )
             self._db.commit()
 
     def delete(self, conversation_id: str) -> bool:
         with self._lock:
             cursor = self._db.execute("DELETE FROM conversations WHERE id=?", (conversation_id,))
+            self._db.execute("DELETE FROM conversation_index WHERE id=?", (conversation_id,))
             self._db.commit()
         return cursor.rowcount > 0
