@@ -170,6 +170,10 @@ def chat(message: MessageInput):
     store.put(conversation_id, updated)
     return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
 
+@app.get("/api/conversations")
+def list_conversations():
+    return {"conversations": store.list_conversations()}
+
 @app.get("/api/conversations/{conversation_id}")
 def get_conversation(conversation_id: str):
     history = store.get(conversation_id)
