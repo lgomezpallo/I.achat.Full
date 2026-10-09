@@ -40,3 +40,5 @@ jobs:
               sys.exit(1)
           json.dump(keys,sys.stdout)
           PY
+          echo "=== Migración recibida; activar entorno en Router ==="
+          ssh -T -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes "$ORACLE_USER@$ORACLE_HOST" 'sudo -n mkdir -p /etc/systemd/system/router.service.d && printf "[Service]\\nEnvironmentFile=/home/ubuntu/.config/router/providers.env\\n" | sudo -n tee /etc/systemd/system/router.service.d/10-providers.conf >/dev/null && sudo -n systemctl daemon-reload && sudo -n systemctl restart router.service && sleep 3 && curl -fsS --max-time 15 http://127.0.0.1:8100/health'
