@@ -39,7 +39,8 @@ class RouterFirstBackend:
         if response.status_code in (401, 403):
             raise RuntimeError("router_auth_rejected")
         if response.status_code != 200:
-            raise RuntimeError("router_http_error")
+            # HTTP status only; never log request credentials or provider responses.
+            raise RuntimeError("router_http_" + str(response.status_code))
         try:
             result = response.json()
         except ValueError as exc:
