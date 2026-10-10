@@ -30,7 +30,7 @@ jobs:
 
           # Huella ED25519 observada en el primer escaneo. Es un pin provisional,
           # NO una validación independiente de la identidad de la VM.
-          expected='SHA256:JCUGOZrLtIE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          expected='SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
           ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > /tmp/oracle-hostkey
           test -s /tmp/oracle-hostkey || { echo "::error::SSH no responde"; exit 1; }
           actual="$(ssh-keygen -lf /tmp/oracle-hostkey -E sha256 | awk '{print $2}' | head -1)"
