@@ -40,7 +40,7 @@ class RouterFirstBackend:
                         "context": context,
                         "required_capabilities": ["chat"],
                         "application_name": "iachat",
-                        "decompose": False,
+                        # Router decides automatically whether decomposition is useful.
                     },
                     timeout=max(self.timeout_s, 90.0) if attempt == 0 else self.timeout_s,
                 )
