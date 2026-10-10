@@ -15,47 +15,110 @@ from .web import HTML, MANIFEST, SERVICE_WORKER
 
 app = FastAPI(title="IAchat", version="0.3.0")
 
-def _valid_session(value: str) -> bool:
+store = ConversationStore(os.getenv("IACHAT_DB", "iachat.db"))
+
+def _signed_user(value: str) -> str | None:
     secret = os.getenv("IACHAT_AUTH_SECRET", "")
-    if not secret or not value or "." not in value:
-        return False
-    expiry, signature = value.split(".", 1)
+    if not secret or not value or value.count(".") != 2:
+        return None
+    username, expiry, signature = value.split(".", 2)
     if not expiry.isdigit() or int(expiry) < int(time.time()):
-        return False
-    expected = hmac.new(secret.encode(), expiry.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature, expected)
+        return None
+    expected = hmac.new(secret.encode(), (username + "." + expiry).encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+    account = store.get_user(username)
+    return username if account and account["enabled"] else None
+
+def _user(request: Request) -> str:
+    username = getattr(request.state, "username", None)
+    if not username:
+        raise HTTPException(401, "authentication_required")
+    return username
 
 @app.middleware("http")
 async def restrict_private_api(request: Request, call_next):
-    path = request.url.path
-    if os.getenv("IACHAT_PASSWORD") and path.startswith("/api/") and not _valid_session(request.cookies.get("iachat_session", "")):
+    username = _signed_user(request.cookies.get("iachat_session", ""))
+    request.state.username = username
+    if request.url.path.startswith("/api/") and not username:
         return JSONResponse({"detail": "authentication_required"}, status_code=401)
     return await call_next(request)
 
 class LoginInput(BaseModel):
+    username: str = "admin"
     password: str
+
+class NewAccount(BaseModel):
+    username: str = Field(min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
+    password: str = Field(min_length=8, max_length=128)
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
 
 @app.post("/auth/login")
 def login(payload: LoginInput, response: Response):
-    expected = os.getenv("IACHAT_PASSWORD", "")
-    secret = os.getenv("IACHAT_AUTH_SECRET", "")
-    if not expected or not secret or not hmac.compare_digest(payload.password, expected):
+    username = payload.username.strip().lower()
+    valid = store.verify_user(username, payload.password)
+    if not valid and username == "admin" and store.get_user("admin") is None:
+        legacy = os.getenv("IACHAT_PASSWORD", "")
+        if legacy and hmac.compare_digest(payload.password, legacy):
+            store.create_user("admin", payload.password, admin=True)
+            valid = True
+    if not valid:
         raise HTTPException(401, "invalid_credentials")
+    secret = os.getenv("IACHAT_AUTH_SECRET", "")
+    if not secret:
+        raise HTTPException(503, "auth_not_configured")
     expiry = str(int(time.time()) + 60 * 60 * 24 * 30)
-    signature = hmac.new(secret.encode(), expiry.encode(), hashlib.sha256).hexdigest()
-    response.set_cookie("iachat_session", expiry + "." + signature, httponly=True, secure=True, samesite="lax", max_age=2592000)
-    return {"ok": True}
+    signature = hmac.new(secret.encode(), (username + "." + expiry).encode(), hashlib.sha256).hexdigest()
+    response.set_cookie("iachat_session", username + "." + expiry + "." + signature, httponly=True, secure=True, samesite="lax", max_age=2592000)
+    return {"ok": True, "username": username}
 
 @app.get("/auth/status")
 def auth_status(request: Request):
-    return {"authenticated": _valid_session(request.cookies.get("iachat_session", ""))}
+    username = _signed_user(request.cookies.get("iachat_session", ""))
+    account = store.get_user(username) if username else None
+    return {"authenticated": bool(username), "username": username, "admin": bool(account and account["admin"])}
 
 @app.post("/auth/logout")
 def logout(response: Response):
     response.delete_cookie("iachat_session")
     return {"ok": True}
 
-store = ConversationStore(os.getenv("IACHAT_DB", "iachat.db"))
+@app.get("/api/users")
+def users(request: Request):
+    username = _user(request)
+    if not store.get_user(username)["admin"]:
+        raise HTTPException(403, "admin_only")
+    return {"users": store.list_users()}
+
+@app.post("/api/users", status_code=201)
+def create_account(payload: NewAccount, request: Request):
+    username = _user(request)
+    if not store.get_user(username)["admin"]:
+        raise HTTPException(403, "admin_only")
+    name = payload.username.lower()
+    if not store.create_user(name, payload.password):
+        raise HTTPException(409, "username_already_exists")
+    return {"username": name}
+
+@app.put("/api/users/{username}/enabled")
+def enable_account(username: str, enabled: bool, request: Request):
+    current = _user(request)
+    if not store.get_user(current)["admin"]:
+        raise HTTPException(403, "admin_only")
+    if not store.set_enabled(username.lower(), enabled):
+        raise HTTPException(404, "account_not_found_or_admin")
+    return {"ok": True}
+
+@app.post("/api/account/password")
+def change_password(payload: PasswordChange, request: Request):
+    username = _user(request)
+    if not store.verify_user(username, payload.current_password):
+        raise HTTPException(401, "invalid_credentials")
+    store.change_password(username, payload.new_password)
+    return {"ok": True}
 
 class MessageInput(BaseModel):
     conversation_id: str | None = None
@@ -171,9 +234,10 @@ def router_status():
             "reason": "health_only_not_end_to_end"}
 
 @app.post("/api/chat", response_model=MessageOutput)
-def chat(message: MessageInput):
+def chat(message: MessageInput, request: Request):
+    owner = _user(request)
     conversation_id = message.conversation_id or str(uuid4())
-    history = store.get(conversation_id)
+    history = store.get(conversation_id, owner)
     if message.conversation_id and history is None:
         raise HTTPException(404, "conversation_not_found")
     history = history or []
@@ -189,17 +253,17 @@ def chat(message: MessageInput):
             "", match.group(1).strip(), flags=re.IGNORECASE,
         ).strip().rstrip(".")
         if 0 < len(content) <= 1000:
-            existing = any(m["content"].casefold() == content.casefold() for m in store.list_memories())
+            existing = any(m["content"].casefold() == content.casefold() for m in store.list_memories(, owner))
             if not existing:
-                store.save_memory(str(uuid4()), content)
+                store.save_memory(str(uuid4()), content, owner)
             answer = ("Ya tenía esa información guardada." if existing
                       else "Guardé esa información en la memoria para futuras conversaciones.")
             updated = [*history, {"role": "user", "content": message.text},
                        {"role": "assistant", "content": answer}]
-            store.put(conversation_id, updated)
+            store.put(conversation_id, updated, owner)
             return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
     try:
-        memories = store.list_memories()
+        memories = store.list_memories(, owner)
         memory_context = []
         if memories:
             memory_context = [{"role": "system", "content":
@@ -215,46 +279,53 @@ def chat(message: MessageInput):
             detail = "router_unavailable"
         raise HTTPException(503, detail) from exc
     updated = [*history, {"role": "user", "content": message.text}, {"role": "assistant", "content": answer}]
-    store.put(conversation_id, updated)
+    store.put(conversation_id, updated, owner)
     return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
 
 @app.get("/api/conversations")
-def list_conversations():
-    return {"conversations": store.list_conversations()}
+def list_conversations(request: Request):
+    owner = _user(request)
+    return {"conversations": store.list_conversations(, owner)}
 
 @app.get("/api/conversations/{conversation_id}")
-def get_conversation(conversation_id: str):
-    history = store.get(conversation_id)
+def get_conversation(conversation_id: str, request: Request):
+    owner = _user(request)
+    history = store.get(conversation_id, owner)
     if history is None:
         raise HTTPException(404, "conversation_not_found")
     return {"conversation_id": conversation_id, "history": history}
 
 @app.delete("/api/conversations/{conversation_id}")
-def delete_conversation(conversation_id: str):
-    if not store.delete(conversation_id):
+def delete_conversation(conversation_id: str, request: Request):
+    owner = _user(request)
+    if not store.delete(conversation_id, owner):
         raise HTTPException(404, "conversation_not_found")
     return {"deleted": True}
 
 @app.get("/api/memories")
-def list_memories():
-    return {"memories": store.list_memories()}
+def list_memories(request: Request):
+    owner = _user(request)
+    return {"memories": store.list_memories(, owner)}
 
 @app.post("/api/memories", status_code=201)
-def create_memory(payload: MemoryInput):
+def create_memory(payload: MemoryInput, request: Request):
+    owner = _user(request)
     memory_id = str(uuid4())
-    store.save_memory(memory_id, payload.content.strip())
+    store.save_memory(memory_id, payload.content.strip(), owner)
     return {"id": memory_id, "content": payload.content.strip()}
 
 @app.put("/api/memories/{memory_id}")
-def update_memory(memory_id: str, payload: MemoryInput):
-    if not any(m["id"] == memory_id for m in store.list_memories()):
+def update_memory(memory_id: str, payload: MemoryInput, request: Request):
+    owner = _user(request)
+    if not any(m["id"] == memory_id for m in store.list_memories(, owner)):
         raise HTTPException(404, "memory_not_found")
-    store.save_memory(memory_id, payload.content.strip())
+    store.save_memory(memory_id, payload.content.strip(), owner)
     return {"id": memory_id, "content": payload.content.strip()}
 
 @app.delete("/api/memories/{memory_id}")
-def delete_memory(memory_id: str):
-    if not store.delete_memory(memory_id):
+def delete_memory(memory_id: str, request: Request):
+    owner = _user(request)
+    if not store.delete_memory(memory_id, owner):
         raise HTTPException(404, "memory_not_found")
     return {"deleted": True}
 
@@ -263,8 +334,9 @@ class SuggestMemoriesInput(BaseModel):
     conversation_id: str
 
 @app.post("/api/memories/suggest")
-def suggest_memories(payload: SuggestMemoriesInput):
-    history = store.get(payload.conversation_id)
+def suggest_memories(payload: SuggestMemoriesInput, request: Request):
+    owner = _user(request)
+    history = store.get(payload.conversation_id, owner)
     if history is None:
         raise HTTPException(404, "conversation_not_found")
     if not history:
@@ -294,7 +366,7 @@ def suggest_memories(payload: SuggestMemoriesInput):
         raise HTTPException(502, "invalid_memory_suggestions")
     if not isinstance(suggestions, list) or any(not isinstance(v, str) for v in suggestions):
         raise HTTPException(502, "invalid_memory_suggestions")
-    existing = {m["content"].casefold() for m in store.list_memories()}
+    existing = {m["content"].casefold() for m in store.list_memories(, owner)}
     cleaned = []
     for item in suggestions[:3]:
         item = item.strip()
