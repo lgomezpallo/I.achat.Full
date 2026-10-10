@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response as RawResponse
 from pydantic import BaseModel, Field
 from .store import ConversationStore
+import re
 from .web import HTML, MANIFEST, SERVICE_WORKER
 
 app = FastAPI(title="IAchat", version="0.3.0")
@@ -176,6 +177,27 @@ def chat(message: MessageInput):
     if message.conversation_id and history is None:
         raise HTTPException(404, "conversation_not_found")
     history = history or []
+    # Only explicit requests are persisted. Never claim a memory was saved
+    # on the basis of an LLM-generated acknowledgment.
+    match = re.match(
+        r"^\\s*(?:quiero\\s+que\\s+recuerdes\\s+que|record[aá]\\s+que|guard[aá]\\s+que)\\s+(.+)",
+        message.text, flags=re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        content = re.sub(
+            r"\\s+guard[aá]\\s+(?:esta\\s+)?informaci[oó]n\\s+para\\s+futuras\\s+conversaciones\\s*\\.?\\s*$",
+            "", match.group(1).strip(), flags=re.IGNORECASE,
+        ).strip().rstrip(".")
+        if 0 < len(content) <= 1000:
+            existing = any(m["content"].casefold() == content.casefold() for m in store.list_memories())
+            if not existing:
+                store.save_memory(str(uuid4()), content)
+            answer = ("Ya tenía esa información guardada." if existing
+                      else "Guardé esa información en la memoria para futuras conversaciones.")
+            updated = [*history, {"role": "user", "content": message.text},
+                       {"role": "assistant", "content": answer}]
+            store.put(conversation_id, updated)
+            return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
     try:
         memories = store.list_memories()
         memory_context = []
