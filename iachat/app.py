@@ -253,7 +253,7 @@ def chat(message: MessageInput, request: Request):
             "", match.group(1).strip(), flags=re.IGNORECASE,
         ).strip().rstrip(".")
         if 0 < len(content) <= 1000:
-            existing = any(m["content"].casefold() == content.casefold() for m in store.list_memories(, owner))
+            existing = any(m["content"].casefold() == content.casefold() for m in store.list_memories(owner))
             if not existing:
                 store.save_memory(str(uuid4()), content, owner)
             answer = ("Ya tenía esa información guardada." if existing
@@ -263,7 +263,7 @@ def chat(message: MessageInput, request: Request):
             store.put(conversation_id, updated, owner)
             return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
     try:
-        memories = store.list_memories(, owner)
+        memories = store.list_memories(owner)
         memory_context = []
         if memories:
             memory_context = [{"role": "system", "content":
@@ -285,7 +285,7 @@ def chat(message: MessageInput, request: Request):
 @app.get("/api/conversations")
 def list_conversations(request: Request):
     owner = _user(request)
-    return {"conversations": store.list_conversations(, owner)}
+    return {"conversations": store.list_conversations(owner)}
 
 @app.get("/api/conversations/{conversation_id}")
 def get_conversation(conversation_id: str, request: Request):
@@ -305,7 +305,7 @@ def delete_conversation(conversation_id: str, request: Request):
 @app.get("/api/memories")
 def list_memories(request: Request):
     owner = _user(request)
-    return {"memories": store.list_memories(, owner)}
+    return {"memories": store.list_memories(owner)}
 
 @app.post("/api/memories", status_code=201)
 def create_memory(payload: MemoryInput, request: Request):
@@ -317,7 +317,7 @@ def create_memory(payload: MemoryInput, request: Request):
 @app.put("/api/memories/{memory_id}")
 def update_memory(memory_id: str, payload: MemoryInput, request: Request):
     owner = _user(request)
-    if not any(m["id"] == memory_id for m in store.list_memories(, owner)):
+    if not any(m["id"] == memory_id for m in store.list_memories(owner)):
         raise HTTPException(404, "memory_not_found")
     store.save_memory(memory_id, payload.content.strip(), owner)
     return {"id": memory_id, "content": payload.content.strip()}
@@ -366,7 +366,7 @@ def suggest_memories(payload: SuggestMemoriesInput, request: Request):
         raise HTTPException(502, "invalid_memory_suggestions")
     if not isinstance(suggestions, list) or any(not isinstance(v, str) for v in suggestions):
         raise HTTPException(502, "invalid_memory_suggestions")
-    existing = {m["content"].casefold() for m in store.list_memories(, owner)}
+    existing = {m["content"].casefold() for m in store.list_memories(owner)}
     cleaned = []
     for item in suggestions[:3]:
         item = item.strip()
