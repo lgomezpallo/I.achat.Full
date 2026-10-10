@@ -29,17 +29,21 @@ jobs:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
           ORACLE_USER: ${{ secrets.ORACLE_USER }}
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
-          ORACLE_KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
         run: |
           set -eu
-          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY" && test -n "$ORACLE_KNOWN_HOSTS" || {
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY" || {
             echo "::error::Falta configurar acceso a Oracle en los secretos del entorno oracle-production."
             exit 1
           }
           install -d -m 700 ~/.ssh
           printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$ORACLE_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # Same pinned public host key fingerprint as the successful login check.
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts
+          actual="$(ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | awk '{print $2}' | head -1)"
+          expected='SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          test "$actual" = "$expected" || { echo "::error::La huella SSH cambió. No se despliega."; exit 1; }
           chmod 600 ~/.ssh/known_hosts
       - name: Transferir y desplegar con reversión
         env:
