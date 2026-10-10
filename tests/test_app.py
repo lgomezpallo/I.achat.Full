@@ -227,3 +227,28 @@ def test_router_status_does_not_confuse_health_with_routing(monkeypatch):
         status_code = 503
     monkeypatch.setattr("iachat.app.httpx.get", lambda *args, **kwargs: Failed())
     assert client.get("/api/router/status").json()["reachable"] is False
+
+
+def test_router_preserves_user_language_instruction(monkeypatch):
+    from iachat.backend import RouterFirstBackend
+    monkeypatch.setenv("ROUTER_URL", "https://router.example")
+    monkeypatch.setenv("ROUTER_TOKEN", "test-token")
+    captured = {}
+    class Response:
+        status_code = 200
+        def json(self):
+            return {"ok": True, "text": "Hola, ¿cómo estás?"}
+    def post(url, **kwargs):
+        captured.update(kwargs["json"])
+        return Response()
+    monkeypatch.setattr("iachat.backend.httpx.post", post)
+    answer = RouterFirstBackend().answer([
+        {"role": "user", "content": "Hola"},
+        {"role": "assistant", "content": "Buen día"},
+        {"role": "user", "content": "¿Cómo estás?"},
+    ])
+    assert answer == "Hola, ¿cómo estás?"
+    assert captured["task"] == "¿Cómo estás?"
+    assert "mismo idioma" in captured["context"]
+    assert "user: Hola" in captured["context"]
+    assert captured["decompose"] is False
