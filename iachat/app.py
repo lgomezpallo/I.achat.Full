@@ -180,12 +180,12 @@ def chat(message: MessageInput):
     # Only explicit requests are persisted. Never claim a memory was saved
     # on the basis of an LLM-generated acknowledgment.
     match = re.match(
-        r"^\\s*(?:quiero\\s+que\\s+recuerdes\\s+que|record[aá]\\s+que|guard[aá]\\s+que)\\s+(.+)",
+        r"^\s*(?:quiero\s+que\s+recuerdes\s+que|record[aá]\s+que|guard[aá]\s+que)\s+(.+)",
         message.text, flags=re.IGNORECASE | re.DOTALL,
     )
     if match:
         content = re.sub(
-            r"\\s+guard[aá]\\s+(?:esta\\s+)?informaci[oó]n\\s+para\\s+futuras\\s+conversaciones\\s*\\.?\\s*$",
+            r"\s+guard[aá]\s+(?:esta\s+)?informaci[oó]n\s+para\s+futuras\s+conversaciones\s*\.?\s*$",
             "", match.group(1).strip(), flags=re.IGNORECASE,
         ).strip().rstrip(".")
         if 0 < len(content) <= 1000:
