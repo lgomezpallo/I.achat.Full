@@ -12,9 +12,9 @@ def test_http_account_isolation_and_admin_permissions(tmp_path, monkeypatch):
     db.save_memory("admin-memory", "Faro Azul", owner="admin")
     monkeypatch.setattr(module, "store", db)
     monkeypatch.setenv("IACHAT_AUTH_SECRET", "test-only-secret-for-http-regression")
-    admin = TestClient(module.app)
-    other = TestClient(module.app)
-    guest = TestClient(module.app)
+    admin = TestClient(module.app, base_url="https://testserver")
+    other = TestClient(module.app, base_url="https://testserver")
+    guest = TestClient(module.app, base_url="https://testserver")
 
     assert guest.get("/api/conversations").status_code == 401
     assert guest.get("/api/users").status_code == 401
