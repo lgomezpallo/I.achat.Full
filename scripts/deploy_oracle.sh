@@ -55,5 +55,6 @@ for attempt in range(12):
 else:
     raise SystemExit("IAchat health check failed")
 PY
+test "$(curl -fsS http://127.0.0.1:8000/ | grep -c 'id="projectScope"')" -ge 1 || { echo "Project selector missing from served app"; exit 1; }
 deployed=0
 echo "IAchat deployed successfully"
