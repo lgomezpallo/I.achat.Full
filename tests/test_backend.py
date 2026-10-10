@@ -29,7 +29,7 @@ def test_router_backend_returns_text(monkeypatch):
     assert captured["url"] == "http://router:8010/route"
     assert captured["headers"]["Authorization"] == "Bearer service-secret"
     assert captured["json"]["task"] == "seguimos"
-    assert "assistant: buenas" in captured["json"]["context"]
+    assert captured["json"]["conversation"][1] == {"role": "assistant", "content": "buenas"}
 
 def test_router_backend_propagates_router_failure(monkeypatch):
     monkeypatch.setattr(module.httpx, "post", lambda *a, **k: FakeResponse({"ok": False, "error": "no_eligible_provider"}))
