@@ -1,9 +1,14 @@
+import pytest
 from fastapi.testclient import TestClient
 import iachat.app as module
 from iachat.app import app
 from iachat.backend import RouterBackend
 from iachat.store import ConversationStore
 
+
+@pytest.fixture(autouse=True)
+def authenticated_client(monkeypatch):
+    monkeypatch.setattr(module, "_signed_user", lambda cookie: "admin")
 
 class RealFormatRouterResponse:
     status_code = 200
@@ -47,8 +52,9 @@ def test_two_turns_through_router_contract_and_persistence(monkeypatch, tmp_path
     assert second.status_code == 200
     assert outgoing[0]["task"] == "Mi color favorito es azul"
     assert outgoing[1]["task"] == "¿Qué color dije?"
-    assert outgoing[1]["context"] == (
-        "user: Mi color favorito es azul\nassistant: Primera respuesta"
-    )
-    assert outgoing[1]["decompose"] is False
+    assert outgoing[1]["conversation"] == [
+        {"role": "user", "content": "Mi color favorito es azul"},
+        {"role": "assistant", "content": "Primera respuesta"},
+    ]
+    assert "decompose" not in outgoing[1]
     assert len(ConversationStore(str(dbfile)).get(cid)) == 4
