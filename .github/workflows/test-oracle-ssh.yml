@@ -37,6 +37,13 @@ jobs:
           echo "Huella ED25519 observada ahora: $actual"
           echo "Huella ED25519 registrada antes: $expected"
           if [[ "$actual" != "$expected" ]]; then
+            python3 - "$actual" "$expected" <<'PY'
+          import sys
+          actual, expected = sys.argv[1:]
+          mismatch = [(i + 1, a, b) for i, (a, b) in enumerate(zip(actual, expected)) if a != b]
+          print("Diferencias entre huellas públicas (posición, observado, esperado):", mismatch)
+          print("Longitudes:", len(actual), len(expected))
+          PY
             echo "::error::La huella del servidor no coincide con la primera observación. No se intentó login."
             exit 1
           fi
