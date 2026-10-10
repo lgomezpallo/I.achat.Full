@@ -107,6 +107,27 @@ class ConversationStore:
             self._db.commit()
         return cursor.rowcount > 0
 
+    def search_conversations(self, query: str, owner: str = "admin", limit: int = 25) -> list[dict]:
+        """Owner-scoped literal text search; never sends conversation content to a model."""
+        needle = query.strip().casefold()
+        if len(needle) < 2:
+            return []
+        matches = []
+        for info in self.list_conversations(owner):
+            history = self.get(info["id"], owner) or []
+            found = next((m["content"] for m in history
+                          if needle in m.get("content", "").casefold()), None)
+            if found is None and needle not in info["title"].casefold():
+                continue
+            excerpt = found or info["title"]
+            pos = excerpt.casefold().find(needle)
+            start = max(0, pos - 70)
+            snippet = excerpt[start:start + 210]
+            matches.append({**info, "excerpt": snippet})
+            if len(matches) >= limit:
+                break
+        return matches
+
     def list_memories(self, owner: str = "admin") -> list[dict]:
         with self._lock:
             rows = self._db.execute("SELECT id, content, updated_at FROM memories WHERE owner=? ORDER BY updated_at DESC, id", (owner,)).fetchall()
