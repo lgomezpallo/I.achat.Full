@@ -6,7 +6,7 @@ import hashlib
 import time
 import httpx
 from uuid import uuid4
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, Query
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response as RawResponse
 from pydantic import BaseModel, Field
 from .store import ConversationStore
@@ -303,6 +303,11 @@ def export_my_data(request: Request):
         "Content-Disposition": 'attachment; filename="iachat-export.json"',
         "Cache-Control": "no-store",
     })
+
+@app.get("/api/conversations/search")
+def search_conversations(request: Request, q: str = Query(min_length=2, max_length=120)):
+    owner = _user(request)
+    return {"matches": store.search_conversations(q, owner)}
 
 @app.get("/api/conversations")
 def list_conversations(request: Request):
