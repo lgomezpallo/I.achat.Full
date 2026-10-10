@@ -1,0 +1,44 @@
+name: Probar acceso SSH a Oracle
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ssh-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    environment: oracle-production
+    steps:
+      - name: Verificar conexión SSH sin modificar Oracle
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY" || {
+            echo "::error::Falta configurar ORACLE_HOST, ORACLE_USER u ORACLE_SSH_KEY."
+            exit 1
+          }
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          trap 'rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts /tmp/oracle-hostkey' EXIT
+
+          # Huella ED25519 observada en el primer escaneo. Es un pin provisional,
+          # NO una validación independiente de la identidad de la VM.
+          expected='SHA256:JCUGOZrLtIE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > /tmp/oracle-hostkey
+          test -s /tmp/oracle-hostkey || { echo "::error::SSH no responde"; exit 1; }
+          actual="$(ssh-keygen -lf /tmp/oracle-hostkey -E sha256 | awk '{print $2}' | head -1)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error::La huella del servidor no coincide con la primera observación. No se intentó login."
+            exit 1
+          fi
+          cp /tmp/oracle-hostkey ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          echo "Huella igual a la observada previamente; intentando autenticación sin instalar nada."
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 -o PasswordAuthentication=no "$ORACLE_USER@$ORACLE_HOST" 'printf "SSH_LOGIN_OK\n"; id -un'
