@@ -19,6 +19,10 @@ class ConversationStore:
             cols = {c[1] for c in self._db.execute(f"PRAGMA table_info({table})")}
             if "owner" not in cols:
                 self._db.execute(f"ALTER TABLE {table} ADD COLUMN owner TEXT NOT NULL DEFAULT 'admin'")
+        # Nullable project column: existing memories stay general.
+        memory_cols = {c[1] for c in self._db.execute("PRAGMA table_info(memories)")}
+        if "project" not in memory_cols:
+            self._db.execute("ALTER TABLE memories ADD COLUMN project TEXT NOT NULL DEFAULT ''")
         self._db.commit()
         self._lock = Lock()
 
@@ -128,17 +132,17 @@ class ConversationStore:
                 break
         return matches
 
-    def list_memories(self, owner: str = "admin") -> list[dict]:
+    def list_memories(self, owner: str = "admin", project: str | None = None) -> list[dict]:
         with self._lock:
-            rows = self._db.execute("SELECT id, content, updated_at FROM memories WHERE owner=? ORDER BY updated_at DESC, id", (owner,)).fetchall()
-        return [{"id": row[0], "content": row[1], "updated_at": row[2]} for row in rows]
+            rows = self._db.execute("SELECT id, content, updated_at, project FROM memories WHERE owner=? ORDER BY updated_at DESC, id", (owner,)).fetchall()
+        return [{"id": row[0], "content": row[1], "updated_at": row[2], "project": row[3]} for row in rows if project is None or row[3] == "" or row[3] == project]
 
-    def save_memory(self, memory_id: str, content: str, owner: str = "admin") -> None:
+    def save_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> None:
         with self._lock:
             self._db.execute(
-                "INSERT INTO memories (id, content, updated_at, owner) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(id) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at WHERE memories.owner=excluded.owner",
-                (memory_id, content, int(time.time()), owner),
+                "INSERT INTO memories (id, content, updated_at, owner, project) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at, project=excluded.project WHERE memories.owner=excluded.owner",
+                (memory_id, content, int(time.time()), owner, project),
             )
             self._db.commit()
 
