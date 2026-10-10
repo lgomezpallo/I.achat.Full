@@ -240,6 +240,10 @@ def chat(message: MessageInput, request: Request):
     if message.conversation_id and history is None:
         raise HTTPException(404, "conversation_not_found")
     history = history or []
+    if message.conversation_id:
+        existing_project = store.conversation_project(conversation_id, owner)
+        if existing_project is not None and existing_project != message.project.strip():
+            raise HTTPException(409, "conversation_project_mismatch")
     # Only explicit requests are persisted. Never claim a memory was saved
     # on the basis of an LLM-generated acknowledgment.
     match = re.match(
@@ -259,7 +263,7 @@ def chat(message: MessageInput, request: Request):
                       else "Guardé esa información en la memoria para futuras conversaciones.")
             updated = [*history, {"role": "user", "content": message.text},
                        {"role": "assistant", "content": answer}]
-            store.put(conversation_id, updated, owner)
+            store.put(conversation_id, updated, owner, message.project.strip())
             return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
     try:
         memories = store.list_memories(owner, message.project.strip())
@@ -280,7 +284,7 @@ def chat(message: MessageInput, request: Request):
         raise HTTPException(503, detail) from exc
     visible_text = message.text + ("\n\nAdjuntos: " + ", ".join(attachment_names) if attachment_names else "")
     updated = [*history, {"role": "user", "content": visible_text}, {"role": "assistant", "content": answer}]
-    store.put(conversation_id, updated, owner)
+    store.put(conversation_id, updated, owner, message.project.strip())
     return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
 
 @app.get("/api/export")
@@ -307,14 +311,24 @@ def export_my_data(request: Request):
     })
 
 @app.get("/api/conversations/search")
-def search_conversations(request: Request, q: str = Query(min_length=2, max_length=120)):
+def search_conversations(request: Request, q: str = Query(min_length=2, max_length=120), project: str | None = None):
     owner = _user(request)
-    return {"matches": store.search_conversations(q, owner)}
+    return {"matches": store.search_conversations(q, owner, project=project)}
 
 @app.get("/api/conversations")
-def list_conversations(request: Request):
+def list_conversations(request: Request, project: str | None = None):
     owner = _user(request)
-    return {"conversations": store.list_conversations(owner)}
+    return {"conversations": store.list_conversations(owner, project)}
+
+class ConversationProjectInput(BaseModel):
+    project: str = Field(default="", max_length=60, pattern=r"^[\w\- ]*$")
+
+@app.put("/api/conversations/{conversation_id}/project")
+def change_conversation_project(conversation_id: str, payload: ConversationProjectInput, request: Request):
+    owner = _user(request)
+    if not store.move_conversation(conversation_id, payload.project.strip(), owner):
+        raise HTTPException(404, "conversation_not_found")
+    return {"ok": True, "project": payload.project.strip()}
 
 @app.get("/api/conversations/{conversation_id}")
 def get_conversation(conversation_id: str, request: Request):
