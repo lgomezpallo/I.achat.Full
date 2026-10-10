@@ -187,7 +187,7 @@ MANIFEST = {
         {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
     ]
 }
-SERVICE_WORKER = """const CACHE='iachat-shell-v10';
+SERVICE_WORKER = """const CACHE='iachat-shell-v11';
 const ASSETS=['/','/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png'];
 self.addEventListener('install',event=>{
  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
