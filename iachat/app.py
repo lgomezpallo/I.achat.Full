@@ -128,9 +128,11 @@ class MessageInput(BaseModel):
     conversation_id: str | None = None
     text: str = Field(default="", max_length=15000)
     attachments: list[AttachmentInput] = Field(default_factory=list, max_length=3)
+    project: str = Field(default="", max_length=60, pattern=r"^[\w\- ]*$")
 
 class MemoryInput(BaseModel):
     content: str = Field(min_length=1, max_length=1000)
+    project: str = Field(default="", max_length=60, pattern=r"^[\w\- ]*$")
 
 class MessageOutput(BaseModel):
     conversation_id: str
@@ -252,7 +254,7 @@ def chat(message: MessageInput, request: Request):
         if 0 < len(content) <= 1000:
             existing = any(m["content"].casefold() == content.casefold() for m in store.list_memories(owner))
             if not existing:
-                store.save_memory(str(uuid4()), content, owner)
+                store.save_memory(str(uuid4()), content, owner, message.project.strip())
             answer = ("Ya tenía esa información guardada." if existing
                       else "Guardé esa información en la memoria para futuras conversaciones.")
             updated = [*history, {"role": "user", "content": message.text},
@@ -260,7 +262,7 @@ def chat(message: MessageInput, request: Request):
             store.put(conversation_id, updated, owner)
             return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
     try:
-        memories = store.list_memories(owner)
+        memories = store.list_memories(owner, message.project.strip())
         memory_context = []
         if memories:
             memory_context = [{"role": "system", "content":
@@ -338,16 +340,16 @@ def list_memories(request: Request):
 def create_memory(payload: MemoryInput, request: Request):
     owner = _user(request)
     memory_id = str(uuid4())
-    store.save_memory(memory_id, payload.content.strip(), owner)
-    return {"id": memory_id, "content": payload.content.strip()}
+    store.save_memory(memory_id, payload.content.strip(), owner, payload.project.strip())
+    return {"id": memory_id, "content": payload.content.strip(), "project": payload.project.strip()}
 
 @app.put("/api/memories/{memory_id}")
 def update_memory(memory_id: str, payload: MemoryInput, request: Request):
     owner = _user(request)
     if not any(m["id"] == memory_id for m in store.list_memories(owner)):
         raise HTTPException(404, "memory_not_found")
-    store.save_memory(memory_id, payload.content.strip(), owner)
-    return {"id": memory_id, "content": payload.content.strip()}
+    store.save_memory(memory_id, payload.content.strip(), owner, payload.project.strip())
+    return {"id": memory_id, "content": payload.content.strip(), "project": payload.project.strip()}
 
 @app.delete("/api/memories/{memory_id}")
 def delete_memory(memory_id: str, request: Request):
