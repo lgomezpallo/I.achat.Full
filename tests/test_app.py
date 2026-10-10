@@ -5,6 +5,19 @@ import iachat.app as module
 
 client = TestClient(app, base_url="https://testserver")
 
+# Legacy functional tests run as an authenticated account. Dedicated security tests
+# exercise real cookie verification and must not receive this bypass.
+import pytest
+
+@pytest.fixture(autouse=True)
+def authenticated_functional_test(request, monkeypatch):
+    if request.node.name not in {
+        "test_private_api_rejects_missing_session",
+        "test_login_rejects_wrong_password",
+    }:
+        monkeypatch.setattr(module, "_signed_user", lambda cookie: "admin")
+
+
 class FakeBackend:
     def answer(self, messages):
         return "respuesta " + str(len(messages))
@@ -250,5 +263,5 @@ def test_router_preserves_user_language_instruction(monkeypatch):
     assert answer == "Hola, ¿cómo estás?"
     assert captured["task"] == "¿Cómo estás?"
     assert "mismo idioma" in captured["context"]
-    assert "user: Hola" in captured["context"]
+    assert captured["conversation"][0] == {"role": "user", "content": "Hola"}
     assert "decompose" not in captured  # Router uses its automatic default
