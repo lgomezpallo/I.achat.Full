@@ -26,9 +26,9 @@ def test_complete_conversation_is_forwarded_in_order():
     assert args[0] == "http://router:8010/route"
     assert kwargs["headers"]["Authorization"] == "Bearer test-token"
     assert kwargs["json"]["task"] == "¿Cómo me llamo?"
-    assert kwargs["json"]["context"] == "user: Me llamo Ana\nassistant: Hola Ana"
+    assert kwargs["json"]["conversation"] == [{"role": "user", "content": "Me llamo Ana"}, {"role": "assistant", "content": "Hola Ana"}]
     assert kwargs["json"]["application_name"] == "iachat"
-    assert kwargs["json"]["decompose"] is False
+    assert "decompose" not in kwargs["json"]
 
 
 def test_last_message_must_be_user():
