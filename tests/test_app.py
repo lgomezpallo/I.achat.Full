@@ -194,7 +194,7 @@ def test_memory_suggestions_require_review_and_do_not_auto_save(monkeypatch):
     module.store = ConversationStore(":memory:")
     class ConversationBackend:
         def answer(self, messages):
-            if "máximo de 3 recuerdos" in messages[-1]["content"]:
+            if "hasta 3 recuerdos" in messages[-1]["content"]:
                 return '["Prefiere respuestas breves", "Usa IAchat en el teléfono"]'
             return "Respuesta"
     monkeypatch.setattr(module, "get_backend", lambda: ConversationBackend())
