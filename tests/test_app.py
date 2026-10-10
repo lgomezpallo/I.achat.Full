@@ -251,4 +251,4 @@ def test_router_preserves_user_language_instruction(monkeypatch):
     assert captured["task"] == "¿Cómo estás?"
     assert "mismo idioma" in captured["context"]
     assert "user: Hola" in captured["context"]
-    assert captured["decompose"] is False
+    assert "decompose" not in captured  # Router uses its automatic default
