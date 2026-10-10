@@ -1,0 +1,25 @@
+name: Verificar identidad SSH Oracle
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    environment: oracle-production
+    steps:
+      - name: Consultar clave publica del servidor sin autenticar
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" || { echo "::error::Falta ORACLE_HOST"; exit 1; }
+          case "$ORACLE_HOST" in *[!a-zA-Z0-9.:-]*|'') echo "::error::Nombre de host inválido"; exit 1;; esac
+          ssh-keyscan -T 8 -t ed25519,rsa "$ORACLE_HOST" 2>/dev/null | sort -u > hostkeys.txt
+          test -s hostkeys.txt || { echo "::error::Puerto SSH inaccesible o sin claves públicas"; exit 1; }
+          echo "HUELLAS PÚBLICAS OBSERVADAS (NO verificadas todavía):"
+          ssh-keygen -lf hostkeys.txt -E sha256
+          echo ""
+          echo "Entradas conocidas para ORACLE_KNOWN_HOSTS (usar SOLO tras verificar huella con Oracle):"
+          cat hostkeys.txt
