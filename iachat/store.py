@@ -23,6 +23,9 @@ class ConversationStore:
         memory_cols = {c[1] for c in self._db.execute("PRAGMA table_info(memories)")}
         if "project" not in memory_cols:
             self._db.execute("ALTER TABLE memories ADD COLUMN project TEXT NOT NULL DEFAULT ''")
+        index_cols = {c[1] for c in self._db.execute("PRAGMA table_info(conversation_index)")}
+        if "project" not in index_cols:
+            self._db.execute("ALTER TABLE conversation_index ADD COLUMN project TEXT NOT NULL DEFAULT ''")
         self._db.commit()
         self._lock = Lock()
 
@@ -79,16 +82,16 @@ class ConversationStore:
         data = json.loads(row[0])
         return [{"role": str(item["role"]), "content": str(item["content"])} for item in data]
 
-    def list_conversations(self, owner: str = "admin") -> list[dict]:
+    def list_conversations(self, owner: str = "admin", project: str | None = None) -> list[dict]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT c.id, COALESCE(i.title, 'Conversación'), COALESCE(i.updated_at, 0) "
+                "SELECT c.id, COALESCE(i.title, 'Conversación'), COALESCE(i.updated_at, 0), COALESCE(i.project, '') "
                 "FROM conversations c LEFT JOIN conversation_index i ON i.id=c.id "
                 "WHERE c.owner=? ORDER BY COALESCE(i.updated_at, 0) DESC, c.rowid DESC", (owner,)
             ).fetchall()
-        return [{"id": r[0], "title": r[1], "updated_at": r[2]} for r in rows]
+        return [{"id": r[0], "title": r[1], "updated_at": r[2], "project": r[3]} for r in rows if project is None or r[3] == project]
 
-    def put(self, conversation_id: str, history: list[dict[str, str]], owner: str = "admin") -> None:
+    def put(self, conversation_id: str, history: list[dict[str, str]], owner: str = "admin", project: str = "") -> None:
         payload = json.dumps(history, ensure_ascii=False)
         with self._lock:
             self._db.execute(
@@ -98,11 +101,27 @@ class ConversationStore:
             )
             title = next((m["content"][:80] for m in history if m.get("role") == "user"), "Conversación")
             self._db.execute(
-                "INSERT INTO conversation_index(id, title, updated_at, owner) VALUES(?, ?, ?, ?) "
+                "INSERT INTO conversation_index(id, title, updated_at, owner, project) VALUES(?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at WHERE conversation_index.owner=excluded.owner",
-                (conversation_id, title, int(time.time()), owner),
+                (conversation_id, title, int(time.time()), owner, project),
             )
             self._db.commit()
+
+    def conversation_project(self, conversation_id: str, owner: str = "admin") -> str | None:
+        row = self._db.execute(
+            "SELECT i.project FROM conversation_index i JOIN conversations c ON c.id=i.id "
+            "WHERE i.id=? AND c.owner=? AND i.owner=?", (conversation_id, owner, owner)
+        ).fetchone()
+        return row[0] if row else None
+
+    def move_conversation(self, conversation_id: str, project: str, owner: str = "admin") -> bool:
+        with self._lock:
+            cursor = self._db.execute(
+                "UPDATE conversation_index SET project=? WHERE id=? AND owner=? "
+                "AND EXISTS(SELECT 1 FROM conversations WHERE id=? AND owner=?)",
+                (project, conversation_id, owner, conversation_id, owner))
+            self._db.commit()
+            return cursor.rowcount > 0
 
     def delete(self, conversation_id: str, owner: str = "admin") -> bool:
         with self._lock:
@@ -111,13 +130,13 @@ class ConversationStore:
             self._db.commit()
         return cursor.rowcount > 0
 
-    def search_conversations(self, query: str, owner: str = "admin", limit: int = 25) -> list[dict]:
+    def search_conversations(self, query: str, owner: str = "admin", limit: int = 25, project: str | None = None) -> list[dict]:
         """Owner-scoped literal text search; never sends conversation content to a model."""
         needle = query.strip().casefold()
         if len(needle) < 2:
             return []
         matches = []
-        for info in self.list_conversations(owner):
+        for info in self.list_conversations(owner, project):
             history = self.get(info["id"], owner) or []
             found = next((m["content"] for m in history
                           if needle in m.get("content", "").casefold()), None)
