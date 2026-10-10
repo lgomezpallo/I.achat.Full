@@ -50,12 +50,12 @@ header{height:62px;min-height:62px;display:flex;align-items:center;justify-conte
 var conversationId=null,busy=false,activeUser=null;
 function activeProject(){return (document.getElementById('projectScope').value||'').trim().slice(0,60)}
 document.getElementById('projectScope').value=localStorage.getItem('iachat.activeProject')||'';
-document.getElementById('projectScope').addEventListener('change',function(){localStorage.setItem('iachat.activeProject',activeProject())});
+document.getElementById('projectScope').addEventListener('change',function(){localStorage.setItem('iachat.activeProject',activeProject());reset();document.getElementById('historySearch').value='';document.getElementById('historySearchStatus').textContent='';syncHistory().catch(function(){});});
 
 var messages=document.getElementById('messages'),input=document.getElementById('input'),drawer=document.getElementById('drawer');
 var ids=[];try{ids=JSON.parse(localStorage.getItem('iachat.history.'+(activeUser||'admin'))||'[]');if(!Array.isArray(ids))ids=[]}catch(e){ids=[]}
 function saveIds(){localStorage.setItem('iachat.history.'+(activeUser||'admin'),JSON.stringify(ids.slice(0,80)))}
-async function syncHistory(){var r=await fetch('/api/conversations');if(r.status===401){showLogin();return false}if(!r.ok)throw Error('No se pudo cargar el historial');var d=await r.json();ids=d.conversations||[];saveIds();renderHistory();return true}
+async function syncHistory(){var r=await fetch('/api/conversations?project='+encodeURIComponent(activeProject()));if(r.status===401){showLogin();return false}if(!r.ok)throw Error('No se pudo cargar el historial');var d=await r.json();ids=d.conversations||[];saveIds();renderHistory();return true}
 
 /* Markdown is rendered with DOM text nodes, never by injecting model HTML. */
 function inlineMd(parent,value){
@@ -118,7 +118,7 @@ function renderMarkdown(target,value){
 
 function add(role,text,error){document.getElementById('empty')?.remove();var e=document.createElement('div');e.className='msg '+role+(error?' error':'');if(role==='assistant'&&!error)renderMarkdown(e,text);else e.textContent=text;messages.appendChild(e);messages.scrollTop=messages.scrollHeight;return e}
 function reset(){conversationId=null;messages.innerHTML='<div class="empty" id="empty">¿En qué te puedo ayudar?</div>';input.value='';drawer.classList.remove('open');}
-function renderHistory(){var list=document.getElementById('historyList');list.replaceChildren();ids.forEach(function(item){var wrap=document.createElement('div');wrap.style.cssText='display:flex;align-items:center;gap:4px';var b=document.createElement('button');b.className='history-item';b.style.flex='1';b.textContent=item.title||'Conversación';b.onclick=function(){openConversation(item.id)};var del=document.createElement('button');del.textContent='×';del.title='Borrar conversación';del.setAttribute('aria-label','Borrar conversación');del.style.cssText='background:transparent;padding:10px';del.onclick=async function(){if(!confirm('¿Borrar esta conversación?'))return;var r=await fetch('/api/conversations/'+encodeURIComponent(item.id),{method:'DELETE'});if(r.ok){if(conversationId===item.id)reset();await syncHistory()}};wrap.append(b,del);list.appendChild(wrap)})}
+function renderHistory(){var list=document.getElementById('historyList');list.replaceChildren();ids.forEach(function(item){var wrap=document.createElement('div');wrap.style.cssText='display:flex;align-items:center;gap:4px';var b=document.createElement('button');b.className='history-item';b.style.flex='1';b.textContent=item.title||'Conversación';b.onclick=function(){openConversation(item.id)};var del=document.createElement('button');del.textContent='×';del.title='Borrar conversación';del.setAttribute('aria-label','Borrar conversación');del.style.cssText='background:transparent;padding:10px';del.onclick=async function(){if(!confirm('¿Borrar esta conversación?'))return;var r=await fetch('/api/conversations/'+encodeURIComponent(item.id),{method:'DELETE'});if(r.ok){if(conversationId===item.id)reset();await syncHistory()}};var move=document.createElement('button');move.textContent='⇄';move.title='Mover conversación a otro proyecto';move.setAttribute('aria-label','Mover conversación');move.style.cssText='background:transparent;padding:10px';move.onclick=async function(){var value=prompt('Mover a proyecto (vacío = General)',item.project||'');if(value===null)return;value=value.trim();if(value.length>60||!/^[\p{L}\p{N}_ -]*$/u.test(value)){alert('Nombre de proyecto no válido');return}var resp=await fetch('/api/conversations/'+encodeURIComponent(item.id)+'/project',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({project:value})});if(resp.ok){if(conversationId===item.id)reset();await syncHistory()}else alert('No se pudo mover la conversación')};wrap.append(b,move,del);list.appendChild(wrap)})}
 var searchTimer, searchSequence=0;
 document.getElementById('historySearch').addEventListener('input',function(){
  var term=this.value.trim(), sequence=++searchSequence;
@@ -127,7 +127,7 @@ document.getElementById('historySearch').addEventListener('input',function(){
  document.getElementById('historySearchStatus').textContent='Buscando…';
  searchTimer=setTimeout(async function(){
   try{
-   var response=await fetch('/api/conversations/search?q='+encodeURIComponent(term));
+   var response=await fetch('/api/conversations/search?q='+encodeURIComponent(term)+'&project='+encodeURIComponent(activeProject()));
    if(!response.ok)throw Error('Error al buscar');
    var data=await response.json(), matches=data.matches||[];
    if(sequence!==searchSequence)return;
@@ -171,7 +171,7 @@ if(oversized){alert('El archivo "'+oversized.name+'" pesa '+(oversized.size/1000
 var invalid=files.find(f=>!['.txt','.md','.pdf'].some(ext=>f.name.toLowerCase().endsWith(ext)));
 if(invalid){alert('El archivo "'+invalid.name+'" no es TXT, MD ni PDF.');return}
 busy=true;input.value='';add('user',text+(files.length?'\nAdjuntos: '+files.map(f=>f.name).join(', '):''));var waiting=add('assistant','Pensando…');var payload={text:text,project:activeProject()};if(conversationId)payload.conversation_id=conversationId;
-try{payload.attachments=await Promise.all(files.map(async function(f){return {name:f.name,content_base64:await fileBase64(f)}}));var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var d=await r.json();waiting.remove();if(!r.ok){input.value=text;add('assistant',d.detail||'No se pudo enviar. Podés reintentarlo.',true);if(r.status===401)showLogin();return}fileInput.value='';document.getElementById('selectedFiles').textContent='';conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55)});saveIds();syncHistory().catch(function(){});add('assistant',d.answer)}
+try{payload.attachments=await Promise.all(files.map(async function(f){return {name:f.name,content_base64:await fileBase64(f)}}));var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var d=await r.json();waiting.remove();if(!r.ok){input.value=text;add('assistant',d.detail||'No se pudo enviar. Podés reintentarlo.',true);if(r.status===401)showLogin();return}fileInput.value='';document.getElementById('selectedFiles').textContent='';conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55),project:activeProject()});saveIds();syncHistory().catch(function(){});add('assistant',d.answer)}
 catch(err){waiting.remove();input.value=text;add('assistant','No hay conexión. El mensaje sigue en la caja para reintentar.',true)}finally{busy=false}};
 input.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('form').requestSubmit()}});
 init();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
