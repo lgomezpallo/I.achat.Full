@@ -23,11 +23,14 @@ class RouterFirstBackend:
             "del usuario, salvo que pida explícitamente otro idioma. No cambies de "
             "idioma porque cambie el proveedor o el modelo."
         )
-        context = language_guidance + "\n" + "\n".join(
-            f"{item['role']}: {item['content']}"
+        context = language_guidance + ("\n" + "\n".join(
+            item["content"] for item in messages[:-1] if item.get("role") == "system"
+        ) if any(item.get("role") == "system" for item in messages[:-1]) else "")
+        conversation = [
+            {"role": item["role"], "content": item["content"]}
             for item in messages[:-1]
-            if item.get("role") in ("user", "assistant", "system")
-        )
+            if item.get("role") in ("user", "assistant") and item.get("content")
+        ]
         # Render Free can cold-start after idle. Retry gateway errors only;
         # no fallback to a provider and never retry authentication failures.
         for attempt in range(2):
@@ -38,6 +41,7 @@ class RouterFirstBackend:
                     json={
                         "task": messages[-1]["content"],
                         "context": context,
+                        "conversation": conversation,
                         "required_capabilities": ["chat"],
                         "application_name": "iachat",
                         # Router decides automatically whether decomposition is useful.
