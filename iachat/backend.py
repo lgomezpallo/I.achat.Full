@@ -16,8 +16,7 @@ class RouterFirstBackend:
         token = (self.token if self.token is not None else os.getenv("ROUTER_TOKEN", "")).strip()
         if not url or not token:
             raise RuntimeError("router_not_configured")
-        context = "\n".join(
-            f"{item['role']}: {item['content']}"
+        # Keep the user-facing language stable even when Router changes models.\n        # This is guidance, not a guarantee: end-to-end tests still need to verify output.\n        language_guidance = (\n            "Instrucción de IAchat: respondé en el mismo idioma que el último mensaje "\n            "del usuario, salvo que pida explícitamente otro idioma. No cambies de "\n            "idioma porque cambie el proveedor o el modelo."\n        )\n        context = language_guidance + "\\n" + "\n".join(\n            f"{item['role']}: {item['content']}"
             for item in messages[:-1]
             if item.get("role") in ("user", "assistant", "system")
         )
