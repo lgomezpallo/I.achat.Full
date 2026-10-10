@@ -252,7 +252,7 @@ def chat(message: MessageInput, request: Request):
             "", match.group(1).strip(), flags=re.IGNORECASE,
         ).strip().rstrip(".")
         if 0 < len(content) <= 1000:
-            existing = any(m["content"].casefold() == content.casefold() for m in store.list_memories(owner))
+            existing = any(m["content"].casefold() == content.casefold() for m in store.list_memories(owner, message.project.strip()))
             if not existing:
                 store.save_memory(str(uuid4()), content, owner, message.project.strip())
             answer = ("Ya tenía esa información guardada." if existing
@@ -361,6 +361,7 @@ def delete_memory(memory_id: str, request: Request):
 
 class SuggestMemoriesInput(BaseModel):
     conversation_id: str
+    project: str = Field(default="", max_length=60, pattern=r"^[\w\- ]*$")
 
 @app.post("/api/memories/suggest")
 def suggest_memories(payload: SuggestMemoriesInput, request: Request):
@@ -407,7 +408,7 @@ def suggest_memories(payload: SuggestMemoriesInput, request: Request):
     def normalized_memory(value: str) -> str:
         return re.sub(r"\s+", " ", value).strip().rstrip(" .!¡?¿").casefold()
 
-    existing = {normalized_memory(m["content"]) for m in store.list_memories(owner)}
+    existing = {normalized_memory(m["content"]) for m in store.list_memories(owner, payload.project.strip())}
     cleaned = []
     seen = set(existing)
     for item in suggestions[:3]:
