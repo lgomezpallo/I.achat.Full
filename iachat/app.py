@@ -136,22 +136,7 @@ def get_backend():
     from .backend import RouterFirstBackend
     return RouterFirstBackend()
 
-@app.on_event("startup")
-def check_router_on_startup():
-    # Probe the real application path without exposing credentials or response content.
-    import threading
-    def probe():
-        try:
-            get_backend().answer([{"role": "user", "content": "Respondé únicamente OK."}])
-            print("IACHAT_ROUTER_PROBE status=ok", flush=True)
-        except Exception as exc:
-            reason = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
-            if reason not in {"router_not_configured", "router_auth_rejected", "router_unavailable",
-                              "router_http_error", "router_invalid_response", "router_failed"} and not (reason.startswith("router_http_") and reason[12:].isdigit()):
-                reason = "unexpected_error"
-            print(f"IACHAT_ROUTER_PROBE status=failed reason={reason}", flush=True)
-    threading.Thread(target=probe, daemon=True).start()
-
+# Startup must not spend inference quota. /api/router/status checks connectivity on demand.
 @app.get("/", response_class=HTMLResponse)
 def home():
     return HTML
@@ -281,6 +266,29 @@ def chat(message: MessageInput, request: Request):
     updated = [*history, {"role": "user", "content": message.text}, {"role": "assistant", "content": answer}]
     store.put(conversation_id, updated, owner)
     return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
+
+@app.get("/api/export")
+def export_my_data(request: Request):
+    """Private, user-scoped export. No LLM calls and no credentials."""
+    from datetime import datetime, timezone
+    owner = _user(request)
+    items = store.list_conversations(owner)
+    conversations = [
+        {"id": item["id"], "title": item["title"], "updated_at": item["updated_at"],
+         "history": store.get(item["id"], owner) or []}
+        for item in items
+    ]
+    data = {
+        "format": "iachat-export-v1",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "username": owner,
+        "conversations": conversations,
+        "memories": store.list_memories(owner),
+    }
+    return JSONResponse(data, headers={
+        "Content-Disposition": 'attachment; filename="iachat-export.json"',
+        "Cache-Control": "no-store",
+    })
 
 @app.get("/api/conversations")
 def list_conversations(request: Request):
