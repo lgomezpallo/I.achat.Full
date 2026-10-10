@@ -45,3 +45,20 @@ def test_suggestions_with_no_user_statements_do_not_call_model(monkeypatch):
     )
     assert response.status_code == 200
     assert response.json() == {"suggestions": []}
+
+
+def test_duplicate_suggestions_ignore_spacing_case_and_punctuation(monkeypatch):
+    module.store = ConversationStore(":memory:")
+    module.store.put("example", [{"role": "user", "content": "Prefiero respuestas breves"}])
+    module.store.save_memory("saved", "Prefiero respuestas breves.", "admin")
+    monkeypatch.setattr(module, "_signed_user", lambda cookie: "admin")
+
+    class Backend:
+        def answer(self, messages):
+            return '["  PREFIERO   respuestas breves! ", "Otra preferencia", "otra  preferencia."]'
+
+    monkeypatch.setattr(module, "get_backend", lambda: Backend())
+    result = TestClient(module.app).post("/api/memories/suggest", json={"conversation_id": "example"})
+    assert result.status_code == 200
+    assert result.json()["suggestions"] == ["Otra preferencia"]
+    assert len(module.store.list_memories()) == 1
