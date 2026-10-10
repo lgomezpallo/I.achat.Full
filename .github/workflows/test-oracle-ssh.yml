@@ -34,6 +34,8 @@ jobs:
           ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > /tmp/oracle-hostkey
           test -s /tmp/oracle-hostkey || { echo "::error::SSH no responde"; exit 1; }
           actual="$(ssh-keygen -lf /tmp/oracle-hostkey -E sha256 | awk '{print $2}' | head -1)"
+          echo "Huella ED25519 observada ahora: $actual"
+          echo "Huella ED25519 registrada antes: $expected"
           if [[ "$actual" != "$expected" ]]; then
             echo "::error::La huella del servidor no coincide con la primera observación. No se intentó login."
             exit 1
