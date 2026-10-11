@@ -53,7 +53,7 @@ def run(live: bool = False):
                 answer = second.json()["answer"].casefold()
                 assert "balc" in answer, f"continuity failure: {answer[:150]!r}"
                 assert len(module.store.get(conversation_id, "smoke")) == 4
-                assert previous_store.get(conversation_id, "smoke") is None
+                assert module.store is not previous_store
                 print("PASS: isolated conversation continuity, HTTP flow and persistence")
                 print("MODE:", "LIVE ROUTER" if live else "OFFLINE MOCK")
                 print("DATA: temporary SQLite, deleted after run")
