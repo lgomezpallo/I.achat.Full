@@ -27,7 +27,7 @@ def related_excerpts(history: list[dict[str, str]], question: str,
                      max_items: int = 3, max_chars: int = 1800) -> list[str]:
     if len(question) < 8 or max_chars < 1:
         return []
-    terms = {_stem(w) for w in re.findall(r"[^\\W\\d_]{4,}", question.casefold(), re.UNICODE)
+    terms = {_stem(w) for w in re.findall(r"[^\W\d_]{4,}", question.casefold(), re.UNICODE)
              if w not in _STOP}
     if not terms:
         return []
@@ -38,7 +38,7 @@ def related_excerpts(history: list[dict[str, str]], question: str,
         text = msg.get("content", "")
         if not isinstance(text, str) or len(text) > 6000:
             continue
-        words = {_stem(w) for w in re.findall(r"[^\\W\\d_]{4,}", text.casefold(), re.UNICODE)}
+        words = {_stem(w) for w in re.findall(r"[^\W\d_]{4,}", text.casefold(), re.UNICODE)}
         score = len(terms & words)
         if score:
             matches.append((score, i, text))
