@@ -53,3 +53,15 @@ def test_long_message_excerpt_is_centered_near_relevant_mention():
     assert len(found) == 1
     assert "coche azul quedó" in found[0]
     assert len(found[0].split(": ", 1)[1]) <= 200
+
+
+def test_multitopic_question_rejects_weak_unrelated_overlap():
+    history = [{"role": "user", "content": "Me gusta el cine de misterio."}]
+    assert related_excerpts(history, "¿Qué bicicleta cine auto compré?") == []
+
+
+def test_multitopic_question_retains_two_specific_matches():
+    history = [{"role": "user", "content": "El auto azul quedó en el garaje."}]
+    found = related_excerpts(history, "¿Dónde quedó mi coche azul estacionado?")
+    assert len(found) == 1
+    assert "auto azul" in found[0]
