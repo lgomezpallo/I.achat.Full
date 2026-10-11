@@ -30,3 +30,33 @@ def test_recent_context_no_partial_messages():
         {"role": "assistant", "content": "final"},
     ]
     assert recent_context(history, budget=12) == []
+
+
+def test_chat_warns_router_when_older_history_is_omitted(monkeypatch):
+    import iachat.app as module
+    from iachat.store import ConversationStore
+    from fastapi.testclient import TestClient
+
+    module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(module, "_signed_user", lambda cookie: "admin")
+    seen = []
+
+    class Backend:
+        def answer(self, messages):
+            seen.append(messages)
+            return "Entendido"
+
+    monkeypatch.setattr(module, "get_backend", lambda: Backend())
+    # An oversized previous turn must not be passed to the model, nor deleted.
+    original = [
+        {"role": "user", "content": "anterior " * 6000},
+        {"role": "assistant", "content": "respuesta antigua"},
+    ]
+    module.store.put("long-chat", original, "admin", "")
+    response = TestClient(module.app).post(
+        "/api/chat", json={"conversation_id": "long-chat", "text": "¿Recordás el dato?"}
+    )
+    assert response.status_code == 200
+    assert any("mensajes anteriores" in m["content"] for m in seen[0] if m["role"] == "system")
+    assert all("anterior " not in m["content"] for m in seen[0] if m["role"] == "user")
+    assert module.store.get("long-chat", "admin")[0] == original[0]
