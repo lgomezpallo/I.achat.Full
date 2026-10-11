@@ -72,7 +72,7 @@ def related_excerpts(history: list[dict[str, str]], question: str,
         per_item = max(1, max_chars // max(1, max_items))
         limit = min(len(text), 500, remaining, per_item)
         # Anchor the excerpt around a relevant word, not just the beginning.
-        tokens = list(re.finditer(r"[^\\W\\d_]{4,}", text, re.UNICODE))
+        tokens = list(re.finditer(r"[^\W\d_]{4,}", text, re.UNICODE))
         hits = [m.start() for m in tokens if _concept(m.group()) in terms]
         if hits and len(text) > limit:
             center = hits[0]
