@@ -353,6 +353,16 @@ def list_memories(request: Request):
     owner = _user(request)
     return {"memories": store.list_memories(owner)}
 
+@app.get("/api/memories/automatic-log")
+def automatic_memory_log(request: Request):
+    return {"events": store.list_automatic_memory_log(_user(request))}
+
+@app.post("/api/memories/automatic-log/{event_id}/undo")
+def undo_automatic_memory(event_id: str, request: Request):
+    if not store.undo_automatic_memory(event_id, _user(request)):
+        raise HTTPException(409, "memory_changed_or_event_not_found")
+    return {"undone": True}
+
 @app.post("/api/memories", status_code=201)
 def create_memory(payload: MemoryInput, request: Request):
     owner = _user(request)
