@@ -199,13 +199,18 @@ def test_memory_suggestions_require_review_and_do_not_auto_save(monkeypatch):
             return "Respuesta"
     monkeypatch.setattr(module, "get_backend", lambda: ConversationBackend())
     cid = client.post("/api/chat", json={"text":"Prefiero respuestas breves"}).json()["conversation_id"]
+    # The chat automatically captures the explicit preference. Suggestions must
+    # exclude it and must never save the remaining proposals without approval.
+    before = client.get("/api/memories").json()["memories"]
+    assert len(before) == 1
+    assert before[0]["content"] == "Prefiero respuestas breves"
     result = client.post("/api/memories/suggest", json={"conversation_id":cid})
     assert result.status_code == 200
-    assert result.json()["suggestions"] == ["Prefiere respuestas breves", "Usa IAchat en el teléfono"]
-    assert client.get("/api/memories").json()["memories"] == []
+    assert result.json()["suggestions"] == ["Usa IAchat en el teléfono"]
+    assert client.get("/api/memories").json()["memories"] == before
     assert client.post("/api/memories",json={"content":result.json()["suggestions"][0]}).status_code == 201
     second = client.post("/api/memories/suggest", json={"conversation_id":cid})
-    assert second.json()["suggestions"] == ["Usa IAchat en el teléfono"]
+    assert second.json()["suggestions"] == []
 
 def test_memory_suggestions_reject_invalid_router_output(monkeypatch):
     module.store = ConversationStore(":memory:")
