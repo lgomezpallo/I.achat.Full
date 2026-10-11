@@ -45,3 +45,11 @@ def test_simple_synonyms_recover_older_message_without_inventing_it():
 def test_unrelated_concepts_do_not_match():
     history = [{"role": "user", "content": "El teléfono quedó cargando."}]
     assert related_excerpts(history, "¿Dónde guardé el coche?") == []
+
+
+def test_long_message_excerpt_is_centered_near_relevant_mention():
+    history = [{"role": "user", "content": "relleno " * 100 + "Mi coche azul quedó en el estacionamiento."}]
+    found = related_excerpts(history, "¿Dónde quedó el auto azul?", max_chars=200)
+    assert len(found) == 1
+    assert "coche azul quedó" in found[0]
+    assert len(found[0].split(": ", 1)[1]) <= 200
