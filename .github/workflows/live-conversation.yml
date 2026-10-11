@@ -1,0 +1,36 @@
+name: IAchat conversación real aislada
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-conversation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: oracle-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: desarrollo/iachat-full
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - name: Verificar credenciales disponibles sin mostrarlas
+        env:
+          ROUTER_URL: ${{ secrets.IACHAT_SMOKE_ROUTER_URL }}
+          ROUTER_TOKEN: ${{ secrets.IACHAT_SMOKE_ROUTER_TOKEN }}
+        run: |
+          test -n "$ROUTER_URL" && test -n "$ROUTER_TOKEN" || {
+            echo "::error::No se configuró el acceso separado de pruebas reales a Router."
+            exit 1
+          }
+      - name: Ejecutar conversaciones aisladas por Router real
+        env:
+          IACHAT_SMOKE_LIVE: "1"
+          ROUTER_URL: ${{ secrets.IACHAT_SMOKE_ROUTER_URL }}
+          ROUTER_TOKEN: ${{ secrets.IACHAT_SMOKE_ROUTER_TOKEN }}
+        run: python scripts/smoke_conversation.py
