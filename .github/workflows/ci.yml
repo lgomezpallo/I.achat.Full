@@ -16,11 +16,4 @@ jobs:
         run: |
           set -o pipefail
           pytest -q 2>&1 | tee pytest-result.txt
-      - name: Conservar diagnóstico cuando fallan las pruebas
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: iachat-pytest-diagnostico
-          path: pytest-result.txt
-          retention-days: 3
       - run: docker build -t iachat-ci .
