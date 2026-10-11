@@ -45,8 +45,8 @@ def learn(store, owner: str, text: str, project: str = "") -> bool:
     existing = {normalize(m["content"]) for m in store.list_memories(owner, project)}
     if normalize(value) in existing:
         return False
-    # Conflicting likes/dislikes must not silently coexist. Defer resolving
-    # contradictions until an auditable replacement workflow exists.
+    # Replace only a directly opposing preference with the exact same subject.
+    # Changes to unrelated or manually edited memories remain untouched.
     def sentiment_subject(item: str) -> tuple[str, str] | None:
         found = re.match(r"^(no me gustan?|me gustan?)\s+(.+)$", normalize(item))
         if not found:
@@ -58,6 +58,9 @@ def learn(store, owner: str, text: str, project: str = "") -> bool:
         for memory in store.list_memories(owner, project):
             previous = sentiment_subject(memory["content"])
             if previous and previous[1] == proposed[1] and previous[0] != proposed[0]:
-                return False
+                if memory["project"] != project:
+                    return False  # never overwrite general memories from a project
+                return store.replace_automatic_memory(
+                    memory["id"], memory["content"], value, owner, project)
     store.save_automatic_memory(str(uuid4()), value, owner, project)
     return True
