@@ -86,6 +86,21 @@ def run(live: bool = False):
                     assert other.json()["answer"] == "No lo sé."
                 assert other.json()["conversation_id"] != conversation_id
                 assert len(module.store.get(conversation_id, "smoke")) == 6
+                # Cross-conversation explicit memory test: user saves a fact,
+                # then asks in a fresh chat. This tests the actual persisted
+                # memory injection path, independently of transcript history.
+                saved = client.post("/api/chat", json={
+                    "text": "Recordá que mi palabra clave de prueba es luciérnaga."
+                })
+                assert saved.status_code == 200
+                remembered = client.post("/api/chat", json={
+                    "text": "¿Cuál es mi palabra clave de prueba? Respondé sólo la palabra."
+                })
+                assert remembered.status_code == 200
+                if live:
+                    print("MEMORY_ANSWER:", repr(remembered.json()["answer"][:300]), flush=True)
+                assert "luci" in remembered.json()["answer"].casefold(), "saved memory was not recalled"
+                assert remembered.json()["conversation_id"] != saved.json()["conversation_id"]
                 assert module.store is not previous_store
                 print("PASS: isolated continuity, unknown facts, conversation isolation and persistence")
                 print("MODE:", "LIVE ROUTER" if live else "OFFLINE MOCK")
