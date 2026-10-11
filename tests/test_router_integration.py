@@ -89,3 +89,28 @@ def test_long_short_turn_history_respects_actual_router_request_contract(monkeyp
     assert len(captured) == 1
     assert len(module.store.get("many-turns", "admin")) == 242
     assert "mensajes anteriores" in captured[0]["context"]
+
+
+def test_router_auth_failure_does_not_corrupt_stored_chat(monkeypatch, tmp_path):
+    module.store = ConversationStore(str(tmp_path / "router-failure.db"))
+    module.store.put("existing", [
+        {"role": "user", "content": "Mi bicicleta es verde."},
+        {"role": "assistant", "content": "Entendido."},
+    ], "admin", "")
+    monkeypatch.setattr(module, "get_backend", lambda: RouterBackend("http://router:8010", token="testing"))
+
+    class Unauthorized:
+        status_code = 401
+
+    def reject_request(url, **kwargs):
+        assert url == "http://router:8010/route"
+        return Unauthorized()
+
+    monkeypatch.setattr("iachat.backend.httpx.post", reject_request)
+    before = module.store.get("existing", "admin")
+    response = TestClient(app).post(
+        "/api/chat", json={"conversation_id": "existing", "text": "¿De qué color es?"}
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "router_auth_rejected"
+    assert module.store.get("existing", "admin") == before
