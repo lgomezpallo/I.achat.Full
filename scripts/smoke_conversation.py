@@ -73,7 +73,15 @@ def run(live: bool = False):
                 assert other.status_code == 200
                 other_answer = other.json()["answer"].casefold()
                 if live:
-                    assert "balc" not in other_answer, "information leaked from another conversation"
+                    # Synthetic data only. Print precisely what the model said, to
+                    # distinguish hypothetical examples from claimed user memory.
+                    print("ISOLATION_ANSWER:", repr(other_answer[:700]), flush=True)
+                    print("ISOLATION_NEW_CHAT:", other.json()["conversation_id"] != conversation_id, flush=True)
+                    assert not any(
+                        phrase in other_answer for phrase in
+                        ("la guardás en el balcón", "la guardas en el balcón",
+                         "la guardo en el balcón", "tu bicicleta está en el balcón")
+                    ), "model asserts an unprovided location in a separate conversation"
                 else:
                     assert other.json()["answer"] == "No lo sé."
                 assert other.json()["conversation_id"] != conversation_id
