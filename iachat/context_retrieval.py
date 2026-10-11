@@ -23,11 +23,31 @@ _STOP = {"que","con","para","como","una","uno","los","las","del","por","qué",
          "podés","puedes","hablamos","dijimos","antes","después","ahora"}
 
 
+# Small transparent synonym map; this is not an embedding model.
+# A hit must still point to literal text in the original conversation.
+_CONCEPTS = (
+    {"auto", "coche", "automovil", "vehiculo"},
+    {"celular", "telefono", "movil", "smartphone"},
+    {"trabajo", "laburo", "empleo"},
+    {"pelicula", "film", "peli"},
+    {"computadora", "ordenador", "pc"},
+    {"dinero", "plata"},
+)
+
+
+def _concept(word: str) -> str:
+    stem = _stem(word)
+    for index, group in enumerate(_CONCEPTS):
+        if stem in {_stem(item) for item in group}:
+            return "concept:" + str(index)
+    return stem
+
+
 def related_excerpts(history: list[dict[str, str]], question: str,
                      max_items: int = 3, max_chars: int = 1800) -> list[str]:
     if len(question) < 8 or max_chars < 1:
         return []
-    terms = {_stem(w) for w in re.findall(r"[^\W\d_]{4,}", question.casefold(), re.UNICODE)
+    terms = {_concept(w) for w in re.findall(r"[^\W\d_]{4,}", question.casefold(), re.UNICODE)
              if w not in _STOP}
     if not terms:
         return []
@@ -38,7 +58,7 @@ def related_excerpts(history: list[dict[str, str]], question: str,
         text = msg.get("content", "")
         if not isinstance(text, str) or len(text) > 6000:
             continue
-        words = {_stem(w) for w in re.findall(r"[^\W\d_]{4,}", text.casefold(), re.UNICODE)}
+        words = {_concept(w) for w in re.findall(r"[^\W\d_]{4,}", text.casefold(), re.UNICODE)}
         score = len(terms & words)
         if score:
             matches.append((score, i, text))
@@ -50,7 +70,16 @@ def related_excerpts(history: list[dict[str, str]], question: str,
             break
         # Reserve space for other matches instead of letting the first consume the budget.
         per_item = max(1, max_chars // max(1, max_items))
-        excerpt = text[:min(len(text), 500, remaining, per_item)]
+        limit = min(len(text), 500, remaining, per_item)
+        # Anchor the excerpt around a relevant word, not just the beginning.
+        tokens = list(re.finditer(r"[^\W\d_]{4,}", text, re.UNICODE))
+        hits = [m.start() for m in tokens if _concept(m.group()) in terms]
+        if hits and len(text) > limit:
+            center = hits[0]
+            start = max(0, min(center - limit // 3, len(text) - limit))
+        else:
+            start = 0
+        excerpt = text[start:start + limit]
         if excerpt:
             chosen.append((i, excerpt))
             remaining -= len(excerpt)
