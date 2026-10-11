@@ -45,5 +45,19 @@ def learn(store, owner: str, text: str, project: str = "") -> bool:
     existing = {normalize(m["content"]) for m in store.list_memories(owner, project)}
     if normalize(value) in existing:
         return False
+    # Conflicting likes/dislikes must not silently coexist. Defer resolving
+    # contradictions until an auditable replacement workflow exists.
+    def sentiment_subject(item: str) -> tuple[str, str] | None:
+        found = re.match(r"^(no me gustan?|me gustan?)\\s+(.+)$", normalize(item))
+        if not found:
+            return None
+        sentiment = "negative" if found.group(1).startswith("no ") else "positive"
+        return sentiment, found.group(2).strip()
+    proposed = sentiment_subject(value)
+    if proposed:
+        for memory in store.list_memories(owner, project):
+            previous = sentiment_subject(memory["content"])
+            if previous and previous[1] == proposed[1] and previous[0] != proposed[0]:
+                return False
     store.save_automatic_memory(str(uuid4()), value, owner, project)
     return True
