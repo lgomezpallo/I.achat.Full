@@ -20,6 +20,8 @@ class FakeBackend:
     def answer(self, messages):
         user_text = messages[-1]["content"]
         context = " ".join(m["content"] for m in messages[:-1] if m["role"] == "user")
+        if "palabra clave de prueba" in user_text.lower():
+            return "luciérnaga" if any("luciérnaga" in m.get("content", "").lower() for m in messages if m["role"] == "system") else "No lo sé."
         if "marca" in user_text.lower():
             return "No me dijiste la marca." if "marca" not in context.lower() else "Ya mencionaste una marca."
         if "bicicleta" in user_text.lower():
