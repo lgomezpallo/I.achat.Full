@@ -26,6 +26,12 @@ class ConversationStore:
         index_cols = {c[1] for c in self._db.execute("PRAGMA table_info(conversation_index)")}
         if "project" not in index_cols:
             self._db.execute("ALTER TABLE conversation_index ADD COLUMN project TEXT NOT NULL DEFAULT ''")
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS automatic_memory_log ("
+            "id TEXT PRIMARY KEY, memory_id TEXT NOT NULL, owner TEXT NOT NULL, "
+            "project TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL, "
+            "undone INTEGER NOT NULL DEFAULT 0)"
+        )
         self._db.commit()
         self._lock = Lock()
 
@@ -164,6 +170,44 @@ class ConversationStore:
                 (memory_id, content, int(time.time()), owner, project),
             )
             self._db.commit()
+
+    def save_automatic_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> None:
+        """Atomically save a new automatically learned memory and its audit entry."""
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO memories(id,content,updated_at,owner,project) VALUES(?,?,?,?,?)",
+                (memory_id, content, int(time.time()), owner, project))
+            self._db.execute(
+                "INSERT INTO automatic_memory_log(id,memory_id,owner,project,content,created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (memory_id, memory_id, owner, project, content, int(time.time())))
+            self._db.commit()
+
+    def list_automatic_memory_log(self, owner: str = "admin", limit: int = 50) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, memory_id, project, content, created_at, undone "
+                "FROM automatic_memory_log WHERE owner=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (owner, limit)).fetchall()
+        return [{"id": row[0], "memory_id": row[1], "project": row[2],
+                 "content": row[3], "created_at": row[4], "undone": bool(row[5])} for row in rows]
+
+    def undo_automatic_memory(self, event_id: str, owner: str = "admin") -> bool:
+        """Undo only if the remembered text is unchanged; never delete a user's edit."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT memory_id,content FROM automatic_memory_log "
+                "WHERE id=? AND owner=? AND undone=0", (event_id, owner)).fetchone()
+            if row is None:
+                return False
+            current = self._db.execute(
+                "SELECT content FROM memories WHERE id=? AND owner=?", (row[0], owner)).fetchone()
+            if current is None or current[0] != row[1]:
+                return False
+            self._db.execute("DELETE FROM memories WHERE id=? AND owner=?", (row[0], owner))
+            self._db.execute("UPDATE automatic_memory_log SET undone=1 WHERE id=? AND owner=?", (event_id, owner))
+            self._db.commit()
+            return True
 
     def delete_memory(self, memory_id: str, owner: str = "admin") -> bool:
         with self._lock:
