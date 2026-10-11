@@ -12,7 +12,6 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from iachat import app as module
 from iachat.store import ConversationStore
 
 
@@ -29,11 +28,14 @@ class FakeBackend:
 
 
 def run(live: bool = False):
-    previous_store = module.store
-    previous_backend = module.get_backend
-    previous_signed_user = module._signed_user
     with tempfile.TemporaryDirectory(prefix="iachat-smoke-") as directory:
         database = Path(directory) / "isolated.sqlite"
+        old_db_setting = os.environ.get("IACHAT_DB")
+        os.environ["IACHAT_DB"] = str(database)
+        from iachat import app as module
+        previous_store = module.store
+        previous_backend = module.get_backend
+        previous_signed_user = module._signed_user
         module.store = ConversationStore(str(database))
         module.store.create_user("smoke", "temporary-only-password")
         module._signed_user = lambda cookie: "smoke"
@@ -84,6 +86,10 @@ def run(live: bool = False):
             module.store = previous_store
             module.get_backend = previous_backend
             module._signed_user = previous_signed_user
+            if old_db_setting is None:
+                os.environ.pop("IACHAT_DB", None)
+            else:
+                os.environ["IACHAT_DB"] = old_db_setting
 
 
 if __name__ == "__main__":
