@@ -5,6 +5,18 @@ conversation excerpts, not persistent facts or system instructions.
 """
 from __future__ import annotations
 import re
+import unicodedata
+
+
+def _stem(word: str) -> str:
+    """Lightweight matching for accents and simple Spanish plural forms."""
+    word = "".join(c for c in unicodedata.normalize("NFD", word.casefold())
+                   if unicodedata.category(c) != "Mn")
+    if len(word) >= 6 and word.endswith("es"):
+        return word[:-2]
+    if len(word) >= 5 and word.endswith("s"):
+        return word[:-1]
+    return word
 
 _STOP = {"que","con","para","como","una","uno","los","las","del","por","qué",
          "este","esta","eso","sobre","tengo","quiero","recordás","recuerdas",
