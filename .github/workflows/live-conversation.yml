@@ -61,3 +61,5 @@ jobs:
       - name: Remove local SSH material
         if: always()
         run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts /tmp/iachat-live-test.tar.gz
+
+# Branch deployment permission confirmed by isolated runner diagnostic.
