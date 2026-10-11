@@ -62,3 +62,19 @@ def test_undo_does_not_delete_edited_memory_or_other_users_data():
     store.save_memory(event["memory_id"], "Prefiero respuestas con ejemplos.", "admin")
     assert not store.undo_automatic_memory(event["id"], "admin")
     assert store.list_memories("admin")[0]["content"] == "Prefiero respuestas con ejemplos."
+
+
+def test_conflicting_preference_is_not_silently_saved():
+    store = ConversationStore(":memory:")
+    assert learn(store, "admin", "Me gustan las películas de misterio.", "Cine")
+    assert not learn(store, "admin", "No me gustan las películas de misterio.", "Cine")
+    assert len(store.list_memories("admin", "Cine")) == 1
+    assert store.list_memories("admin", "Cine")[0]["content"] == "Me gustan las películas de misterio"
+    assert len(store.list_automatic_memory_log("admin")) == 1
+
+
+def test_same_preference_different_project_is_allowed():
+    store = ConversationStore(":memory:")
+    assert learn(store, "admin", "Me gustan las películas de misterio.", "A")
+    assert learn(store, "admin", "No me gustan las películas de misterio.", "B")
+    assert len(store.list_memories("admin")) == 2
