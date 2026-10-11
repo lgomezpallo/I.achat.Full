@@ -27,3 +27,9 @@ def test_retrieval_is_bounded_and_requires_subject_terms():
     assert len(found) == 2
     assert sum(len(x.split(": ", 1)[1]) for x in found) <= 300
     assert related_excerpts(history, "¿Qué dijimos antes?") == []
+
+
+def test_retrieval_handles_accents_and_simple_plurals():
+    messages = [{"role": "user", "content": "Las películas de misterio me interesan."}]
+    found = related_excerpts(messages, "¿Qué película misteriosa mencioné?")
+    assert len(found) == 1
