@@ -64,13 +64,25 @@ def test_undo_does_not_delete_edited_memory_or_other_users_data():
     assert store.list_memories("admin")[0]["content"] == "Prefiero respuestas con ejemplos."
 
 
-def test_conflicting_preference_is_not_silently_saved():
+def test_conflicting_preference_replaces_and_can_be_undone():
     store = ConversationStore(":memory:")
     assert learn(store, "admin", "Me gustan las películas de misterio.", "Cine")
-    assert not learn(store, "admin", "No me gustan las películas de misterio.", "Cine")
-    assert len(store.list_memories("admin", "Cine")) == 1
+    assert learn(store, "admin", "No me gustan las películas de misterio.", "Cine")
+    memories = store.list_memories("admin", "Cine")
+    assert len(memories) == 1
+    assert memories[0]["content"] == "No me gustan las películas de misterio"
+    events = store.list_automatic_memory_log("admin")
+    assert len(events) == 2
+    assert events[0]["previous_content"] == "Me gustan las películas de misterio"
+    assert store.undo_automatic_memory(events[0]["id"], "admin")
     assert store.list_memories("admin", "Cine")[0]["content"] == "Me gustan las películas de misterio"
-    assert len(store.list_automatic_memory_log("admin")) == 1
+
+
+def test_manual_memory_is_not_replaced_automatically():
+    store = ConversationStore(":memory:")
+    store.save_memory("manual", "Me gustan las películas de misterio", "admin", "Cine")
+    assert not learn(store, "admin", "No me gustan las películas de misterio.", "Cine")
+    assert store.list_memories("admin", "Cine")[0]["content"] == "Me gustan las películas de misterio"
 
 
 def test_same_preference_different_project_is_allowed():
