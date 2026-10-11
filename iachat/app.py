@@ -433,7 +433,7 @@ def suggest_memories(payload: SuggestMemoriesInput, request: Request):
     if not isinstance(suggestions, list) or any(not isinstance(v, str) for v in suggestions):
         raise HTTPException(502, "invalid_memory_suggestions")
     def normalized_memory(value: str) -> str:
-        return re.sub(r"\s+", " ", value).strip().rstrip(" .!¡?¿").casefold()
+        return re.sub(r"^prefiero\b", "prefiere", re.sub(r"\s+", " ", value).strip().rstrip(" .!¡?¿").casefold())
 
     existing = {normalized_memory(m["content"]) for m in store.list_memories(owner, payload.project.strip())}
     cleaned = []
