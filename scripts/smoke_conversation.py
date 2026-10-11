@@ -59,13 +59,20 @@ def run(live: bool = False):
                     "text": "¿De qué marca es mi bicicleta?"
                 })
                 assert unknown.status_code == 200
-                if not live:
-                    assert "no me dijiste" in unknown.json()["answer"].casefold()
+                unknown_answer = unknown.json()["answer"].casefold()
+                if live:
+                    assert not any(x in unknown_answer for x in ("trek", "giant", "specialized", "venzo", "scott")), "invented bicycle brand"
+                    assert any(x in unknown_answer for x in ("no ", "nunca", "desconozco", "sin información", "no tengo")), "model failed to acknowledge unknown brand"
+                else:
+                    assert "no me dijiste" in unknown_answer
                 other = client.post("/api/chat", json={
                     "text": "¿Dónde guardo mi bicicleta?"
                 })
                 assert other.status_code == 200
-                if not live:
+                other_answer = other.json()["answer"].casefold()
+                if live:
+                    assert "balc" not in other_answer, "information leaked from another conversation"
+                else:
                     assert other.json()["answer"] == "No lo sé."
                 assert other.json()["conversation_id"] != conversation_id
                 assert len(module.store.get(conversation_id, "smoke")) == 6
