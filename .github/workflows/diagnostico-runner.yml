@@ -18,3 +18,5 @@ jobs:
     steps:
       - name: Confirmar autorización del entorno sin usar secretos
         run: echo "ENVIRONMENT_OK"
+
+# Re-run after authorizing the development branch in oracle-production.
