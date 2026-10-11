@@ -21,6 +21,8 @@ class FakeBackend:
     def answer(self, messages):
         user_text = messages[-1]["content"]
         context = " ".join(m["content"] for m in messages[:-1] if m["role"] == "user")
+        if "marca" in user_text.lower():
+            return "No me dijiste la marca." if "marca" not in context.lower() else "Ya mencionaste una marca."
         if "bicicleta" in user_text.lower():
             return "La bicicleta está en el balcón." if "balcón" in context else "No lo sé."
         return "Entendido."
@@ -52,9 +54,23 @@ def run(live: bool = False):
                 assert second.status_code == 200, f"follow-up HTTP {second.status_code}"
                 answer = second.json()["answer"].casefold()
                 assert "balc" in answer, f"continuity failure: {answer[:150]!r}"
-                assert len(module.store.get(conversation_id, "smoke")) == 4
+                unknown = client.post("/api/chat", json={
+                    "conversation_id": conversation_id,
+                    "text": "¿De qué marca es mi bicicleta?"
+                })
+                assert unknown.status_code == 200
+                if not live:
+                    assert "no me dijiste" in unknown.json()["answer"].casefold()
+                other = client.post("/api/chat", json={
+                    "text": "¿Dónde guardo mi bicicleta?"
+                })
+                assert other.status_code == 200
+                if not live:
+                    assert other.json()["answer"] == "No lo sé."
+                assert other.json()["conversation_id"] != conversation_id
+                assert len(module.store.get(conversation_id, "smoke")) == 6
                 assert module.store is not previous_store
-                print("PASS: isolated conversation continuity, HTTP flow and persistence")
+                print("PASS: isolated continuity, unknown facts, conversation isolation and persistence")
                 print("MODE:", "LIVE ROUTER" if live else "OFFLINE MOCK")
                 print("DATA: temporary SQLite, deleted after run")
         finally:
