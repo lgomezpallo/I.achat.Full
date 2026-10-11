@@ -39,3 +39,26 @@ def test_chat_auto_memory_does_not_use_assistant_content(monkeypatch):
     memories = module.store.list_memories("admin", "General")
     assert len(memories) == 1
     assert memories[0]["content"] == "Prefiero respuestas breves"
+
+
+def test_automatic_memory_has_reversible_audit_trail():
+    store = ConversationStore(":memory:")
+    assert learn(store, "admin", "Prefiero respuestas concretas.", "General")
+    events = store.list_automatic_memory_log("admin")
+    assert len(events) == 1
+    assert events[0]["project"] == "General"
+    assert events[0]["undone"] is False
+    assert store.undo_automatic_memory(events[0]["id"], "admin") is True
+    assert store.list_memories("admin") == []
+    assert store.list_automatic_memory_log("admin")[0]["undone"] is True
+    assert store.undo_automatic_memory(events[0]["id"], "admin") is False
+
+
+def test_undo_does_not_delete_edited_memory_or_other_users_data():
+    store = ConversationStore(":memory:")
+    assert learn(store, "admin", "Prefiero respuestas concretas.")
+    event = store.list_automatic_memory_log("admin")[0]
+    assert not store.undo_automatic_memory(event["id"], "someone-else")
+    store.save_memory(event["memory_id"], "Prefiero respuestas con ejemplos.", "admin")
+    assert not store.undo_automatic_memory(event["id"], "admin")
+    assert store.list_memories("admin")[0]["content"] == "Prefiero respuestas con ejemplos."
