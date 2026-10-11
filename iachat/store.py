@@ -32,6 +32,9 @@ class ConversationStore:
             "project TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL, "
             "undone INTEGER NOT NULL DEFAULT 0)"
         )
+        event_cols = {c[1] for c in self._db.execute("PRAGMA table_info(automatic_memory_log)")}
+        if "previous_content" not in event_cols:
+            self._db.execute("ALTER TABLE automatic_memory_log ADD COLUMN previous_content TEXT")
         self._db.commit()
         self._lock = Lock()
 
@@ -183,14 +186,39 @@ class ConversationStore:
                 (memory_id, memory_id, owner, project, content, int(time.time())))
             self._db.commit()
 
+    def replace_automatic_memory(self, memory_id: str, old: str, new: str, owner: str, project: str) -> bool:
+        """Compare-and-swap an automatic memory, preserving a reversible event."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT content,project FROM memories WHERE id=? AND owner=?",
+                (memory_id, owner)).fetchone()
+            if not row or row[0] != old or row[1] != project:
+                return False
+            # Never overwrite user-edited entries: require a matching original auto-save.
+            origin = self._db.execute(
+                "SELECT 1 FROM automatic_memory_log WHERE memory_id=? AND owner=? "
+                "AND previous_content IS NULL AND content=? LIMIT 1",
+                (memory_id, owner, old)).fetchone()
+            if not origin:
+                return False
+            self._db.execute(
+                "UPDATE memories SET content=?,updated_at=? WHERE id=? AND owner=? AND project=?",
+                (new, int(time.time()), memory_id, owner, project))
+            self._db.execute(
+                "INSERT INTO automatic_memory_log(id,memory_id,owner,project,content,created_at,previous_content) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (secrets.token_hex(16), memory_id, owner, project, new, int(time.time()), old))
+            self._db.commit()
+            return True
+
     def list_automatic_memory_log(self, owner: str = "admin", limit: int = 50) -> list[dict]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT id, memory_id, project, content, created_at, undone "
+                "SELECT id, memory_id, project, content, created_at, undone, previous_content "
                 "FROM automatic_memory_log WHERE owner=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                 (owner, limit)).fetchall()
         return [{"id": row[0], "memory_id": row[1], "project": row[2],
-                 "content": row[3], "created_at": row[4], "undone": bool(row[5])} for row in rows]
+                 "content": row[3], "created_at": row[4], "undone": bool(row[5]), "previous_content": row[6]} for row in rows]
 
     def undo_automatic_memory(self, event_id: str, owner: str = "admin") -> bool:
         """Undo only if the remembered text is unchanged; never delete a user's edit."""
@@ -201,10 +229,18 @@ class ConversationStore:
             if row is None:
                 return False
             current = self._db.execute(
-                "SELECT content FROM memories WHERE id=? AND owner=?", (row[0], owner)).fetchone()
-            if current is None or current[0] != row[1]:
+                "SELECT content,project FROM memories WHERE id=? AND owner=?", (row[0], owner)).fetchone()
+            event = self._db.execute(
+                "SELECT content,previous_content,project FROM automatic_memory_log WHERE id=? AND owner=?",
+                (event_id, owner)).fetchone()
+            if current is None or event is None or current != (event[0], event[2]):
                 return False
-            self._db.execute("DELETE FROM memories WHERE id=? AND owner=?", (row[0], owner))
+            if event[1] is None:
+                self._db.execute("DELETE FROM memories WHERE id=? AND owner=?", (row[0], owner))
+            else:
+                self._db.execute(
+                    "UPDATE memories SET content=?,updated_at=? WHERE id=? AND owner=?",
+                    (event[1], int(time.time()), row[0], owner))
             self._db.execute("UPDATE automatic_memory_log SET undone=1 WHERE id=? AND owner=?", (event_id, owner))
             self._db.commit()
             return True
