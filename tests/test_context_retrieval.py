@@ -33,3 +33,15 @@ def test_retrieval_handles_accents_and_simple_plurals():
     messages = [{"role": "user", "content": "Las películas de misterio me interesan."}]
     found = related_excerpts(messages, "¿Qué película misteriosa mencioné?")
     assert len(found) == 1
+
+
+def test_simple_synonyms_recover_older_message_without_inventing_it():
+    history = [{"role": "user", "content": "Dejé el auto en el garaje."}]
+    found = related_excerpts(history, "¿Dónde dejé el coche?")
+    assert len(found) == 1
+    assert "Dejé el auto en el garaje" in found[0]
+
+
+def test_unrelated_concepts_do_not_match():
+    history = [{"role": "user", "content": "El teléfono quedó cargando."}]
+    assert related_excerpts(history, "¿Dónde guardé el coche?") == []
