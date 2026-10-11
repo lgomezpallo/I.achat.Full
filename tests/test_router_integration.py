@@ -114,3 +114,26 @@ def test_router_auth_failure_does_not_corrupt_stored_chat(monkeypatch, tmp_path)
     assert response.status_code == 503
     assert response.json()["detail"] == "router_auth_rejected"
     assert module.store.get("existing", "admin") == before
+
+
+def test_router_invalid_success_payload_does_not_persist_fake_answer(monkeypatch, tmp_path):
+    module.store = ConversationStore(str(tmp_path / "router-invalid.db"))
+    history = [
+        {"role": "user", "content": "El perro se llama Tango."},
+        {"role": "assistant", "content": "Entendido."},
+    ]
+    module.store.put("existing", history, "admin", "")
+    monkeypatch.setattr(module, "get_backend", lambda: RouterBackend("http://router:8010", token="testing"))
+
+    class InvalidResponse:
+        status_code = 200
+        def json(self):
+            return {"ok": True, "text": "", "provider": "test", "model": "test"}
+
+    monkeypatch.setattr("iachat.backend.httpx.post", lambda url, **kwargs: InvalidResponse())
+    result = TestClient(app).post("/api/chat", json={
+        "conversation_id": "existing", "text": "¿Cómo se llama el perro?"
+    })
+    assert result.status_code == 503
+    assert result.json()["detail"] == "router_failed"
+    assert module.store.get("existing", "admin") == history
