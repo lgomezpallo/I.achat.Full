@@ -4,6 +4,7 @@ on:
     branches: [desarrollo/iachat-full]
     paths:
       - scripts/live_smoke_from_service.py
+      - scripts/smoke_conversation.py
       - .github/workflows/live-conversation.yml
   workflow_dispatch:
 
