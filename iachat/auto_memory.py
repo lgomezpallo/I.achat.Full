@@ -48,7 +48,7 @@ def learn(store, owner: str, text: str, project: str = "") -> bool:
     # Conflicting likes/dislikes must not silently coexist. Defer resolving
     # contradictions until an auditable replacement workflow exists.
     def sentiment_subject(item: str) -> tuple[str, str] | None:
-        found = re.match(r"^(no me gustan?|me gustan?)\\s+(.+)$", normalize(item))
+        found = re.match(r"^(no me gustan?|me gustan?)\s+(.+)$", normalize(item))
         if not found:
             return None
         sentiment = "negative" if found.group(1).startswith("no ") else "positive"
