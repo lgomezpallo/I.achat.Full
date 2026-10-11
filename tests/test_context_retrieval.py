@@ -23,7 +23,7 @@ def test_excerpts_do_not_treat_assistant_messages_as_user_facts():
 
 def test_retrieval_is_bounded_and_requires_subject_terms():
     history = [{"role": "user", "content": "bicicleta " * 70} for _ in range(10)]
-    found = related_excerpts(history, "¿Qué bicicleta hablamos antes?", max_items=2, max_chars=150)
+    found = related_excerpts(history, "¿Qué bicicleta hablamos antes?", max_items=2, max_chars=300)
     assert len(found) == 2
-    assert sum(len(x.split(": ", 1)[1]) for x in found) <= 150
+    assert sum(len(x.split(": ", 1)[1]) for x in found) <= 300
     assert related_excerpts(history, "¿Qué dijimos antes?") == []
