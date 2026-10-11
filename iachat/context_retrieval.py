@@ -48,7 +48,9 @@ def related_excerpts(history: list[dict[str, str]], question: str,
     for _, i, text in matches:
         if len(chosen) >= max_items or remaining <= 0:
             break
-        excerpt = text[:min(len(text), 500, remaining)]
+        # Reserve space for other matches instead of letting the first consume the budget.
+        per_item = max(1, max_chars // max(1, max_items))
+        excerpt = text[:min(len(text), 500, remaining, per_item)]
         if excerpt:
             chosen.append((i, excerpt))
             remaining -= len(excerpt)
