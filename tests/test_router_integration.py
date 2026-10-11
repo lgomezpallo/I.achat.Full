@@ -58,3 +58,34 @@ def test_two_turns_through_router_contract_and_persistence(monkeypatch, tmp_path
     ]
     assert "decompose" not in outgoing[1]
     assert len(ConversationStore(str(dbfile)).get(cid)) == 4
+
+
+def test_long_short_turn_history_respects_actual_router_request_contract(monkeypatch, tmp_path):
+    """Many short turns must never trigger Router's 100-message validation error."""
+    module.store = ConversationStore(str(tmp_path / "long-chat.db"))
+    monkeypatch.setattr(module, "get_backend", lambda: RouterBackend("http://router:8010", token="testing"))
+    history = [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": f"Mensaje {i}"}
+        for i in range(240)
+    ]
+    module.store.put("many-turns", history, "admin", "")
+    captured = []
+
+    def fake_router(url, **kwargs):
+        payload = kwargs["json"]
+        captured.append(payload)
+        assert url == "http://router:8010/route"
+        assert len(payload["conversation"]) <= 100
+        assert payload["conversation"][0]["role"] == "user"
+        assert payload["conversation"][-1] == history[-1]
+        assert payload["task"] == "¿Qué recordás?"
+        return RealFormatRouterResponse("No tengo todos los mensajes anteriores.")
+
+    monkeypatch.setattr("iachat.backend.httpx.post", fake_router)
+    result = TestClient(app).post(
+        "/api/chat", json={"conversation_id": "many-turns", "text": "¿Qué recordás?"}
+    )
+    assert result.status_code == 200
+    assert len(captured) == 1
+    assert len(module.store.get("many-turns", "admin")) == 242
+    assert "mensajes anteriores" in captured[0]["context"]
