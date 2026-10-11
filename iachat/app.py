@@ -6,7 +6,7 @@ import hashlib
 import time
 import httpx
 from uuid import uuid4
-from fastapi import FastAPI, HTTPException, Request, Response, Query
+from fastapi import FastAPI, HTTPException, Request, Response, Query, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response as RawResponse
 from pydantic import BaseModel, Field
 from .store import ConversationStore
@@ -226,7 +226,7 @@ def router_status():
             "reason": "health_only_not_end_to_end"}
 
 @app.post("/api/chat", response_model=MessageOutput)
-def chat(message: MessageInput, request: Request):
+def chat(message: MessageInput, request: Request, background_tasks: BackgroundTasks):
     owner = _user(request)
     from .attachments import extract, AttachmentError
     if not message.text.strip() and not message.attachments:
@@ -285,6 +285,9 @@ def chat(message: MessageInput, request: Request):
     visible_text = message.text + ("\n\nAdjuntos: " + ", ".join(attachment_names) if attachment_names else "")
     updated = [*history, {"role": "user", "content": visible_text}, {"role": "assistant", "content": answer}]
     store.put(conversation_id, updated, owner, message.project.strip())
+    if not message.attachments:
+        from .auto_memory import learn
+        background_tasks.add_task(learn, store, owner, message.text, message.project.strip())
     return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
 
 @app.get("/api/export")
