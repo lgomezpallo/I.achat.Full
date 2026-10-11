@@ -45,5 +45,5 @@ def learn(store, owner: str, text: str, project: str = "") -> bool:
     existing = {normalize(m["content"]) for m in store.list_memories(owner, project)}
     if normalize(value) in existing:
         return False
-    store.save_memory(str(uuid4()), value, owner, project)
+    store.save_automatic_memory(str(uuid4()), value, owner, project)
     return True
