@@ -62,7 +62,7 @@ def related_excerpts(history: list[dict[str, str]], question: str,
         score = len(terms & words)
         # One generic shared word is too weak when the question names
         # several specific subjects. Prefer precision over invented recall.
-        if len(terms) >= 3 and score < 2:
+        if len(terms) >= 4 and score < 2:
             continue
         if score:
             matches.append((score, i, text))
