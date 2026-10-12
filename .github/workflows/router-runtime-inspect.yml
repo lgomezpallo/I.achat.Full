@@ -1,0 +1,48 @@
+name: Diagnóstico Router Oracle
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/router-runtime-inspect.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 5
+    steps:
+      - name: Leer estado de Router sin cambiar archivos
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$HOME/.ssh/known_hosts"
+          actual="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = "SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI"
+          ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "$ORACLE_USER@$ORACLE_HOST" 'bash -s' <<'REMOTE'
+          set -e
+          for unit in router.service r-outer.service router-ia.service router-full.service; do
+            if [[ "$(systemctl show "$unit" -p LoadState --value 2>/dev/null)" == loaded ]]; then
+              echo "UNIT=$unit"
+              echo "STATE=$(systemctl is-active "$unit" || true)"
+              echo "PID=$(systemctl show "$unit" -p MainPID --value)"
+              echo "WORKDIR=$(systemctl show "$unit" -p WorkingDirectory --value)"
+              echo "EXIT=$(systemctl show "$unit" -p ExecMainStatus --value)"
+            fi
+          done
+          echo "TCP_LISTEN:"
+          ss -ltn | awk '/LISTEN/ {print $4}' | sort -u
+          for port in 8000 8001 8010 8080 8090 8787; do
+            status="$(curl --max-time 2 -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/health" || true)"
+            echo "HEALTH_PORT_$port=$status"
+          done
+          REMOTE
+      - name: Limpiar clave temporal
+        if: always()
+        run: rm -f "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
