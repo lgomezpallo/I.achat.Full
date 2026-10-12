@@ -298,6 +298,8 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         detail = str(exc) if isinstance(exc, RuntimeError) else "providers_unavailable"
         if detail.startswith("router_http_") and detail[12:] in ("400", "401", "403", "413", "422", "429", "500", "502", "503", "504"):
             pass  # Preserve only safe upstream status codes for diagnosis.
+        elif detail in ("router_transport_timeout", "router_transport_connect", "router_transport_protocol", "router_transport_other"):
+            pass
         elif detail not in ("router_not_configured", "router_auth_rejected", "router_unavailable", "router_http_error", "router_invalid_response", "router_failed"):
             detail = "router_unavailable"
         raise HTTPException(503, detail) from exc
