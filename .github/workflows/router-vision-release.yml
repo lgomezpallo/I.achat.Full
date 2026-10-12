@@ -1,0 +1,115 @@
+name: Actualizar Router visión
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/router-vision-release.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: router-vision-release
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: oracle-production
+    steps:
+      - name: Checkout Router verificado
+        uses: actions/checkout@v4
+        with:
+          repository: lgomezpallo/R.outer.full
+          ref: d4ef3f3b01abc18b41611f1d01dce2b0cd32610d
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verificar pruebas de Router
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pytest -q
+      - name: Identidad de Oracle y preparar SSH
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$HOME/.ssh/known_hosts"
+          actual="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = "SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Desplegar Router con rollback
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+        run: |
+          set -euo pipefail
+          tar --exclude='.git' --exclude='.github' --exclude='__pycache__' --exclude='.pytest_cache' -czf /tmp/router-vision-release.tar.gz .
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15"
+          scp $SSH_OPTS /tmp/router-vision-release.tar.gz "$ORACLE_USER@$ORACLE_HOST:/tmp/router-vision-release-$GITHUB_RUN_ID.tar.gz"
+          ssh $SSH_OPTS "$ORACLE_USER@$ORACLE_HOST" "bash -s -- $GITHUB_RUN_ID" <<'REMOTE'
+          set -Eeuo pipefail
+          run_id="$1"
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          archive="/tmp/router-vision-release-$run_id.tar.gz"
+          service=""
+          for unit in router.service r-outer.service router-ia.service router-full.service; do
+            if [[ "$(systemctl show "$unit" -p LoadState --value 2>/dev/null)" == "loaded" ]] && systemctl is-active --quiet "$unit"; then
+              service="$unit"
+              break
+            fi
+          done
+          if [[ -z "$service" ]]; then
+            echo "::error::Router service unit not found. No files modified."
+            exit 1
+          fi
+          app="$(systemctl show "$service" -p WorkingDirectory --value)"
+          if [[ ! -f "$app/router/api.py" ]]; then
+            pid="$(systemctl show "$service" -p MainPID --value)"
+            app="$(readlink -f "/proc/$pid/cwd")"
+          fi
+          test -f "$app/router/api.py" || { echo "::error::Router source directory not found"; exit 1; }
+          python_bin="$app/.venv/bin/python"
+          test -x "$python_bin" || { echo "::error::Router virtualenv not found"; exit 1; }
+          command -v rsync >/dev/null
+          stage="$(mktemp -d)"
+          backup="$(mktemp -d)"
+          modified=0
+          cleanup(){ rm -rf "$stage" "$backup"; rm -f "$archive"; }
+          rollback(){
+            status=$?
+            if [[ "$status" -ne 0 && "$modified" -eq 1 ]]; then
+              echo "Restoring Router source after failed release"
+              rsync -a "$backup/" "$app/" || true
+              "$python_bin" -m pip install -e "$app" -q || true
+              sudo -n systemctl restart "$service" || true
+            fi
+            cleanup
+            exit "$status"
+          }
+          trap rollback EXIT
+          tar -xzf "$archive" -C "$stage" --no-same-owner
+          test -f "$stage/router/api.py"
+          test -f "$stage/router/client.py"
+          rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='.env' --exclude='*.key' --exclude='router-catalog.json' "$app/" "$backup/"
+          modified=1
+          rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='.env' --exclude='*.key' --exclude='router-catalog.json' "$stage/" "$app/"
+          "$python_bin" -m pip install -e "$app" --disable-pip-version-check -q
+          "$python_bin" -m compileall -q "$app/router"
+          sudo -n systemctl restart "$service"
+          sudo -n systemctl is-active --quiet "$service"
+          curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8010/health >/dev/null
+          modified=0
+          echo "Router vision runtime deployed successfully"
+          REMOTE
+      - name: Limpiar material SSH
+        if: always()
+        run: rm -f "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts" /tmp/router-vision-release.tar.gz
