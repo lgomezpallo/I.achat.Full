@@ -228,11 +228,21 @@ def router_status():
 @app.post("/api/chat", response_model=MessageOutput)
 def chat(message: MessageInput, request: Request, background_tasks: BackgroundTasks):
     owner = _user(request)
-    from .attachments import extract, AttachmentError
+    from .attachments import extract, extract_images, AttachmentError
     if not message.text.strip() and not message.attachments:
         raise HTTPException(422, "empty_message")
     try:
-        document_context, attachment_names = extract(message.attachments)
+        documents = []
+        image_files = []
+        for attachment in message.attachments:
+            ext = attachment.name.lower().rsplit(".", 1)[-1]
+            if ext in ("jpg", "jpeg", "png", "webp"):
+                image_files.append(attachment)
+            else:
+                documents.append(attachment)
+        document_context, document_names = extract(documents)
+        images, image_names = extract_images(image_files)
+        attachment_names = document_names + image_names
     except AttachmentError as exc:
         raise HTTPException(422, str(exc)) from exc
     conversation_id = message.conversation_id or str(uuid4())
@@ -291,7 +301,11 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 "incluyeron en la ventana actual. No afirmes recordar detalles de esos "
                 "mensajes sin que estén en el contexto o en recuerdos persistentes. "
                 "Si son imprescindibles para responder, pedí el dato concreto."})
-        answer = get_backend().answer([*memory_context, *recent_history, {"role": "user", "content": content_for_router}])
+        messages_for_router = [*memory_context, *recent_history, {"role": "user", "content": content_for_router or "Describí las imágenes adjuntas."}]
+        if images:
+            answer = get_backend().answer(messages_for_router, images=images)
+        else:
+            answer = get_backend().answer(messages_for_router)
     except httpx.HTTPStatusError as exc:
         raise HTTPException(503, "providers_http_error") from exc
     except (httpx.RequestError, RuntimeError) as exc:
