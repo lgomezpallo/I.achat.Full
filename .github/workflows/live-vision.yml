@@ -81,6 +81,46 @@ jobs:
           if not data.get("ok") or "rojo" not in answer:
               raise SystemExit("vision_response_failed")
           print("PASS: Router successfully analyzed synthetic red image", flush=True)
+
+          # Now verify the complete IAchat HTTP endpoint, isolated from users and
+          # production SQLite. This must call the deployed IAchat backend.
+          import tempfile
+          from pathlib import Path
+          from fastapi.testclient import TestClient
+          from iachat.store import ConversationStore
+
+          with tempfile.TemporaryDirectory(prefix="iachat-vision-test-") as temp:
+              os.environ["IACHAT_DB"] = str(Path(temp) / "vision.sqlite")
+              os.environ["ROUTER_URL"] = "http://127.0.0.1:8010"
+              os.environ["ROUTER_TOKEN"] = token
+              from iachat import app as chat_module
+              previous_store = chat_module.store
+              previous_auth = chat_module._signed_user
+              try:
+                  chat_module.store = ConversationStore(os.environ["IACHAT_DB"])
+                  chat_module.store.create_user("vision-smoke", "temporary-only-password")
+                  chat_module._signed_user = lambda cookie: "vision-smoke"
+                  with TestClient(chat_module.app) as client:
+                      response = client.post("/api/chat", json={
+                          "text": "¿Qué color predomina en esta imagen? Respondé solamente el color.",
+                          "attachments": [{"name": "imagen-prueba.png", "content_base64": encoded}],
+                      })
+                  print("IACHAT_IMAGE_HTTP:", response.status_code, flush=True)
+                  if response.status_code != 200:
+                      print("IACHAT_IMAGE_FAILURE:", str(response.json().get("detail", "unknown"))[:100], flush=True)
+                      raise SystemExit("iachat_image_endpoint_failed")
+                  body = response.json()
+                  answer = str(body.get("answer") or "").casefold()
+                  print("IACHAT_IMAGE_ANSWER:", repr(answer[:160]), flush=True)
+                  if "roj" not in answer:
+                      raise SystemExit("iachat_image_not_understood")
+                  saved = chat_module.store.get(body["conversation_id"], "vision-smoke")
+                  if not saved or encoded in repr(saved):
+                      raise SystemExit("raw_image_saved_in_history")
+                  print("PASS: IAchat image upload to Router to real vision model", flush=True)
+              finally:
+                  chat_module.store = previous_store
+                  chat_module._signed_user = previous_auth
           PY
           REMOTE
       - name: Limpiar material SSH
