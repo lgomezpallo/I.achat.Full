@@ -9,7 +9,7 @@ class RouterFirstBackend:
         self.token = token
         self.timeout_s = timeout_s
 
-    def answer(self, messages: list[dict[str, str]]) -> str:
+    def answer(self, messages: list[dict[str, str]], images: list[str] | None = None) -> str:
         if not messages or messages[-1].get("role") != "user":
             raise ValueError("last_message_must_be_user")
         url = (self.url if self.url is not None else os.getenv("ROUTER_URL", "")).strip().rstrip("/")
@@ -42,7 +42,8 @@ class RouterFirstBackend:
                         "task": messages[-1]["content"],
                         "context": context,
                         "conversation": conversation,
-                        "required_capabilities": ["chat"],
+                        "required_capabilities": ["chat", "vision"] if images else ["chat"],
+                        "images": images or [],
                         "application_name": "iachat",
                         # Router decides automatically whether decomposition is useful.
                     },
