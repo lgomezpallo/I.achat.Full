@@ -29,5 +29,8 @@ if not all(service_env.get(key) for key in ("ROUTER_URL", "ROUTER_TOKEN")):
 env = os.environ.copy()
 env.update(service_env)
 env["IACHAT_SMOKE_LIVE"] = "1"
+# Python starts with scripts/ on sys.path; force imports from the extracted
+# development tree instead of the installed production IAchat package.
+env["PYTHONPATH"] = os.getcwd() + os.pathsep + env.get("PYTHONPATH", "")
 # Import-time db path is overridden by the isolated smoke runner.
 os.execve(sys.executable, [sys.executable, "scripts/smoke_conversation.py"], env)
