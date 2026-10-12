@@ -103,6 +103,28 @@ def run(live: bool = False):
                     print("MEMORY_ANSWER:", repr(remembered.json()["answer"][:300]), flush=True)
                 assert "luci" in remembered.json()["answer"].casefold(), "saved memory was not recalled"
                 assert remembered.json()["conversation_id"] != saved.json()["conversation_id"]
+                # Real long-history retrieval: many short turns displace the
+                # original fact from the recent message-count window.
+                long_id = "smoke-long-history"
+                long_history = [
+                    {"role": "user", "content": "Mi vehículo de prueba es un coche color turquesa."},
+                    {"role": "assistant", "content": "Entendido."},
+                ]
+                for index in range(120):
+                    long_history.extend([
+                        {"role": "user", "content": f"Mensaje de relleno número {index}."},
+                        {"role": "assistant", "content": "Recibido."},
+                    ])
+                module.store.put(long_id, long_history, "smoke", "")
+                long_response = client.post("/api/chat", json={
+                    "conversation_id": long_id,
+                    "text": "¿De qué color es mi auto de prueba?"
+                })
+                assert long_response.status_code == 200
+                if live:
+                    print("LONG_CONTEXT_ANSWER:", repr(long_response.json()["answer"][:300]), flush=True)
+                assert "turquesa" in long_response.json()["answer"].casefold(), "older conversation fact not recovered"
+                assert len(module.store.get(long_id, "smoke")) == len(long_history) + 2
                 assert module.store is not previous_store
                 print("PASS: isolated continuity, unknown facts, conversation isolation and persistence")
                 print("MODE:", "LIVE ROUTER" if live else "OFFLINE MOCK")
