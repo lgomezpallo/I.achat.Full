@@ -48,8 +48,14 @@ class RouterFirstBackend:
                     },
                     timeout=max(self.timeout_s, 90.0) if attempt == 0 else self.timeout_s,
                 )
+            except httpx.TimeoutException as exc:
+                raise RuntimeError("router_transport_timeout") from exc
+            except httpx.ConnectError as exc:
+                raise RuntimeError("router_transport_connect") from exc
+            except httpx.RemoteProtocolError as exc:
+                raise RuntimeError("router_transport_protocol") from exc
             except httpx.RequestError as exc:
-                raise RuntimeError("router_unavailable") from exc
+                raise RuntimeError("router_transport_other") from exc
             if response.status_code not in (502, 503, 504) or attempt:
                 break
             # Wake the upstream without submitting the user message twice
