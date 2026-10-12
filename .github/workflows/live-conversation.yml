@@ -1,0 +1,68 @@
+name: IAchat conversación real aislada
+on:
+  push:
+    branches: [desarrollo/iachat-full]
+    paths:
+      - scripts/live_smoke_from_service.py
+      - scripts/smoke_conversation.py
+      - .github/workflows/live-conversation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iachat-live-smoke
+  cancel-in-progress: false
+
+jobs:
+  live-conversation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: oracle-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify SSH host identity
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts
+          actual="$(ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 ~/.ssh/known_hosts
+      - name: Run isolated live conversation without deployment
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+        run: |
+          set -euo pipefail
+          tar -czf /tmp/iachat-live-test.tar.gz --exclude='.git' --exclude='.github' .
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15"
+          scp $SSH_OPTS /tmp/iachat-live-test.tar.gz "$ORACLE_USER@$ORACLE_HOST:/tmp/iachat-live-test-${GITHUB_RUN_ID}.tar.gz"
+          ssh $SSH_OPTS "$ORACLE_USER@$ORACLE_HOST" "bash -s -- ${GITHUB_RUN_ID}" <<'REMOTE'
+          set -euo pipefail
+          id="$1"
+          archive="/tmp/iachat-live-test-${id}.tar.gz"
+          stage="$(mktemp -d /tmp/iachat-smoke.XXXXXXXX)"
+          trap 'rm -rf "$stage" "$archive"' EXIT
+          tar -xzf "$archive" -C "$stage" --no-same-owner
+          cd "$stage"
+          /home/ubuntu/Proyecto/Aplicaciones/IAchat/.venv/bin/python scripts/live_smoke_from_service.py
+          REMOTE
+      - name: Remove local SSH material
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts /tmp/iachat-live-test.tar.gz
+
+# Branch deployment permission confirmed by isolated runner diagnostic.
+
+# Re-run on isolated smoke diagnostic update.

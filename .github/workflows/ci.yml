@@ -16,4 +16,6 @@ jobs:
         run: |
           set -o pipefail
           pytest -q 2>&1 | tee pytest-result.txt
+      - name: Conversación aislada sin credenciales reales
+        run: python scripts/smoke_conversation.py
       - run: docker build -t iachat-ci .

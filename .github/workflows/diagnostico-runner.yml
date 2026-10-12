@@ -1,0 +1,22 @@
+name: Diagnóstico ejecución GitHub
+on:
+  push:
+    branches: [desarrollo/iachat-full]
+    paths:
+      - .github/workflows/diagnostico-runner.yml
+permissions:
+  contents: read
+jobs:
+  runner-sin-entorno:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirmar que GitHub asigna runner
+        run: echo "RUNNER_OK"
+  runner-con-entorno:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    steps:
+      - name: Confirmar autorización del entorno sin usar secretos
+        run: echo "ENVIRONMENT_OK"
+
+# Re-run after authorizing the development branch in oracle-production.

@@ -7,6 +7,9 @@ older omitted turns must never be represented as remembered facts.
 from __future__ import annotations
 
 MAX_HISTORY_CHARS = 32000
+# Router /route accepts at most 100 previous conversation messages.
+# Leave headroom and keep complete recent turns.
+MAX_HISTORY_MESSAGES = 90
 
 
 def recent_context(history: list[dict[str, str]], budget: int = MAX_HISTORY_CHARS) -> list[dict[str, str]]:
@@ -25,6 +28,8 @@ def recent_context(history: list[dict[str, str]], budget: int = MAX_HISTORY_CHAR
         if size > budget - used:
             break
         selected.append({"role": entry["role"], "content": content})
+        if len(selected) >= MAX_HISTORY_MESSAGES:
+            break
         used += size
     selected.reverse()
     # Never begin with an orphan assistant response.

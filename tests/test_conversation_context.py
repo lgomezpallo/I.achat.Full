@@ -60,3 +60,15 @@ def test_chat_warns_router_when_older_history_is_omitted(monkeypatch):
     assert any("mensajes anteriores" in m["content"] for m in seen[0] if m["role"] == "system")
     assert all("anterior " not in m["content"] for m in seen[0] if m["role"] == "user")
     assert module.store.get("long-chat", "admin")[0] == original[0]
+
+
+def test_recent_context_respects_router_message_count_limit():
+    history = [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": f"turn-{i}"}
+        for i in range(240)
+    ]
+    recent = recent_context(history)
+    assert len(recent) <= 90
+    assert recent[0]["role"] == "user"
+    assert recent[-1] == history[-1]
+    assert len(history) == 240
