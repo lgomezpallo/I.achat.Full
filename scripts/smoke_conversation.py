@@ -37,6 +37,10 @@ def run(live: bool = False):
         old_db_setting = os.environ.get("IACHAT_DB")
         os.environ["IACHAT_DB"] = str(database)
         from iachat import app as module
+        if live:
+            # Prevent accidental testing of an installed older production package.
+            source_root = Path.cwd().resolve()
+            assert Path(module.__file__).resolve().is_relative_to(source_root), "live smoke imported deployed IAchat rather than the development tree"
         previous_store = module.store
         previous_backend = module.get_backend
         previous_signed_user = module._signed_user
@@ -138,6 +142,7 @@ def run(live: bool = False):
                             print("LONG_BACKEND_REACHED:", True,
                                   "conversation_messages:", sum(m["role"] in ("user", "assistant") for m in messages),
                                   flush=True)
+                            assert sum(m["role"] in ("user", "assistant") for m in messages) <= 91, "unbounded Router conversation"
                             try:
                                 return backend_before_long().answer(messages)
                             except Exception as exc:
