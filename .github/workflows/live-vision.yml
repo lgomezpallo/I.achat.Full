@@ -1,0 +1,88 @@
+name: IAchat prueba real imagen
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/live-vision.yml
+permissions:
+  contents: read
+jobs:
+  vision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: oracle-production
+    steps:
+      - name: Verificar Router visión con imagen sintética en Oracle
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$HOME/.ssh/known_hosts"
+          actual="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = "SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$ORACLE_USER@$ORACLE_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          "$HOME/Proyecto/Aplicaciones/IAchat/.venv/bin/python" - <<'PY'
+          import base64
+          import os
+          import struct
+          import subprocess
+          import zlib
+          import httpx
+
+          pid = subprocess.check_output(["systemctl", "show", "iachat", "--property=MainPID", "--value"], text=True).strip()
+          if not pid.isdigit() or int(pid) < 2:
+              raise SystemExit("IAchat process unavailable")
+          raw = subprocess.check_output(["sudo", "-n", "cat", "/proc/" + pid + "/environ"])
+          settings = {}
+          for entry in raw.split(bytes([0])):
+              key, sep, value = entry.partition(b"=")
+              if sep and key in (b"ROUTER_TOKEN",):
+                  settings[key.decode()] = value.decode()
+          token = settings.get("ROUTER_TOKEN", "")
+          if not token:
+              raise SystemExit("No Router token configured")
+
+          width = height = 64
+          def chunk(tag, body):
+              return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF)
+          raw_rgb = (b"\\x00" + bytes([255, 0, 0]) * width) * height
+          png = bytes.fromhex("89504e470d0a1a0a")
+          png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+          png += chunk(b"IDAT", zlib.compress(raw_rgb))
+          png += chunk(b"IEND", b"")
+          encoded = base64.b64encode(png).decode("ascii")
+          payload = {
+              "task": "¿Cuál es el color principal de la imagen? Contestá con una palabra en español.",
+              "required_capabilities": ["chat", "vision"],
+              "images": ["data:image/png;base64," + encoded],
+              "decompose": False,
+              "application_name": "iachat",
+          }
+          result = httpx.post(
+              "http://127.0.0.1:8010/route",
+              headers={"Authorization": "Bearer " + token},
+              json=payload,
+              timeout=110,
+          )
+          print("VISION_HTTP:", result.status_code, flush=True)
+          result.raise_for_status()
+          data = result.json()
+          print("VISION_OK:", bool(data.get("ok")), flush=True)
+          print("VISION_PROVIDER:", str(data.get("provider") or "none")[:80], flush=True)
+          print("VISION_MODEL:", str(data.get("model") or "none")[:120], flush=True)
+          answer = str(data.get("text") or "").casefold()
+          print("VISION_TEST_ANSWER:", repr(answer[:180]), flush=True)
+          if not data.get("ok") or "rojo" not in answer:
+              raise SystemExit("vision_response_failed")
+          print("PASS: Router successfully analyzed synthetic red image", flush=True)
+          PY
+          REMOTE
+      - name: Limpiar material SSH
+        if: always()
+        run: rm -f "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
