@@ -124,7 +124,14 @@ def run(live: bool = False):
                     "conversation_id": long_id,
                     "text": "¿De qué color es mi auto de prueba?"
                 })
-                assert long_response.status_code == 200
+                if long_response.status_code != 200:
+                    # Only a synthetic request is involved. Never print secrets.
+                    try:
+                        error = long_response.json().get("detail", "unknown")
+                    except ValueError:
+                        error = "invalid_error_response"
+                    print("LONG_CONTEXT_HTTP:", long_response.status_code, repr(str(error)[:120]), flush=True)
+                assert long_response.status_code == 200, "long-history Router HTTP failure"
                 if live:
                     print("LONG_CONTEXT_ANSWER:", repr(long_response.json()["answer"][:300]), flush=True)
                 assert "turquesa" in long_response.json()["answer"].casefold(), "older conversation fact not recovered"
