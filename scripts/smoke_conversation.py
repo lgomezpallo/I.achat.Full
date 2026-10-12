@@ -140,7 +140,7 @@ def run(live: bool = False):
                     except ValueError:
                         error = "invalid_error_response"
                     print("LONG_CONTEXT_HTTP:", long_response.status_code, repr(str(error)[:120]), flush=True)
-                    print("LONG_CONTEXT_DIAGNOSTIC: long request failed after successful short Router request", flush=True)
+                    print("LONG_CONTEXT_DIAGNOSTIC: classified failure after successful short Router request", flush=True)
                 assert long_response.status_code == 200, "long-history Router HTTP failure"
                 if live:
                     print("LONG_CONTEXT_ANSWER:", repr(long_response.json()["answer"][:300]), flush=True)
