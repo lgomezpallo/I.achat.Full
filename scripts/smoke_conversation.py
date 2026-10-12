@@ -129,6 +129,24 @@ def run(live: bool = False):
                 print("LONG_BASELINE_HTTP:", baseline.status_code, flush=True)
                 if baseline.status_code != 200:
                     print("LONG_BASELINE_FAILED: Router already unavailable before long input", flush=True)
+                # Instrument only this temporary live invocation; record no
+                # user data, credentials or model responses.
+                backend_before_long = module.get_backend
+                if live:
+                    class DiagnosticBackend:
+                        def answer(self, messages):
+                            print("LONG_BACKEND_REACHED:", True,
+                                  "conversation_messages:", sum(m["role"] in ("user", "assistant") for m in messages),
+                                  flush=True)
+                            try:
+                                return backend_before_long().answer(messages)
+                            except Exception as exc:
+                                safe_code = str(exc)
+                                if not (safe_code.startswith("router_") or safe_code.startswith("providers_")):
+                                    safe_code = "unclassified"
+                                print("LONG_BACKEND_EXCEPTION:", type(exc).__name__, safe_code[:80], flush=True)
+                                raise
+                    module.get_backend = lambda: DiagnosticBackend()
                 long_response = client.post("/api/chat", json={
                     "conversation_id": long_id,
                     "text": "¿De qué color es mi auto de prueba?"
