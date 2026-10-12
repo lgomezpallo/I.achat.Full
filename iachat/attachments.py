@@ -54,3 +54,36 @@ def extract(attachments):
         if remaining <= 0:
             break
     return "\n\n".join(sections), names
+
+
+def extract_images(attachments):
+    """Validate still images and return ephemeral data URLs; never persist bytes."""
+    images = []
+    names = []
+    formats = {
+        "jpg": ("jpeg", lambda b: b.startswith(bytes.fromhex("ffd8ff"))),
+        "jpeg": ("jpeg", lambda b: b.startswith(bytes.fromhex("ffd8ff"))),
+        "png": ("png", lambda b: b.startswith(bytes.fromhex("89504e470d0a1a0a"))),
+        "webp": ("webp", lambda b: b.startswith(b"RIFF") and b[8:12] == b"WEBP"),
+    }
+    if len(attachments) > 3:
+        raise AttachmentError("too_many_attachments")
+    for item in attachments:
+        name = PurePath(item.name.replace("\\", "/")).name[:180]
+        ext = name.lower().rsplit(".", 1)[-1]
+        if ext not in formats:
+            raise AttachmentError("unsupported_image_type")
+        if len(item.content_base64) > 2_750_000:
+            raise AttachmentError("image_too_large")
+        try:
+            raw = base64.b64decode(item.content_base64, validate=True)
+        except (ValueError, binascii.Error):
+            raise AttachmentError("invalid_image_encoding")
+        if not raw or len(raw) > MAX_FILE_BYTES:
+            raise AttachmentError("image_too_large")
+        mime, signature_ok = formats[ext]
+        if not signature_ok(raw):
+            raise AttachmentError("image_signature_invalid")
+        images.append("data:image/" + mime + ";base64," + item.content_base64)
+        names.append(name)
+    return images, names
