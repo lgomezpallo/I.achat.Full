@@ -51,7 +51,7 @@ jobs:
           width = height = 64
           def chunk(tag, body):
               return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF)
-          raw_rgb = (b"\\x00" + bytes([255, 0, 0]) * width) * height
+          raw_rgb = (bytes([0]) + bytes([255, 0, 0]) * width) * height
           png = bytes.fromhex("89504e470d0a1a0a")
           png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
           png += chunk(b"IDAT", zlib.compress(raw_rgb))
