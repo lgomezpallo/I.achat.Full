@@ -205,9 +205,9 @@ var oversized=files.find(f=>f.size>2000000);
 if(oversized){alert('El archivo "'+oversized.name+'" pesa '+(oversized.size/1000000).toFixed(2)+' MB. El máximo es 2 MB por archivo.');return}
 var invalid=files.find(f=>!['.txt','.md','.pdf','.jpg','.jpeg','.png','.webp'].some(ext=>f.name.toLowerCase().endsWith(ext)));
 if(invalid){alert('El archivo "'+invalid.name+'" no es PDF, TXT, MD, JPG, PNG ni WebP.');return}
-busy=true;input.value='';add('user',text+(files.length?'\nAdjuntos: '+files.map(f=>f.name).join(', '):''));var waiting=add('assistant','Pensando…');var payload={text:text,project:activeProject()};if(conversationId)payload.conversation_id=conversationId;
-try{payload.attachments=await Promise.all(files.map(async function(f){return {name:f.name,content_base64:await fileBase64(f)}}));var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var d=await r.json();waiting.remove();if(!r.ok){input.value=text;add('assistant',d.detail||'No se pudo enviar. Podés reintentarlo.',true);if(r.status===401)showLogin();return}fileInput.value='';imageInput.value='';document.getElementById('selectedFiles').textContent='';conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55),project:activeProject()});saveIds();syncHistory().catch(function(){});add('assistant',d.answer)}
-catch(err){waiting.remove();input.value=text;add('assistant','No hay conexión. El mensaje sigue en la caja para reintentar.',true)}finally{busy=false}};
+busy=true;var waiting=add('assistant','Enviando…');var payload={text:text,project:activeProject()};if(conversationId)payload.conversation_id=conversationId;
+try{payload.attachments=await Promise.all(files.map(async function(f){return {name:f.name,content_base64:await fileBase64(f)}}));var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var raw=await r.text(),d;try{d=JSON.parse(raw)}catch(_){d={detail:'El servidor respondió con un error no válido.'}}waiting.remove();if(!r.ok){var detail=typeof d.detail==='string'?d.detail:'No se pudo procesar el adjunto';alert('No se envió el mensaje (HTTP '+r.status+'): '+detail+'. Podés reintentar.');if(r.status===401)showLogin();return}if(!d||typeof d.answer!=='string'||!d.conversation_id){alert('El servidor devolvió una respuesta incompleta. Conservamos tu mensaje para reintentar.');return}add('user',text+(files.length?'\nAdjuntos: '+files.map(f=>f.name).join(', '):''));input.value='';fileInput.value='';imageInput.value='';document.getElementById('selectedFiles').textContent='';conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55),project:activeProject()});saveIds();syncHistory().catch(function(){});add('assistant',d.answer)}
+catch(err){waiting.remove();alert('No se pudo enviar. Comprobá la conexión y reintentá: el texto y los adjuntos siguen seleccionados.')}finally{busy=false}};
 input.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('form').requestSubmit()}});
 init();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
 </script></body></html>"""
@@ -222,7 +222,7 @@ MANIFEST = {
         {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
     ]
 }
-SERVICE_WORKER = """const CACHE='iachat-shell-v13';
+SERVICE_WORKER = """const CACHE='iachat-shell-v14';
 const ASSETS=['/','/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png'];
 self.addEventListener('install',event=>{
  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
