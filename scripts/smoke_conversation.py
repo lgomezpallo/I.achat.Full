@@ -120,6 +120,15 @@ def run(live: bool = False):
                         {"role": "assistant", "content": "Recibido."},
                     ])
                 module.store.put(long_id, long_history, "smoke", "")
+                # Check Router with a short, unrelated request immediately before
+                # the long request. This distinguishes service outage from
+                # a context-size-specific problem without altering production data.
+                baseline = client.post("/api/chat", json={
+                    "text": "Respondé únicamente: prueba correcta."
+                })
+                print("LONG_BASELINE_HTTP:", baseline.status_code, flush=True)
+                if baseline.status_code != 200:
+                    print("LONG_BASELINE_FAILED: Router already unavailable before long input", flush=True)
                 long_response = client.post("/api/chat", json={
                     "conversation_id": long_id,
                     "text": "¿De qué color es mi auto de prueba?"
