@@ -35,6 +35,8 @@ class ConversationStore:
         event_cols = {c[1] for c in self._db.execute("PRAGMA table_info(automatic_memory_log)")}
         if "previous_content" not in event_cols:
             self._db.execute("ALTER TABLE automatic_memory_log ADD COLUMN previous_content TEXT")
+        self._db.execute("CREATE TABLE IF NOT EXISTS image_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, owner TEXT NOT NULL, message_index INTEGER NOT NULL, filename TEXT NOT NULL, data_url TEXT NOT NULL)")
+        self._db.execute("CREATE INDEX IF NOT EXISTS image_attachments_lookup ON image_attachments(conversation_id, owner, message_index)")
         self._db.commit()
         self._lock = Lock()
 
@@ -91,6 +93,15 @@ class ConversationStore:
         data = json.loads(row[0])
         return [{"role": str(item["role"]), "content": str(item["content"])} for item in data]
 
+    def images_for_conversation(self, conversation_id: str, owner: str = "admin") -> list[dict]:
+        rows = self._db.execute("SELECT message_index, filename, data_url FROM image_attachments WHERE conversation_id=? AND owner=? ORDER BY message_index,id", (conversation_id, owner)).fetchall()
+        return [{"message_index": r[0], "filename": r[1], "data_url": r[2]} for r in rows]
+
+    def save_images(self, conversation_id: str, owner: str, message_index: int, images: list[str], names: list[str]) -> None:
+        with self._lock:
+            self._db.executemany("INSERT INTO image_attachments(conversation_id,owner,message_index,filename,data_url) VALUES(?,?,?,?,?)", [(conversation_id,owner,message_index,name,image) for name,image in zip(names,images)])
+            self._db.commit()
+
     def list_conversations(self, owner: str = "admin", project: str | None = None) -> list[dict]:
         with self._lock:
             rows = self._db.execute(
@@ -136,6 +147,7 @@ class ConversationStore:
         with self._lock:
             cursor = self._db.execute("DELETE FROM conversations WHERE id=? AND owner=?", (conversation_id, owner))
             self._db.execute("DELETE FROM conversation_index WHERE id=? AND owner=?", (conversation_id, owner))
+            self._db.execute("DELETE FROM image_attachments WHERE conversation_id=? AND owner=?", (conversation_id, owner))
             self._db.commit()
         return cursor.rowcount > 0
 
