@@ -330,7 +330,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         if chosen_images:
             visual_labels = "\n".join(f"Imagen {i+1}: {name}" for i,name in enumerate(chosen_names))
             visual_task = content_for_router.strip() or "Describí las imágenes adjuntas."
-            visual_task += "\n\nImágenes disponibles para esta consulta, en orden:\\n" + visual_labels
+            visual_task += "\n\nImágenes disponibles para esta consulta, en orden:\n" + visual_labels
             messages_for_router = [*memory_context, *recent_history, {"role": "user", "content": visual_task}]
             answer = get_backend().answer(messages_for_router, images=chosen_images)
         elif wants_previous and not previous_images:
