@@ -301,10 +301,42 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 "incluyeron en la ventana actual. No afirmes recordar detalles de esos "
                 "mensajes sin que estén en el contexto o en recuerdos persistentes. "
                 "Si son imprescindibles para responder, pedí el dato concreto."})
-        messages_for_router = [*memory_context, *recent_history, {"role": "user", "content": content_for_router or "Describí las imágenes adjuntas."}]
-        if images:
-            answer = get_backend().answer(messages_for_router, images=images)
+        # Resolve visual references against stored original image bytes, not
+        # earlier assistant descriptions. Router accepts an image array with
+        # the current task; label its order explicitly in the task text.
+        previous_images = store.images_for_conversation(conversation_id, owner)
+        request_lower = message.text.casefold()
+        wants_previous = bool(re.search(r"\\b(anterior|anteriores|previa|previas|primera|primero|segunda|segundo)\\b", request_lower))
+        wants_comparison = bool(re.search(r"compar|diferenc|ambas|las dos|entre las|entre ambas", request_lower))
+        wants_visual = bool(re.search(r"imagen|foto|fotograf|adjunt|captura|mostr|describ|ves|ve[so]|anterior|primera|segunda", request_lower))
+        chosen_images = list(images)
+        chosen_names = list(image_names)
+        if previous_images and (wants_previous or wants_comparison or (not images and wants_visual)):
+            if wants_comparison:
+                prior = previous_images[-2:] if not images else previous_images[-1:]
+            elif "primera" in request_lower or "primero" in request_lower:
+                prior = previous_images[:1]
+            elif "segunda" in request_lower or "segundo" in request_lower:
+                prior = previous_images[1:2]
+            else:
+                prior = previous_images[-1:]
+            if wants_previous and not wants_comparison:
+                chosen_images = []
+                chosen_names = []
+            chosen_images = [p["data_url"] for p in prior] + chosen_images
+            chosen_names = [p["filename"] for p in prior] + chosen_names
+        if wants_previous and not previous_images and not wants_comparison:
+            chosen_images = [] if not images else chosen_images
+        if chosen_images:
+            visual_labels = "\\n".join(f"Imagen {i+1}: {name}" for i,name in enumerate(chosen_names))
+            visual_task = content_for_router.strip() or "Describí las imágenes adjuntas."
+            visual_task += "\\n\\nImágenes disponibles para esta consulta, en orden:\\n" + visual_labels
+            messages_for_router = [*memory_context, *recent_history, {"role": "user", "content": visual_task}]
+            answer = get_backend().answer(messages_for_router, images=chosen_images)
+        elif wants_previous and not previous_images:
+            answer = "No tengo disponible la imagen anterior para analizarla. Volvé a adjuntarla."
         else:
+            messages_for_router = [*memory_context, *recent_history, {"role": "user", "content": content_for_router or "Describí las imágenes adjuntas."}]
             answer = get_backend().answer(messages_for_router)
     except httpx.HTTPStatusError as exc:
         raise HTTPException(503, "providers_http_error") from exc
@@ -320,6 +352,8 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
     visible_text = message.text + ("\n\nAdjuntos: " + ", ".join(attachment_names) if attachment_names else "")
     updated = [*history, {"role": "user", "content": visible_text}, {"role": "assistant", "content": answer}]
     store.put(conversation_id, updated, owner, message.project.strip())
+    if images:
+        store.save_images(conversation_id, owner, len(history), images, image_names)
     if not message.attachments:
         from .auto_memory import learn
         background_tasks.add_task(learn, store, owner, message.text, message.project.strip())
