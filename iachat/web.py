@@ -27,7 +27,7 @@ header{height:62px;min-height:62px;display:flex;align-items:center;justify-conte
 .attach-icon{font-size:21px;line-height:1}
 @media(max-width:380px){.attach-label{display:none}.attach{width:42px;padding:0}}
 .send{width:39px;height:39px;border-radius:14px;background:var(--accent);color:#091326;font-size:23px;font-weight:700}.send:disabled{opacity:.45}
-.note{text-align:center;color:#8897af;font-size:10px;margin:7px 0 0}
+.selected-file{display:inline-flex;align-items:center;gap:5px;margin:3px;padding:4px 7px;border:1px solid var(--edge);border-radius:10px;background:var(--panel);max-width:100%}.selected-file button{background:#35445c;border-radius:8px;padding:0 7px;font-size:17px}.selected-file span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.note{text-align:center;color:#8897af;font-size:10px;margin:7px 0 0}
 #drawer{position:absolute;z-index:8;top:0;bottom:0;left:0;width:min(85vw,320px);background:#1b2432;border-right:1px solid var(--edge);padding:19px;box-shadow:12px 0 60px #0008;display:none;overflow:auto}
 #drawer.open{display:block}.drawer-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
 .history-item{width:100%;padding:12px;text-align:left;background:#293447;border-radius:12px;margin-bottom:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -194,10 +194,25 @@ document.getElementById('pickDocuments').onclick=function(){closeAttachmentMenu(
 document.getElementById('pickImages').onclick=function(){closeAttachmentMenu();imageInput.click()};
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeAttachmentMenu()});
 document.addEventListener('click',function(e){if(!attachMenu.hidden&&!attachMenu.contains(e.target)&&!attachButton.contains(e.target))closeAttachmentMenu()});
-function selectedAttachments(){return [...fileInput.files,...imageInput.files]}
-function showSelectedAttachments(){var fs=selectedAttachments();document.getElementById('selectedFiles').textContent=fs.length?fs.map(f=>f.name).join(', '):''}
-fileInput.onchange=showSelectedAttachments;
-imageInput.onchange=showSelectedAttachments;
+var selectedFiles=[];
+function selectedAttachments(){return selectedFiles.slice()}
+function showSelectedAttachments(){
+  var host=document.getElementById('selectedFiles');host.replaceChildren();
+  selectedFiles.forEach(function(f,index){
+    var chip=document.createElement('span');chip.className='selected-file';
+    var name=document.createElement('span');name.textContent=f.name;
+    var remove=document.createElement('button');remove.type='button';remove.textContent='×';
+    remove.setAttribute('aria-label','Quitar '+f.name);
+    remove.onclick=function(){selectedFiles.splice(index,1);showSelectedAttachments()};
+    chip.append(name,remove);host.appendChild(chip);
+  });
+}
+function addSelectedFiles(e){
+  selectedFiles.push(...Array.from(e.target.files||[]));
+  e.target.value='';showSelectedAttachments();
+}
+fileInput.onchange=addSelectedFiles;
+imageInput.onchange=addSelectedFiles;
 function fileBase64(f){return new Promise(function(resolve,reject){var rd=new FileReader();rd.onload=function(){resolve(String(rd.result).split(',')[1])};rd.onerror=reject;rd.readAsDataURL(f)})}
 
 document.getElementById('form').onsubmit=async function(e){e.preventDefault();if(busy)return;var text=input.value.trim(),files=selectedAttachments();if(!text&&!files.length)return;if(files.length>3){alert('Podés adjuntar como máximo 3 archivos.');return}
@@ -206,7 +221,7 @@ if(oversized){alert('El archivo "'+oversized.name+'" pesa '+(oversized.size/1000
 var invalid=files.find(f=>!['.txt','.md','.pdf','.jpg','.jpeg','.png','.webp'].some(ext=>f.name.toLowerCase().endsWith(ext)));
 if(invalid){alert('El archivo "'+invalid.name+'" no es PDF, TXT, MD, JPG, PNG ni WebP.');return}
 busy=true;var waiting=add('assistant','Enviando…');var payload={text:text,project:activeProject()};if(conversationId)payload.conversation_id=conversationId;
-try{payload.attachments=await Promise.all(files.map(async function(f){return {name:f.name,content_base64:await fileBase64(f)}}));var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var raw=await r.text(),d;try{d=JSON.parse(raw)}catch(_){d={detail:'El servidor respondió con un error no válido.'}}waiting.remove();if(!r.ok){var detail=typeof d.detail==='string'?d.detail:'No se pudo procesar el adjunto';alert('No se envió el mensaje (HTTP '+r.status+'): '+detail+'. Podés reintentar.');if(r.status===401)showLogin();return}if(!d||typeof d.answer!=='string'||!d.conversation_id){alert('El servidor devolvió una respuesta incompleta. Conservamos tu mensaje para reintentar.');return}add('user',text+(files.length?'\nAdjuntos: '+files.map(f=>f.name).join(', '):''));input.value='';fileInput.value='';imageInput.value='';document.getElementById('selectedFiles').textContent='';conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55),project:activeProject()});saveIds();syncHistory().catch(function(){});add('assistant',d.answer)}
+try{payload.attachments=await Promise.all(files.map(async function(f){return {name:f.name,content_base64:await fileBase64(f)}}));var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var raw=await r.text(),d;try{d=JSON.parse(raw)}catch(_){d={detail:'El servidor respondió con un error no válido.'}}waiting.remove();if(!r.ok){var detail=typeof d.detail==='string'?d.detail:'No se pudo procesar el adjunto';alert('No se envió el mensaje (HTTP '+r.status+'): '+detail+'. Podés reintentar.');if(r.status===401)showLogin();return}if(!d||typeof d.answer!=='string'||!d.conversation_id){alert('El servidor devolvió una respuesta incompleta. Conservamos tu mensaje para reintentar.');return}add('user',text+(files.length?'\nAdjuntos: '+files.map(f=>f.name).join(', '):''));input.value='';selectedFiles=[];fileInput.value='';imageInput.value='';showSelectedAttachments();conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55),project:activeProject()});saveIds();syncHistory().catch(function(){});add('assistant',d.answer)}
 catch(err){waiting.remove();alert('No se pudo enviar. Comprobá la conexión y reintentá: el texto y los adjuntos siguen seleccionados.')}finally{busy=false}};
 input.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('form').requestSubmit()}});
 init();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
