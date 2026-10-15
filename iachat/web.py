@@ -195,6 +195,14 @@ document.getElementById('pickImages').onclick=function(){closeAttachmentMenu();i
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeAttachmentMenu()});
 document.addEventListener('click',function(e){if(!attachMenu.hidden&&!attachMenu.contains(e.target)&&!attachButton.contains(e.target))closeAttachmentMenu()});
 var selectedFiles=[];
+var selectedFileData=new WeakMap();
+function cacheSelectedFile(f){
+  if(!selectedFileData.has(f)){
+    var result=fileBase64(f).then(function(data){return {ok:true,data:data}},function(err){console.warn('IAchat file read failed',f.name,err&&err.name);return {ok:false}});
+    selectedFileData.set(f,result);
+  }
+  return selectedFileData.get(f);
+}
 function selectedAttachments(){return selectedFiles.slice()}
 function showSelectedAttachments(){
   var host=document.getElementById('selectedFiles');host.replaceChildren();
@@ -208,12 +216,13 @@ function showSelectedAttachments(){
   });
 }
 function addSelectedFiles(e){
-  selectedFiles.push(...Array.from(e.target.files||[]));
+  var incoming=Array.from(e.target.files||[]);
+  incoming.forEach(function(f){selectedFiles.push(f);cacheSelectedFile(f)});
   e.target.value='';showSelectedAttachments();
 }
 fileInput.onchange=addSelectedFiles;
 imageInput.onchange=addSelectedFiles;
-function fileBase64(f){return new Promise(function(resolve,reject){var rd=new FileReader();rd.onload=function(){resolve(String(rd.result).split(',')[1])};rd.onerror=reject;rd.readAsDataURL(f)})}
+function fileBase64(f){return new Promise(function(resolve,reject){var rd=new FileReader();rd.onload=function(){var data=String(rd.result||'').split(',')[1];if(data)resolve(data);else reject(new Error('empty_file_data'))};rd.onerror=function(){reject(rd.error||new Error('file_read_error'))};rd.onabort=function(){reject(new Error('file_read_aborted'))};try{rd.readAsDataURL(f)}catch(err){reject(err)}})}
 
 document.getElementById('form').onsubmit=async function(e){e.preventDefault();if(busy)return;var text=input.value.trim(),files=selectedAttachments();if(!text&&!files.length)return;if(files.length>3){alert('Podés adjuntar como máximo 3 archivos.');return}
 var oversized=files.find(f=>f.size>2000000);
@@ -221,8 +230,12 @@ if(oversized){alert('El archivo "'+oversized.name+'" pesa '+(oversized.size/1000
 var invalid=files.find(f=>!['.txt','.md','.pdf','.jpg','.jpeg','.png','.webp'].some(ext=>f.name.toLowerCase().endsWith(ext)));
 if(invalid){alert('El archivo "'+invalid.name+'" no es PDF, TXT, MD, JPG, PNG ni WebP.');return}
 busy=true;var waiting=add('assistant','Enviando…');var payload={text:text,project:activeProject()};if(conversationId)payload.conversation_id=conversationId;
-var stage='reading_files';var accepted=false;try{payload.attachments=await Promise.all(files.map(async function(f){return {name:f.name,content_base64:await fileBase64(f)}}));stage='sending_request';var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var raw=await r.text(),d;try{d=JSON.parse(raw)}catch(_){d={detail:'El servidor respondió con un error no válido.'}}waiting.remove();if(!r.ok){var detail=typeof d.detail==='string'?d.detail:'No se pudo procesar el adjunto';alert('No se envió el mensaje (HTTP '+r.status+'): '+detail+'. Podés reintentar.');if(r.status===401)showLogin();return}if(!d||typeof d.answer!=='string'||!d.conversation_id){alert('El servidor devolvió una respuesta incompleta. Conservamos tu mensaje para reintentar.');return}accepted=true;var sent=add('user',text);payload.attachments.forEach(function(a,i){var f=files[i],ext=f.name.toLowerCase();if(/\.(jpg|jpeg|png|webp)$/.test(ext)){var img=document.createElement('img');img.className='sent-image';img.alt='Imagen adjunta: '+f.name;img.src='data:'+(ext.endsWith('.png')?'image/png':ext.endsWith('.webp')?'image/webp':'image/jpeg')+';base64,'+a.content_base64;sent.appendChild(img)}else{var note=document.createElement('div');note.className='sent-file';note.textContent='📄 '+f.name;sent.appendChild(note)}});input.value='';selectedFiles=[];fileInput.value='';imageInput.value='';showSelectedAttachments();conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55),project:activeProject()});saveIds();syncHistory().catch(function(){});add('assistant',d.answer)}
-catch(err){if(waiting.isConnected)waiting.remove();if(accepted){console.error('IAchat display failure after successful send',err);alert('El mensaje se envió, pero hubo un problema al actualizar la pantalla. Recargá la conversación antes de reintentar para evitar duplicados.');return}var reason=err&&err.name==='TypeError'?'No se pudo completar la solicitud HTTP. Puede ser un problema de conexión, proxy o límite de carga.':err&&err.name==='AbortError'?'La solicitud fue interrumpida.':'Error inesperado al preparar o enviar el mensaje.';console.error('IAchat upload failure',stage,err);alert((stage==='reading_files'?'No se pudo leer el archivo seleccionado. ':reason)+' El texto y los adjuntos siguen seleccionados para reintentar.')}finally{busy=false}};
+var stage='reading_files';var accepted=false;try{payload.attachments=await Promise.all(files.map(async function(f){
+  var cached=await cacheSelectedFile(f);
+  if(!cached.ok)throw new Error('file_read_failed_reselect');
+  return {name:f.name,content_base64:cached.data};
+}));stage='sending_request';var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var raw=await r.text(),d;try{d=JSON.parse(raw)}catch(_){d={detail:'El servidor respondió con un error no válido.'}}waiting.remove();if(!r.ok){var detail=typeof d.detail==='string'?d.detail:'No se pudo procesar el adjunto';alert('No se envió el mensaje (HTTP '+r.status+'): '+detail+'. Podés reintentar.');if(r.status===401)showLogin();return}if(!d||typeof d.answer!=='string'||!d.conversation_id){alert('El servidor devolvió una respuesta incompleta. Conservamos tu mensaje para reintentar.');return}accepted=true;var sent=add('user',text);payload.attachments.forEach(function(a,i){var f=files[i],ext=f.name.toLowerCase();if(/\.(jpg|jpeg|png|webp)$/.test(ext)){var img=document.createElement('img');img.className='sent-image';img.alt='Imagen adjunta: '+f.name;img.src='data:'+(ext.endsWith('.png')?'image/png':ext.endsWith('.webp')?'image/webp':'image/jpeg')+';base64,'+a.content_base64;sent.appendChild(img)}else{var note=document.createElement('div');note.className='sent-file';note.textContent='📄 '+f.name;sent.appendChild(note)}});input.value='';selectedFiles=[];fileInput.value='';imageInput.value='';showSelectedAttachments();conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55),project:activeProject()});saveIds();syncHistory().catch(function(){});add('assistant',d.answer)}
+catch(err){if(waiting.isConnected)waiting.remove();if(accepted){console.error('IAchat display failure after successful send',err);alert('El mensaje se envió, pero hubo un problema al actualizar la pantalla. Recargá la conversación antes de reintentar para evitar duplicados.');return}var reason=err&&err.name==='TypeError'?'No se pudo completar la solicitud HTTP. Puede ser un problema de conexión, proxy o límite de carga.':err&&err.name==='AbortError'?'La solicitud fue interrumpida.':'Error inesperado al preparar o enviar el mensaje.';console.error('IAchat upload failure',stage,err);alert((stage==='reading_files'?'No se pudo leer el archivo. Quitá el adjunto y volvé a seleccionarlo desde Imágenes o Documentos. ':reason)+' El texto sigue disponible para reintentar.')}finally{busy=false}};
 input.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('form').requestSubmit()}});
 init();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
 </script></body></html>"""
@@ -237,7 +250,7 @@ MANIFEST = {
         {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
     ]
 }
-SERVICE_WORKER = """const CACHE='iachat-shell-v14';
+SERVICE_WORKER = """const CACHE='iachat-shell-v15';
 const ASSETS=['/','/manifest.webmanifest','/icons/icon-192.png','/icons/icon-512.png'];
 self.addEventListener('install',event=>{
  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
