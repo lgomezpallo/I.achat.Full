@@ -23,7 +23,8 @@ class RouterFirstBackend:
             "del usuario, salvo que pida explícitamente otro idioma. No cambies de "
             "idioma porque cambie el proveedor o el modelo."
         )
-        context = language_guidance + ("\n" + "\n".join(
+        conversational_guidance = ("Interpretá errores de tipeo y referencias implícitas usando el contexto conversacional. No exijas aclaraciones si la intención es clara. Distinguí hechos observados de inferencias; no inventes detalles visuales ni afirmes datos inciertos como hechos. Si el usuario corrige algo, incorporá la corrección sin perder el hilo.")
+        context = language_guidance + "\n" + conversational_guidance + ("\n" + "\n".join(
             item["content"] for item in messages[:-1] if item.get("role") == "system"
         ) if any(item.get("role") == "system" for item in messages[:-1]) else "")
         conversation = [
