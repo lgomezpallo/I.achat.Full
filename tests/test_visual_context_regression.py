@@ -134,3 +134,38 @@ def test_new_image_compared_to_previous_is_not_discarded(monkeypatch):
     assert len(requests[1]["images"]) == 2
     assert "antes.png" in requests[1]["task"]
     assert "despues.png" in requests[1]["task"]
+
+
+def test_pronoun_followup_uses_previous_image(monkeypatch):
+    module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(module, "_signed_user", lambda cookie: "admin")
+    monkeypatch.setenv("ROUTER_URL", "https://router.example")
+    monkeypatch.setenv("ROUTER_TOKEN", "test-token")
+    requests = []
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"ok": True, "text": "Respuesta de prueba"}
+
+    def post(url, **kwargs):
+        requests.append(kwargs["json"])
+        return Response()
+
+    monkeypatch.setattr("iachat.backend.httpx.post", post)
+    with TestClient(module.app, base_url="https://testserver") as client:
+        first = client.post("/api/chat", json={
+            "text": "Mirá esta imagen",
+            "attachments": [{"name": "referencia.png", "content_base64": PNG}],
+        })
+        assert first.status_code == 200, first.text
+        second = client.post("/api/chat", json={
+            "conversation_id": first.json()["conversation_id"],
+            "text": "¿Qué es eso?",
+        })
+        assert second.status_code == 200, second.text
+
+    assert len(requests) == 2
+    assert requests[1]["required_capabilities"] == ["chat", "vision"]
+    assert requests[1]["images"] == requests[0]["images"]
