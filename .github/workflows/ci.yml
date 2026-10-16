@@ -16,6 +16,14 @@ jobs:
         run: |
           set -o pipefail
           pytest -q 2>&1 | tee pytest-result.txt
+      - name: Guardar diagnóstico de pruebas fallidas
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iachat-pytest-diagnostic
+          path: pytest-result.txt
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Conversación aislada sin credenciales reales
         run: python scripts/smoke_conversation.py
       - run: docker build -t iachat-ci .

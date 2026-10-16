@@ -307,8 +307,13 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         previous_images = store.images_for_conversation(conversation_id, owner)
         request_lower = message.text.casefold()
         wants_previous = bool(re.search(r"\b(anterior|anteriores|previa|previas|primera|primero|segunda|segundo)\b", request_lower))
-        wants_comparison = bool(re.search(r"compar|diferenc|ambas|las dos|entre las|entre ambas", request_lower))
-        wants_visual = bool(re.search(r"imagen|foto|fotograf|adjunt|captura|mostr|describ|ves|ve[so]|anterior|primera|segunda|\\b(esa|ese|esta|este|eso|esto|última|ultimo|último|detalle|fondo|camiseta|estadio)\\b", request_lower))
+        wants_comparison = bool(re.search(
+            r"compar|diferenc|ambas|las dos|entre las|entre ambas|respecto (?:de|a)|"
+            r"cambi[oó]|cambios|igual(?:es)?|distint|versus|\bvs\.?\b", request_lower))
+        wants_visual = bool(re.search(
+            r"imagen|foto|fotograf|adjunt|captura|mostr|describ|ves|veo|"
+            r"anterior|primera|segunda|\b(esa|ese|esta|este|eso|esto|última|ultimo|"
+            r"último|detalle|fondo|camiseta|estadio)\b", request_lower))
         chosen_images = list(images)
         chosen_names = list(image_names)
         if previous_images and (wants_previous or wants_comparison or (not images and wants_visual)):
@@ -320,7 +325,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 prior = previous_images[1:2]
             else:
                 prior = previous_images[-1:]
-            if wants_previous and not wants_comparison:
+            if wants_previous and not wants_comparison and not images:
                 chosen_images = []
                 chosen_names = []
             chosen_images = [p["data_url"] for p in prior] + chosen_images
