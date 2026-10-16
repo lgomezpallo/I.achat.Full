@@ -91,6 +91,8 @@ def test_two_image_comparison_sends_both_originals(monkeypatch):
         assert c.status_code == 200, c.text
 
     assert len(requests) == 3
+    assert "segunda.png" in requests[1]["task"]
+    assert requests[1]["images"]
     assert requests[2]["required_capabilities"] == ["chat", "vision"]
     assert len(requests[2]["images"]) == 2
     assert "primera.png" in requests[2]["task"]
