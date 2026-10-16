@@ -3,8 +3,8 @@ from iachat.central import decide
 
 
 def test_greeting_is_local():
-    decision = decide("¡Hola!")  # punctuation not in strict matcher: delegate safely
-    assert decision.action == "delegate"
+    decision = decide("¡Hola!")
+    assert decision.action == "reply"
     assert decide("Hola").action == "reply"
 
 
