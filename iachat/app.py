@@ -275,6 +275,17 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                        {"role": "assistant", "content": answer}]
             store.put(conversation_id, updated, owner, message.project.strip())
             return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
+    # Central is opt-in until its live Router fallback has been validated.
+    # Attachments and substantive requests always use the existing Router path.
+    if os.getenv("IACHAT_CENTRAL_ENABLED", "").strip() == "1" and not message.attachments:
+        from .central import decide
+        central_decision = decide(message.text)
+        if central_decision.action == "reply":
+            updated = [*history, {"role": "user", "content": message.text},
+                       {"role": "assistant", "content": central_decision.response}]
+            store.put(conversation_id, updated, owner, message.project.strip())
+            return MessageOutput(conversation_id=conversation_id,
+                                 answer=central_decision.response, history=updated)
     try:
         memories = store.list_memories(owner, message.project.strip())
         memory_context = []
