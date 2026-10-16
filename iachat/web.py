@@ -217,7 +217,13 @@ function showSelectedAttachments(){
 }
 function addSelectedFiles(e){
   var incoming=Array.from(e.target.files||[]);
-  incoming.forEach(function(f){selectedFiles.push(f);cacheSelectedFile(f)});
+  var available=Math.max(0,5-selectedFiles.length);
+  if(incoming.length>available){alert('Podés adjuntar como máximo 5 archivos por mensaje.');}
+  incoming.slice(0,available).forEach(function(f){
+    if(f.size>2000000){alert('El archivo "'+f.name+'" supera los 2 MB permitidos.');return}
+    if(selectedFiles.some(function(existing){return existing.name===f.name&&existing.size===f.size&&existing.lastModified===f.lastModified})){return}
+    selectedFiles.push(f);cacheSelectedFile(f);
+  });
   e.target.value='';showSelectedAttachments();
 }
 fileInput.onchange=addSelectedFiles;
