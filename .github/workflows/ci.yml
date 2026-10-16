@@ -1,7 +1,7 @@
 name: IAchat CI
 on:
   push:
-    branches: [main, desarrollo/iachat-full]
+    branches: [main, desarrollo/iachat-full, 'fix/visual-context-comparison-20261016']
   pull_request:
 jobs:
   tests:
