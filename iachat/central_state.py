@@ -21,7 +21,7 @@ class ContextResult:
     question: str = ""
 
 
-_REFERENCE = re.compile(r"\b(ahí|alli|allí|esa|ese|eso|esta|este|esto|la misma|el mismo)\b", re.I)
+_REFERENCE = re.compile(r"\b(ahí|alli|allí|eso|esto|la misma|el mismo)\b", re.I)
 
 
 def resolve_topic(text: str, state: ConversationState) -> ContextResult:
