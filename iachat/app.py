@@ -320,7 +320,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 prior = previous_images[1:2]
             else:
                 prior = previous_images[-1:]
-            if wants_previous and not wants_comparison:
+            if wants_previous and not wants_comparison and not images:
                 chosen_images = []
                 chosen_names = []
             chosen_images = [p["data_url"] for p in prior] + chosen_images
