@@ -127,7 +127,7 @@ class AttachmentInput(BaseModel):
 class MessageInput(BaseModel):
     conversation_id: str | None = None
     text: str = Field(default="", max_length=15000)
-    attachments: list[AttachmentInput] = Field(default_factory=list, max_length=3)
+    attachments: list[AttachmentInput] = Field(default_factory=list, max_length=5)
     project: str = Field(default="", max_length=60, pattern=r"^[\w\- ]*$")
 
 class MemoryInput(BaseModel):
