@@ -307,7 +307,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         previous_images = store.images_for_conversation(conversation_id, owner)
         request_lower = message.text.casefold()
         wants_previous = bool(re.search(r"\b(anterior|anteriores|previa|previas|primera|primero|segunda|segundo)\b", request_lower))
-        wants_comparison = bool(re.search(r"compar|diferenc|ambas|las dos|entre las|entre ambas", request_lower))
+        wants_comparison = bool(re.search(r"compar|diferenc|ambas|las dos|entre las|entre ambas|respecto (?:de|a)|cambi[oó]|cambios|igual(?:es)?|distint|versus|\\bvs\\.?\\b", request_lower))
         wants_visual = bool(re.search(r"imagen|foto|fotograf|adjunt|captura|mostr|describ|ves|ve[so]|anterior|primera|segunda|\\b(esa|ese|esta|este|eso|esto|última|ultimo|último|detalle|fondo|camiseta|estadio)\\b", request_lower))
         chosen_images = list(images)
         chosen_names = list(image_names)
