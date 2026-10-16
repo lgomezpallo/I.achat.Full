@@ -66,7 +66,7 @@ def extract_images(attachments):
         "png": ("png", lambda b: b.startswith(bytes.fromhex("89504e470d0a1a0a"))),
         "webp": ("webp", lambda b: b.startswith(b"RIFF") and b[8:12] == b"WEBP"),
     }
-    if len(attachments) > 3:
+    if len(attachments) > 5:
         raise AttachmentError("too_many_attachments")
     for item in attachments:
         name = PurePath(item.name.replace("\\", "/")).name[:180]
