@@ -224,7 +224,7 @@ fileInput.onchange=addSelectedFiles;
 imageInput.onchange=addSelectedFiles;
 function fileBase64(f){return new Promise(function(resolve,reject){var rd=new FileReader();rd.onload=function(){var data=String(rd.result||'').split(',')[1];if(data)resolve(data);else reject(new Error('empty_file_data'))};rd.onerror=function(){reject(rd.error||new Error('file_read_error'))};rd.onabort=function(){reject(new Error('file_read_aborted'))};try{rd.readAsDataURL(f)}catch(err){reject(err)}})}
 
-document.getElementById('form').onsubmit=async function(e){e.preventDefault();if(busy)return;var text=input.value.trim(),files=selectedAttachments();if(!text&&!files.length)return;if(files.length>3){alert('Podés adjuntar como máximo 3 archivos.');return}
+document.getElementById('form').onsubmit=async function(e){e.preventDefault();if(busy)return;var text=input.value.trim(),files=selectedAttachments();if(!text&&!files.length)return;if(files.length>5){alert('Podés adjuntar como máximo 5 archivos.');return}
 var oversized=files.find(f=>f.size>2000000);
 if(oversized){alert('El archivo "'+oversized.name+'" pesa '+(oversized.size/1000000).toFixed(2)+' MB. El máximo es 2 MB por archivo.');return}
 var invalid=files.find(f=>!['.txt','.md','.pdf','.jpg','.jpeg','.png','.webp'].some(ext=>f.name.toLowerCase().endsWith(ext)));
