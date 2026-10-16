@@ -27,14 +27,18 @@ def test_central_http_recovers_state_and_clarifies_unknown_reference(monkeypatch
     # The persisted topic is available, so this is delegated rather than
     # incorrectly clarified. A model is deliberately not called in this test.
     class Backend:
+        messages = None
         def answer(self, messages, images=None):
+            self.messages = messages
             return "Respuesta de prueba"
-    monkeypatch.setattr(module, "get_backend", lambda: Backend())
+    backend = Backend()
+    monkeypatch.setattr(module, "get_backend", lambda: backend)
     followup = client.post("/api/chat", json={
         "conversation_id": conversation_id, "text": "¿Qué pasó ahí?"
     })
     assert followup.status_code == 200
     assert followup.json()["answer"] == "Respuesta de prueba"
+    assert any("Obra 1058" in m["content"] for m in backend.messages if m["role"] == "system")
 
     unknown = client.post("/api/chat", json={"text": "¿Qué pasó ahí?"})
     assert unknown.status_code == 200
