@@ -280,11 +280,14 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
     # Load state by authenticated owner and conversation, without guessing topics.
     if os.getenv("IACHAT_CENTRAL_ENABLED", "").strip() == "1" and not message.attachments:
         from .central import decide, Decision
-        from .central_state import ConversationState, resolve_topic
+        from .central_state import ConversationState, resolve_topic, explicit_topic, set_topic
         from .central_storage import CentralStateStore
         central_db = CentralStateStore(os.getenv("IACHAT_DB", "iachat.db"))
         try:
             central_state = central_db.load(owner, conversation_id) or ConversationState()
+            named_topic = explicit_topic(message.text)
+            if named_topic:
+                set_topic(central_state, named_topic)
             central_decision = decide(message.text)
             if central_decision.action == "delegate":
                 reference = resolve_topic(message.text, central_state)
@@ -292,6 +295,8 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                     central_topic_context = reference.topic
                 if reference.status == "clarify":
                     central_decision = Decision("clarify", reference.question, "missing_topic_reference")
+            if named_topic and central_decision.action == "delegate":
+                central_db.save(owner, conversation_id, central_state)
             if central_decision.action in ("reply", "clarify"):
                 updated = [*history, {"role": "user", "content": message.text},
                            {"role": "assistant", "content": central_decision.response}]
