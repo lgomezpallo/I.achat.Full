@@ -42,3 +42,21 @@ def test_two_images_and_followup_reuse_originals(monkeypatch, tmp_path):
     assert len(backend.calls[1][1]) == 2
     assert len(followup.json()["history"]) == 4
     assert PNG not in repr(followup.json()["history"])
+
+
+def test_five_images_are_accepted(monkeypatch, tmp_path):
+    module.store = ConversationStore(str(tmp_path / "five.db"))
+    module.store.create_user("smoke", "test-only-secret")
+    monkeypatch.setattr(module, "_signed_user", lambda cookie: "smoke")
+    backend = Backend()
+    monkeypatch.setattr(module, "get_backend", lambda: backend)
+    response = TestClient(module.app).post("/api/chat", json={
+        "text": "Compará las cinco fotos",
+        "attachments": [
+            {"name": f"foto-{i}.png", "content_base64": PNG}
+            for i in range(1, 6)
+        ],
+    })
+    assert response.status_code == 200, response.text
+    assert len(backend.calls[0][1]) == 5
+    assert "Imagen 5: foto-5.png" in backend.calls[0][0][-1]["content"]
