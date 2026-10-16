@@ -35,7 +35,8 @@ def test_image_to_backend_is_ephemeral(monkeypatch, tmp_path):
     assert response.status_code == 200, response.text
     conversation = response.json()
     assert backend.images == ["data:image/png;base64," + PNG]
-    assert backend.messages[-1]["content"] == "Describí esta imagen."
+    assert backend.messages[-1]["content"].startswith("Describí esta imagen.")
+    assert "Imagen 1: foto.png" in backend.messages[-1]["content"]
     assert "foto.png" in conversation["history"][-2]["content"]
     assert PNG not in repr(conversation["history"])
     assert PNG not in repr(module.store.get(conversation["conversation_id"], "smoke"))
