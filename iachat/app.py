@@ -309,11 +309,11 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         wants_previous = bool(re.search(r"\b(anterior|anteriores|previa|previas|primera|primero|segunda|segundo)\b", request_lower))
         wants_comparison = bool(re.search(
             r"compar|diferenc|ambas|las dos|entre las|entre ambas|respecto (?:de|a)|"
-            r"cambi[oó]|cambios|igual(?:es)?|distint|versus|\\bvs\\.?\\b", request_lower))
+            r"cambi[oó]|cambios|igual(?:es)?|distint|versus|\bvs\.?\b", request_lower))
         wants_visual = bool(re.search(
             r"imagen|foto|fotograf|adjunt|captura|mostr|describ|ves|veo|"
-            r"anterior|primera|segunda|\\b(esa|ese|esta|este|eso|esto|última|ultimo|"
-            r"último|detalle|fondo|camiseta|estadio)\\b", request_lower))
+            r"anterior|primera|segunda|\b(esa|ese|esta|este|eso|esto|última|ultimo|"
+            r"último|detalle|fondo|camiseta|estadio)\b", request_lower))
         chosen_images = list(images)
         chosen_names = list(image_names)
         if previous_images and (wants_previous or wants_comparison or (not images and wants_visual)):
