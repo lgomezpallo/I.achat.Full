@@ -60,3 +60,26 @@ def test_five_images_are_accepted(monkeypatch, tmp_path):
     assert response.status_code == 200, response.text
     assert len(backend.calls[0][1]) == 5
     assert "Imagen 5: foto-5.png" in backend.calls[0][0][-1]["content"]
+
+
+def test_mixed_documents_and_images(monkeypatch, tmp_path):
+    module.store = ConversationStore(str(tmp_path / "mixed.db"))
+    module.store.create_user("smoke", "test-only-secret")
+    monkeypatch.setattr(module, "_signed_user", lambda cookie: "smoke")
+    backend = Backend()
+    monkeypatch.setattr(module, "get_backend", lambda: backend)
+    response = TestClient(module.app).post("/api/chat", json={
+        "text": "Compará el documento con las fotos",
+        "attachments": [
+            {"name": "notas.txt", "content_base64": base64.b64encode(b"Datos del documento").decode()},
+            {"name": "primera.png", "content_base64": PNG},
+            {"name": "segunda.png", "content_base64": PNG},
+        ],
+    })
+    assert response.status_code == 200, response.text
+    messages, images = backend.calls[0]
+    assert len(images) == 2
+    assert "Datos del documento" in messages[-1]["content"]
+    assert "Imagen 1: primera.png" in messages[-1]["content"]
+    assert "Imagen 2: segunda.png" in messages[-1]["content"]
+    assert "notas.txt" in response.json()["history"][-2]["content"]
