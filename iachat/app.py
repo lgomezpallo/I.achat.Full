@@ -276,16 +276,28 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
             store.put(conversation_id, updated, owner, message.project.strip())
             return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
     # Central is opt-in until its live Router fallback has been validated.
-    # Attachments and substantive requests always use the existing Router path.
+    # Load state by authenticated owner and conversation, without guessing topics.
     if os.getenv("IACHAT_CENTRAL_ENABLED", "").strip() == "1" and not message.attachments:
-        from .central import decide
-        central_decision = decide(message.text)
-        if central_decision.action == "reply":
-            updated = [*history, {"role": "user", "content": message.text},
-                       {"role": "assistant", "content": central_decision.response}]
-            store.put(conversation_id, updated, owner, message.project.strip())
-            return MessageOutput(conversation_id=conversation_id,
-                                 answer=central_decision.response, history=updated)
+        from .central import decide, Decision
+        from .central_state import ConversationState, resolve_topic
+        from .central_storage import CentralStateStore
+        central_db = CentralStateStore(os.getenv("IACHAT_DB", "iachat.db"))
+        try:
+            central_state = central_db.load(owner, conversation_id) or ConversationState()
+            central_decision = decide(message.text)
+            if central_decision.action == "delegate":
+                reference = resolve_topic(message.text, central_state)
+                if reference.status == "clarify":
+                    central_decision = Decision("clarify", reference.question, "missing_topic_reference")
+            if central_decision.action in ("reply", "clarify"):
+                updated = [*history, {"role": "user", "content": message.text},
+                           {"role": "assistant", "content": central_decision.response}]
+                store.put(conversation_id, updated, owner, message.project.strip())
+                central_db.save(owner, conversation_id, central_state)
+                return MessageOutput(conversation_id=conversation_id,
+                                     answer=central_decision.response, history=updated)
+        finally:
+            central_db.close()
     try:
         memories = store.list_memories(owner, message.project.strip())
         memory_context = []
