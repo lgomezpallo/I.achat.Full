@@ -52,3 +52,31 @@ def ask_clarification(state: ConversationState, question: str) -> None:
 def clear_topic(state: ConversationState) -> None:
     state.active_topic = None
     state.pending_question = None
+
+
+def state_to_dict(state: ConversationState) -> dict:
+    """Create a JSON-compatible snapshot without exposing mutable references."""
+    return {
+        "version": 1,
+        "active_topic": state.active_topic,
+        "pending_question": state.pending_question,
+        "facts": dict(state.facts),
+    }
+
+
+def state_from_dict(data: dict) -> ConversationState:
+    """Load a snapshot, rejecting malformed or unsupported state."""
+    if not isinstance(data, dict) or data.get("version") != 1:
+        raise ValueError("unsupported conversation state")
+    topic = data.get("active_topic")
+    pending = data.get("pending_question")
+    facts = data.get("facts")
+    if (topic is not None and (not isinstance(topic, str) or not topic.strip())):
+        raise ValueError("invalid active_topic")
+    if (pending is not None and (not isinstance(pending, str) or not pending.strip())):
+        raise ValueError("invalid pending_question")
+    if not isinstance(facts, dict) or any(
+        not isinstance(k, str) or not isinstance(v, str) for k, v in facts.items()
+    ):
+        raise ValueError("invalid facts")
+    return ConversationState(active_topic=topic, pending_question=pending, facts=dict(facts))
