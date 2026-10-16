@@ -80,3 +80,15 @@ def state_from_dict(data: dict) -> ConversationState:
     ):
         raise ValueError("invalid facts")
     return ConversationState(active_topic=topic, pending_question=pending, facts=dict(facts))
+
+
+_EXPLICIT_TOPIC = re.compile(r"\b(?:obra|presupuesto)\s*(?:n[°ºo.]\s*)?(\d{3,8})\b", re.I)
+
+
+def explicit_topic(text: str) -> str | None:
+    """Recognize only a clearly named work/budget identifier.
+
+    Do not infer topics from dates, bare numbers or ambiguous place names.
+    """
+    match = _EXPLICIT_TOPIC.search(text)
+    return f"Obra {match.group(1)}" if match else None
