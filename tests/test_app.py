@@ -75,17 +75,18 @@ def test_router_failure_does_not_create_fake_answer(monkeypatch):
     monkeypatch.setattr(module, "get_backend", lambda: FailingBackend())
     response = client.post("/api/chat", json={"text": "Hola"})
     assert response.status_code == 503
-    assert response.json()["detail"] == "router_unavailable"
+    assert response.json()["detail"] == "providers_unavailable"
     assert module.store._db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
 
 
 def test_readiness_requires_router_credentials(monkeypatch):
+    monkeypatch.setenv("IACHAT_BACKEND", "router")
     monkeypatch.delenv("ROUTER_URL", raising=False)
     monkeypatch.delenv("ROUTER_TOKEN", raising=False)
     assert client.get("/ready").status_code == 503
     monkeypatch.setenv("ROUTER_URL", "https://router.example")
     monkeypatch.setenv("ROUTER_TOKEN", "test-token")
-    assert client.get("/ready").json()["mode"] == "router_only"
+    assert client.get("/ready").json()["mode"] == "router"
 
 def test_router_backend_success_and_auth_failure(monkeypatch):
     from iachat.backend import RouterFirstBackend
@@ -226,6 +227,7 @@ def test_memory_suggestions_reject_invalid_router_output(monkeypatch):
 
 
 def test_router_status_does_not_confuse_health_with_routing(monkeypatch):
+    monkeypatch.setenv("IACHAT_BACKEND", "router")
     monkeypatch.delenv("ROUTER_URL", raising=False)
     monkeypatch.delenv("ROUTER_TOKEN", raising=False)
     missing = client.get("/api/router/status")
