@@ -16,13 +16,6 @@ rollback() {
     rsync -a --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' \
       "$backup/" "$app/" || true
     "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q || true
-    # Reuse already-installed provider credentials without exposing their values.
-# Systemd reads this file as root even when its permissions prevent user access.
-if sudo -n test -f /etc/router-providers.env; then
-  sudo -n install -d -m 755 /etc/systemd/system/iachat.service.d
-  printf '[Service]\\nEnvironmentFile=-/etc/router-providers.env\\n' | sudo -n tee /etc/systemd/system/iachat.service.d/20-integrated-providers.conf >/dev/null
-  sudo -n systemctl daemon-reload
-fi
 sudo -n systemctl restart iachat || true
   fi
   cleanup
@@ -44,6 +37,22 @@ rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*
   "$stage/" "$app/"
 "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q
 "$app/.venv/bin/python" -m compileall -q "$app/iachat"
+# Load existing provider credentials directly into IAchat (never echo secrets).
+# A literal newline, not a backslash-n, is required in a systemd drop-in.
+provider_file=""
+for candidate in /etc/router-providers.env "$HOME/.config/router/providers.env"; do
+  if sudo -n test -s "$candidate"; then
+    provider_file="$candidate"
+    break
+  fi
+done
+if [[ -z "$provider_file" ]]; then
+  echo "::error::No provider credential file found on Oracle."
+  exit 1
+fi
+sudo -n install -d -m 755 /etc/systemd/system/iachat.service.d
+printf '[Service]\nEnvironmentFile=%s\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee /etc/systemd/system/iachat.service.d/20-integrated-providers.conf >/dev/null
+sudo -n systemctl daemon-reload
 sudo -n systemctl restart iachat
 sudo -n systemctl is-active --quiet iachat
 # /health checks process availability; no inference request is made.
@@ -62,6 +71,8 @@ for attempt in range(12):
 else:
     raise SystemExit("IAchat health check failed")
 PY
+# Readiness must verify that credentials reached IAchat, not only process health.
+curl -fsS --max-time 10 http://127.0.0.1:8000/ready | grep -q '"mode":"integrated"'
 test "$(curl -fsS http://127.0.0.1:8000/ | grep -c 'id="projectScope"')" -ge 1 || { echo "Project selector missing from served app"; exit 1; }
 deployed=0
 echo "IAchat deployed successfully"
