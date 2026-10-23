@@ -16,7 +16,14 @@ rollback() {
     rsync -a --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' \
       "$backup/" "$app/" || true
     "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q || true
-    sudo -n systemctl restart iachat || true
+    # Reuse already-installed provider credentials without exposing their values.
+# Systemd reads this file as root even when its permissions prevent user access.
+if sudo -n test -f /etc/router-providers.env; then
+  sudo -n install -d -m 755 /etc/systemd/system/iachat.service.d
+  printf '[Service]\\nEnvironmentFile=-/etc/router-providers.env\\n' | sudo -n tee /etc/systemd/system/iachat.service.d/20-integrated-providers.conf >/dev/null
+  sudo -n systemctl daemon-reload
+fi
+sudo -n systemctl restart iachat || true
   fi
   cleanup
   exit "$status"
