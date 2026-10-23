@@ -140,8 +140,8 @@ class MessageOutput(BaseModel):
     history: list[dict[str, str]]
 
 def get_backend():
-    from .backend import RouterFirstBackend
-    return RouterFirstBackend()
+    from .backend import ProviderBackend, RouterFirstBackend
+    return RouterFirstBackend() if os.getenv("IACHAT_BACKEND", "integrated").strip().lower() == "router" else ProviderBackend()
 
 # Startup must not spend inference quota. /api/router/status checks connectivity on demand.
 @app.get("/", response_class=HTMLResponse)
@@ -206,12 +206,24 @@ def health():
 
 @app.get("/ready")
 def ready():
-    if not os.getenv("ROUTER_URL", "").strip() or not os.getenv("ROUTER_TOKEN", "").strip():
-        raise HTTPException(503, "router_not_configured")
-    return {"status": "ready", "component": "iachat", "mode": "router_only", "router_configured": True}
+    from .backend import ProviderBackend
+    if os.getenv("IACHAT_BACKEND", "integrated").strip().lower() == "router":
+        if not os.getenv("ROUTER_URL", "").strip() or not os.getenv("ROUTER_TOKEN", "").strip():
+            raise HTTPException(503, "router_not_configured")
+        return {"status": "ready", "component": "iachat", "mode": "router"}
+    if not ProviderBackend.configured():
+        raise HTTPException(503, "providers_not_configured")
+    return {"status": "ready", "component": "iachat", "mode": "integrated"}
+
 
 @app.get("/api/router/status")
 def router_status():
+    from .backend import ProviderBackend
+    if os.getenv("IACHAT_BACKEND", "integrated").strip().lower() != "router":
+        configured = ProviderBackend.configured()
+        return {"configured": configured, "reachable": configured,
+                "routing_verified": False, "mode": "integrated",
+                "reason": "providers_configured_not_inference_verified" if configured else "providers_not_configured"}
     url = os.getenv("ROUTER_URL", "").strip().rstrip("/")
     token = os.getenv("ROUTER_TOKEN", "").strip()
     if not url or not token:
@@ -346,7 +358,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
             pass  # Preserve only safe upstream status codes for diagnosis.
         elif detail in ("router_transport_timeout", "router_transport_connect", "router_transport_protocol", "router_transport_other"):
             pass
-        elif detail not in ("router_not_configured", "router_auth_rejected", "router_unavailable", "router_http_error", "router_invalid_response", "router_failed"):
+        elif detail not in ("router_not_configured", "router_auth_rejected", "router_unavailable", "router_http_error", "router_invalid_response", "router_failed", "providers_not_configured", "providers_unavailable", "providers_failed", "vision_not_configured"):
             detail = "router_unavailable"
         raise HTTPException(503, detail) from exc
     visible_text = message.text + ("\n\nAdjuntos: " + ", ".join(attachment_names) if attachment_names else "")
@@ -494,7 +506,7 @@ def suggest_memories(payload: SuggestMemoriesInput, request: Request):
     try:
         raw = get_backend().answer([{"role": "user", "content": task}])
     except (RuntimeError, httpx.RequestError) as exc:
-        raise HTTPException(503, "router_unavailable") from exc
+        raise HTTPException(503, "providers_unavailable") from exc
     try:
         suggestions = json.loads(raw.strip())
     except (ValueError, TypeError):
