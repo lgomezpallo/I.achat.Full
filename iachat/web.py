@@ -235,7 +235,35 @@ function addSelectedFiles(e){
 }
 fileInput.onchange=addSelectedFiles;
 imageInput.onchange=addSelectedFiles;
-cameraInput.onchange=addSelectedFiles;
+cameraInput.onchange=async function(e){
+  var photo=(e.target.files||[])[0];
+  e.target.value='';
+  if(!photo)return;
+  if(selectedFiles.length>=5){alert('Podés adjuntar como máximo 5 archivos por mensaje.');return}
+  try{
+    var image=await createImageBitmap(photo);
+    var scale=Math.min(1,1600/Math.max(image.width,image.height));
+    var canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(image.width*scale));
+    canvas.height=Math.max(1,Math.round(image.height*scale));
+    var ctx=canvas.getContext('2d');
+    if(!ctx)throw Error('canvas_unavailable');
+    ctx.drawImage(image,0,0,canvas.width,canvas.height);
+    if(image.close)image.close();
+    var blob=null;
+    for(var quality of [0.85,0.7,0.55,0.4]){
+      blob=await new Promise(function(resolve){canvas.toBlob(resolve,'image/jpeg',quality)});
+      if(blob&&blob.size<=2000000)break;
+    }
+    if(!blob||blob.size>2000000)throw Error('image_too_large');
+    var filename='foto-'+new Date().toISOString().replace(/[:.]/g,'-')+'.jpg';
+    var converted=new File([blob],filename,{type:'image/jpeg',lastModified:Date.now()});
+    addSelectedFiles({target:{files:[converted],value:''}});
+  }catch(err){
+    console.warn('IAchat camera processing failed',err&&err.message);
+    alert('No se pudo preparar la foto. Probá adjuntarla desde Imágenes.');
+  }
+};
 function fileBase64(f){return new Promise(function(resolve,reject){var rd=new FileReader();rd.onload=function(){var data=String(rd.result||'').split(',')[1];if(data)resolve(data);else reject(new Error('empty_file_data'))};rd.onerror=function(){reject(rd.error||new Error('file_read_error'))};rd.onabort=function(){reject(new Error('file_read_aborted'))};try{rd.readAsDataURL(f)}catch(err){reject(err)}})}
 
 document.getElementById('form').onsubmit=async function(e){e.preventDefault();if(busy)return;var text=input.value.trim(),files=selectedAttachments();if(!text&&!files.length)return;if(files.length>5){alert('Podés adjuntar como máximo 5 archivos.');return}
