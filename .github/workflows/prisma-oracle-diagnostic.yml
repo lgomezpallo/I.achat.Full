@@ -1,0 +1,49 @@
+name: Prisma Oracle diagnostic (automatic)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/prisma-oracle-diagnostic.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prisma:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: oracle-production
+    steps:
+      - name: Check Prisma on Oracle using existing IAchat SSH secrets
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST"
+          test -n "$ORACLE_USER"
+          test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          keyfile="$(mktemp "$HOME/.ssh/oracle-key.XXXXXX")"
+          knownfile="$(mktemp "$HOME/.ssh/oracle-known.XXXXXX")"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          actual="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          printf 'prisma_service: '
+          systemctl is-active prisma
+          printf 'prisma_health: '
+          curl -fsS --max-time 10 http://127.0.0.1:8080/api/healthz
+          printf '\nprisma_unit: '
+          systemctl show prisma -p WorkingDirectory -p ExecStart --no-pager
+          if [ -d /home/ubuntu/CoreXFull/.git ]; then
+            printf 'prisma_checkout_commit: '
+            git -C /home/ubuntu/CoreXFull log -1 --format='%h %ci %s'
+            printf 'prisma_checkout_modified_files: '
+            git -C /home/ubuntu/CoreXFull status --porcelain | wc -l
+          fi
+          REMOTE
