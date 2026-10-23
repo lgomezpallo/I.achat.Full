@@ -1,0 +1,73 @@
+name: Prisma - build and Oracle preflight
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/prisma-build-verify.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Download Prisma source
+        uses: actions/checkout@v4
+        with:
+          repository: lgomezpallo/CoreXFull
+          ref: main
+          path: corexfull
+          persist-credentials: false
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pnpm
+        run: corepack enable && corepack prepare pnpm@10.26.1 --activate
+      - name: Install dependencies
+        working-directory: corexfull/prisma
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck and build Prisma
+        working-directory: corexfull/prisma
+        run: pnpm build
+      - name: Identify tested commit
+        working-directory: corexfull
+        run: git log -1 --format='Tested CoreXFull commit: %H'
+  oracle:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 5
+    steps:
+      - name: Read-only live Prisma check
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in ORACLE_HOST ORACLE_USER ORACLE_SSH_KEY; do
+            test -n "${!name:-}" || { echo "::error::Missing $name"; exit 1; }
+          done
+          install -d -m 700 "$HOME/.ssh"
+          key="$(mktemp "$HOME/.ssh/prisma-key.XXXXXX")"
+          known="$(mktemp "$HOME/.ssh/prisma-known.XXXXXX")"
+          trap 'rm -f "$key" "$known"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$key"
+          chmod 600 "$key"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$known"
+          actual="$(ssh-keygen -lf "$known" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI' || { echo "::error::Host identity mismatch"; exit 1; }
+          ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "Prisma service:"
+          systemctl is-active prisma
+          echo "Health:"
+          curl -fsS --max-time 10 http://127.0.0.1:8080/api/healthz
+          echo
+          echo "Service configuration:"
+          systemctl show prisma -p WorkingDirectory -p ExecStart --no-pager
+          echo "CoreXFull revision:"
+          if [ -d /home/ubuntu/CoreXFull/.git ]; then git -C /home/ubuntu/CoreXFull log -1 --format='%H %ci'; fi
+          REMOTE
