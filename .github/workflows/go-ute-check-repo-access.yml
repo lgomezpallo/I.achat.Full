@@ -31,14 +31,16 @@ jobs:
           ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
           set -euo pipefail
           key="$HOME/.ssh/go_ute_repo_readonly"
-          test -f "$key" && test -f "$key.pub"
+          if ! test -f "$key" || ! test -f "$key.pub"; then echo "::error::La clave de G.O. no está en Oracle"; exit 1; fi
+          echo "OK etapa 1: clave G.O. existente"
           chmod 600 "$key"
           tmp="$(mktemp)"
           trap 'rm -f "$tmp"' EXIT
-          ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$tmp"
+          if ! ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$tmp" || ! test -s "$tmp"; then echo "::error::No se pudo obtener la clave pública del servidor GitHub desde Oracle"; exit 1; fi
           # Pin host key through published GitHub fingerprint (Ed25519).
           fingerprint="$(ssh-keygen -lf "$tmp" -E sha256 | awk '{print $2}' | head -1)"
-          test "$fingerprint" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zP9G1Sp5m6rrJc8w'
-          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$tmp" git ls-remote --exit-code git@github.com:lgomezpallo/G.estion.Obras.UTE.git HEAD
+          if test "$fingerprint" != 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zP9G1Sp5m6rrJc8w'; then echo "::error::Huella SSH GitHub distinta a la esperada; se bloqueó la conexión"; exit 1; fi
+          echo "OK etapa 2: identidad del servidor GitHub verificada"
+          if ! GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$tmp" git ls-remote --exit-code git@github.com:lgomezpallo/G.estion.Obras.UTE.git HEAD; then echo "::error::GitHub rechazó la lectura; revisar Deploy key de G.O. y permisos"; exit 1; fi
           echo "OK: Oracle puede leer G.O. usando su deploy key."
           REMOTE
