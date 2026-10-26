@@ -1,0 +1,44 @@
+name: Verificar lectura del repositorio G.O. desde Oracle
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 5
+    steps:
+      - name: SSH hacia Oracle y prueba de lectura GitHub con clave G.O.
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/oracle-ci.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/oracle-known.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          actual="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          key="$HOME/.ssh/go_ute_repo_readonly"
+          test -f "$key" && test -f "$key.pub"
+          chmod 600 "$key"
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$tmp"
+          # Pin host key through published GitHub fingerprint (Ed25519).
+          fingerprint="$(ssh-keygen -lf "$tmp" -E sha256 | awk '{print $2}' | head -1)"
+          test "$fingerprint" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zP9G1Sp5m6rrJc8w'
+          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$tmp" git ls-remote --exit-code git@github.com:lgomezpallo/G.estion.Obras.UTE.git HEAD
+          echo "OK: Oracle puede leer G.O. usando su deploy key."
+          REMOTE
