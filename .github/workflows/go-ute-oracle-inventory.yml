@@ -1,0 +1,51 @@
+name: G.O. inventario previo a instalacion
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inventario:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 5
+    steps:
+      - name: Consultar requisitos de G.O. sin modificar Oracle
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/ci-oracle.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/ci-host.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"; chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          fp="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
+          test "$fp" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo "=== Servicios activos ==="
+          for svc in router iachat postgresql nginx caddy; do
+            printf "%s: " "$svc"
+            systemctl is-active "$svc" 2>/dev/null || true
+          done
+          echo "=== Ejecutables ==="
+          for cmd in python3 git psql pg_isready nginx caddy; do
+            command -v "$cmd" || true
+          done
+          echo "=== Puertos 8000 8010 8020 5432 80 443 ==="
+          ss -ltnH | awk '$4 ~ /:(8000|8010|8020|5432|80|443)$/ {print $4}' | sort -u
+          echo "=== Directorio G.O. ==="
+          if test -e /home/ubuntu/Proyecto/Aplicaciones/GestionObrasUTE; then echo "Ya existe"; else echo "Aun no existe"; fi
+          echo "=== Health local compartido ==="
+          curl -fsS --max-time 3 http://127.0.0.1:8000/health || true
+          printf '\n'
+          curl -fsS --max-time 3 http://127.0.0.1:8010/health || true
+          printf '\n'
+          echo "=== Inventario terminado, sin cambios ==="
+          REMOTE
