@@ -1,0 +1,64 @@
+name: G.O. preparar codigo aislado en Oracle
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: go-ute-stage
+  cancel-in-progress: false
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 12
+    steps:
+      - name: Preparar copia aislada y ejecutar pruebas
+        shell: bash
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/oracle-stage-key.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/oracle-stage-host.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"; chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          root="$HOME/Proyecto/Aplicaciones/GestionObrasUTE"
+          key="$HOME/.ssh/go_ute_repo_readonly"
+          test -f "$key"
+          mkdir -p "$HOME/Proyecto/Aplicaciones"
+          hostkeys="$(mktemp)"
+          trap 'rm -f "$hostkeys"' EXIT
+          ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$hostkeys"
+          test "$(ssh-keygen -lf "$hostkeys" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$hostkeys"
+          if test -e "$root" && ! test -d "$root/.git"; then
+            echo "::error::Existe directorio G.O. sin Git; no sobrescribir"; exit 1
+          fi
+          if ! test -e "$root"; then
+            git clone --depth 1 git@github.com:lgomezpallo/G.estion.Obras.UTE.git "$root"
+          else
+            test "$(git -C "$root" remote get-url origin)" = "git@github.com:lgomezpallo/G.estion.Obras.UTE.git"
+            test -z "$(git -C "$root" status --porcelain)" || { echo "::error::Cambios locales en G.O., detener"; exit 1; }
+            git -C "$root" pull --ff-only origin main
+          fi
+          echo "=== G.O. commit ==="
+          git -C "$root" log -1 --format='%h %s'
+          echo "=== Python ==="
+          python3 --version
+          echo "=== Pruebas ==="
+          if test ! -d "$root/.venv"; then python3 -m venv "$root/.venv"; fi
+          "$root/.venv/bin/python" -m pip install -r "$root/requirements-chat.txt" -q
+          cd "$root"
+          "$root/.venv/bin/python" -m compileall -q go_ute
+          "$root/.venv/bin/python" -m pytest -q
+          echo "=== ESTAGING G.O. OK; no se levantaron servicios ==="
+          REMOTE
