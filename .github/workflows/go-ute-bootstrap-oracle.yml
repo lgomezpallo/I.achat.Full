@@ -1,0 +1,52 @@
+name: Preparar clave de lectura de G.O. en Oracle
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: go-ute-bootstrap-oracle
+  cancel-in-progress: false
+jobs:
+  preparar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 5
+    steps:
+      - name: Comprobar host SSH y preparar clave separada para G.O.
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          keyfile="$(mktemp "$HOME/.ssh/iachat-oracle.XXXXXXXX")"
+          knownfile="$(mktemp "$HOME/.ssh/oracle-host.XXXXXXXX")"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test -s "$knownfile"
+          actual="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          install -d -m 700 "$HOME/.ssh"
+          key="$HOME/.ssh/go_ute_repo_readonly"
+          if test -e "$key" && ! test -f "$key.pub"; then
+            echo "ERROR: Existe clave G.O. sin parte pública, revisar manualmente"
+            exit 1
+          fi
+          if ! test -e "$key"; then
+            ssh-keygen -q -t ed25519 -N '' -C 'go-ute-oracle-readonly' -f "$key"
+          fi
+          echo '=== CLAVE PUBLICA G.O. (copiar en GitHub, Deploy keys, solo lectura) ==='
+          cat "$key.pub"
+          echo '=== FIN CLAVE PUBLICA ==='
+          printf 'IAchat: '; systemctl is-active iachat
+          printf 'Router: '; systemctl is-active router
+          REMOTE
