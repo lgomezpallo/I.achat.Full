@@ -1,0 +1,81 @@
+name: G.O. instalar servicio privado 8020
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: go-ute-private-service
+  cancel-in-progress: false
+jobs:
+  instalar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 12
+    steps:
+      - name: Instalar G.O. en 127.0.0.1 sin abrir Caddy
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/go-deploy-key.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/go-deploy-host.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          root="$HOME/Proyecto/Aplicaciones/GestionObrasUTE"
+          test -d "$root/.git" && test -f "$root/go_ute/app.py"
+          sudo -n test -f /etc/go-ute/db.env
+          test "$(systemctl is-active iachat)" = active
+          test "$(systemctl is-active router)" = active
+          test -z "$(git -C "$root" status --porcelain)" || { echo 'ERROR: cambios locales en G.O., no sobrescribir'; exit 1; }
+          keys="$(mktemp)"
+          trap 'rm -f "$keys"' EXIT
+          ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$keys"
+          test "$(ssh-keygen -lf "$keys" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/go_ute_repo_readonly -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$keys" git -C "$root" pull --ff-only origin main
+          test -f "$root/deploy/go-ute.service"
+          sudo -n bash -se "$root" <<'INSTALL'
+          set -euo pipefail
+          root="$1"
+          id -u go-ute >/dev/null 2>&1 || useradd --system --home /var/lib/go-ute --shell /usr/sbin/nologin --user-group go-ute
+          install -d -o go-ute -g go-ute -m 750 /var/lib/go-ute
+          install -d -o root -g root -m 755 /opt/go-ute
+          cp -a "$root/go_ute" /opt/go-ute/
+          cp "$root/requirements-chat.txt" /opt/go-ute/
+          python3 -m venv /opt/go-ute/.venv
+          /opt/go-ute/.venv/bin/python -m pip install --quiet -r /opt/go-ute/requirements-chat.txt
+          if [ ! -f /etc/go-ute/app.env ]; then
+            # La contraseña nunca sale del servidor; archivo sólo legible por root y servicio G.O.
+            install -m 640 -o root -g go-ute /dev/null /etc/go-ute/app.env
+            cat /etc/go-ute/db.env > /etc/go-ute/app.env
+            printf '\nGO_SESSION_SECRET=%s\n' "$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" >> /etc/go-ute/app.env
+            printf 'GO_ROUTER_URL=http://127.0.0.1:8010\n' >> /etc/go-ute/app.env
+          fi
+          chown root:go-ute /etc/go-ute/app.env
+          chmod 640 /etc/go-ute/app.env
+          install -m 644 "$root/deploy/go-ute.service" /etc/systemd/system/go-ute.service
+          systemctl daemon-reload
+          systemctl enable --now go-ute.service
+          systemctl restart go-ute.service
+          INSTALL
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 3 http://127.0.0.1:8020/health | grep -q '"service":"go-ute"'; then break; fi
+            sleep 2
+          done
+          curl -fsS --max-time 5 http://127.0.0.1:8020/health >/dev/null
+          echo 'OK: servicio G.O. privado responde en 127.0.0.1:8020'
+          curl -sS -o /dev/null -w 'POST /api/chat sin sesion: HTTP %{http_code}\n' -H 'Content-Type: application/json' -d '{"message":"hola"}' http://127.0.0.1:8020/api/chat
+          test "$(systemctl is-active iachat)" = active
+          test "$(systemctl is-active router)" = active
+          echo 'OK: IAchat y Router activos. Sin modificaciones a Caddy ni al DNS.'
+          echo 'PENDIENTE: Google OAuth, dominio HTTPS, passkeys y prueba Router de conversación.'
+          REMOTE
