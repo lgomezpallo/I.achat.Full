@@ -1,0 +1,66 @@
+name: G.O. autorizar acceso al Router
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: go-ute-router-authorization
+  cancel-in-progress: false
+jobs:
+  autorizar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 5
+    steps:
+      - name: Crear token exclusivo G.O. en Router sin mostrar credenciales
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          k="$(mktemp ~/.ssh/go-auth-key.XXXXXXXX)"
+          h="$(mktemp ~/.ssh/go-auth-host.XXXXXXXX)"
+          trap 'rm -f "$k" "$h"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$k"; chmod 600 "$k"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$h"
+          test "$(ssh-keygen -lf "$h" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$h"
+          ssh -i "$k" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$h" "$ORACLE_USER@$ORACLE_HOST" 'sudo -n /opt/go-ute/.venv/bin/python -' <<'PY'
+          import os, subprocess, tempfile, pathlib, urllib.request, json
+          envfile=pathlib.Path("/etc/go-ute/app.env")
+          if not envfile.is_file():
+              raise SystemExit("ERROR: app.env no encontrado")
+          contents=envfile.read_text()
+          if any(line.startswith("GO_ROUTER_TOKEN=") and line.split("=",1)[1].strip() for line in contents.splitlines()):
+              print("OK: G.O. ya tiene credencial Router; sin cambios")
+              raise SystemExit(0)
+          pid=subprocess.check_output(["systemctl","show","router","--property=MainPID","--value"],text=True).strip()
+          if not pid.isdecimal() or int(pid)<2:
+              raise SystemExit("ERROR: Router no ejecutándose")
+          variables=dict(p.split(b"=",1) for p in pathlib.Path(f"/proc/{pid}/environ").read_bytes().split(b"\0") if b"=" in p)
+          admin=variables.get(b"ROUTER_SERVICE_TOKEN",b"").decode()
+          if not admin:
+              raise SystemExit("BLOQUEO: token administrador no disponible en entorno Router; no se cambió ninguna clave")
+          req=urllib.request.Request("http://127.0.0.1:8010/tokens",data=json.dumps({"name":"go-ute"}).encode(),headers={"Authorization":"Bearer "+admin,"Content-Type":"application/json"},method="POST")
+          try:
+              with urllib.request.urlopen(req,timeout=8) as response:
+                  token=json.load(response).get("token","")
+          except Exception as exc:
+              raise SystemExit("ERROR: Router no pudo autorizar G.O. (sin revelar detalles sensibles)") from None
+          if not isinstance(token,str) or len(token)<20 or "\n" in token:
+              raise SystemExit("ERROR: token generado inválido")
+          new_contents=contents.rstrip("\n")+"\nGO_ROUTER_TOKEN="+token+"\n"
+          fd,path=tempfile.mkstemp(prefix=".go-app-",dir=str(envfile.parent))
+          try:
+              with os.fdopen(fd,"w") as file: file.write(new_contents)
+              os.chown(path,0,__import__("grp").getgrnam("go-ute").gr_gid)
+              os.chmod(path,0o640)
+              os.replace(path,envfile)
+          finally:
+              if os.path.exists(path): os.unlink(path)
+          subprocess.run(["systemctl","restart","go-ute"],check=True)
+          print("OK: credencial exclusiva G.O. creada y guardada en Oracle. Servicio reiniciado.")
+          PY
