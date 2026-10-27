@@ -1,0 +1,44 @@
+name: G.O. comprobar PostgreSQL en Oracle
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 5
+    steps:
+      - name: Diagnóstico de PostgreSQL sin cambios
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/go-db-key.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/go-db-known.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"; chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo '=== Ubuntu ==='
+          . /etc/os-release; printf '%s %s\n' "$ID" "$VERSION_ID"
+          echo '=== Permisos sudo sin contraseña ==='
+          if sudo -n true 2>/dev/null; then echo 'sudo: disponible'; else echo 'sudo: requiere autorización'; fi
+          echo '=== Paquetes instalados ==='
+          dpkg-query -W -f='${Package} ${Status} ${Version}\n' 'postgresql*' 2>/dev/null | grep 'install ok installed' || true
+          echo '=== Clusters existentes ==='
+          if command -v pg_lsclusters >/dev/null; then pg_lsclusters; else echo 'pg_lsclusters ausente'; fi
+          echo '=== Ocupación de disco ==='
+          df -h / /var/lib 2>/dev/null || true
+          echo '=== PostgreSQL red ==='
+          ss -lntH | awk '$4 ~ /:5432$/ {print $4}' || true
+          echo '=== Fin del diagnóstico (solo lectura) ==='
+          REMOTE
