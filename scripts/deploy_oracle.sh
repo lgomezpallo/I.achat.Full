@@ -17,6 +17,11 @@ rollback() {
       "$backup/" "$app/" || true
     "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q || true
 sudo -n systemctl restart iachat || true
+    if sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then
+      echo "Rollback health: OK (inference not verified)"
+    else
+      echo "::error::Rollback health check failed; manual recovery required."
+    fi
   fi
   cleanup
   exit "$status"
@@ -74,5 +79,23 @@ PY
 # Readiness must verify that credentials reached IAchat, not only process health.
 curl -fsS --max-time 10 http://127.0.0.1:8000/ready | grep -q '"mode":"integrated"'
 test "$(curl -fsS http://127.0.0.1:8000/ | grep -c 'id="projectScope"')" -ge 1 || { echo "Project selector missing from served app"; exit 1; }
+# Explicit postdeploy checks: ensure the configured integrated minirouter is active.
+"$app/.venv/bin/python" - <<'PY'
+import json
+import urllib.error
+import urllib.request
+base = "http://127.0.0.1:8000"
+def probe(path):
+    try:
+        with urllib.request.urlopen(base + path, timeout=10) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as exc:
+        return exc.code, None
+code, status = probe("/api/router/status")
+assert code == 200 and status.get("mode") == "integrated" and status.get("configured") is True, "Integrated providers unavailable"
+code, _ = probe("/api/conversations")
+assert code == 401, "Private conversations API not protected"
+print("Postdeploy: minirouter configuration and authentication checks OK")
+PY
 deployed=0
-echo "IAchat deployed successfully"
+echo "IAchat deployed successfully (live inference not verified)"
