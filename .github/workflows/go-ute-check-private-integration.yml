@@ -34,6 +34,15 @@ jobs:
             echo "$service: $status"
             test "$status" = active
           done
+          echo "=== Ajuste mínimo del directorio protegido ==="
+          sudo -n chown root:go-ute /etc/go-ute
+          sudo -n chmod 710 /etc/go-ute
+          sudo -n chown root:go-ute /etc/go-ute/app.env
+          sudo -n chmod 640 /etc/go-ute/app.env
+          sudo -n chmod 600 /etc/go-ute/db.env
+          sudo -n -u go-ute test -r /etc/go-ute/app.env || { echo 'ERROR: G.O. no puede leer su configuración'; exit 1; }
+          sudo -n -u go-ute test ! -r /etc/go-ute/db.env || { echo 'ERROR: Archivo maestro de BD expuesto'; exit 1; }
+          echo "OK: usuario G.O. accede solo a app.env; db.env sigue protegido."
           echo "=== Prueba DB G.O. desde usuario de servicio ==="
           sudo -n -u go-ute env GO_ENV_FILE=/etc/go-ute/app.env bash -se <<'DB'
           set -euo pipefail
