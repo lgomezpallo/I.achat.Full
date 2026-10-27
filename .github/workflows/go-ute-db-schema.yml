@@ -1,0 +1,77 @@
+name: G.O. aplicar esquema PostgreSQL
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: go-ute-db-migrations
+  cancel-in-progress: false
+jobs:
+  migracion:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 8
+    steps:
+      - name: Verificar y aplicar tablas iniciales de G.O.
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/go-db-key.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/go-db-known.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          test "$(systemctl is-active iachat)" = active
+          test "$(systemctl is-active router)" = active
+          test -f /etc/go-ute/db.env
+          root="$HOME/Proyecto/Aplicaciones/GestionObrasUTE"
+          test -d "$root/.git"
+          test -z "$(git -C "$root" status --porcelain)" || { echo "ERROR: repositorio G.O. con cambios locales"; exit 1; }
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$tmp"
+          test "$(ssh-keygen -lf "$tmp" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
+          key="$HOME/.ssh/go_ute_repo_readonly"
+          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$tmp" git -C "$root" pull --ff-only origin main
+          test -f "$root/migrations/001_initial.sql"
+          test -x "$root/.venv/bin/python"
+          # Solo el proceso root lee la contraseña; el script no imprime secretos.
+          sudo -n env GOU_ROOT="$root" bash -se <<'DB'
+          set -euo pipefail
+          set -a
+          . /etc/go-ute/db.env
+          set +a
+          "$GOU_ROOT/.venv/bin/python" - <<'PY'
+          import os
+          from pathlib import Path
+          import psycopg
+          schema=Path(os.environ["GOU_ROOT"])/"migrations/001_initial.sql"
+          with psycopg.connect(os.environ["GO_DATABASE_URL"], connect_timeout=5) as conn:
+              conn.execute(schema.read_text(encoding="utf-8"))
+              tables={r[0] for r in conn.execute("select table_name from information_schema.tables where table_schema=current_schema() and table_name in ('obras','propuestas','movimientos')")}
+              assert tables=={"obras","propuestas","movimientos"},f"Faltan tablas: {tables}"
+              # Prueba real de escritura y lectura revertida: no queda dato de ejemplo.
+              with conn.transaction() as tx:
+                  conn.execute("insert into obras (presupuesto,direccion) values (%s,%s)",("999999-PRUEBA-GO","PRUEBA TEMPORAL"))
+                  got=conn.execute("select direccion from obras where presupuesto=%s",("999999-PRUEBA-GO",)).fetchone()
+                  assert got and got[0]=="PRUEBA TEMPORAL"
+                  tx.rollback()
+              assert conn.execute("select count(*) from obras where presupuesto=%s",("999999-PRUEBA-GO",)).fetchone()[0]==0
+          print("OK: Tablas G.O. disponibles; escritura/lectura verificada; fila de prueba revertida.")
+          PY
+          DB
+          test "$(systemctl is-active iachat)" = active
+          test "$(systemctl is-active router)" = active
+          echo "OK: Migración G.O. terminada, IAchat y Router activos."
+          REMOTE
