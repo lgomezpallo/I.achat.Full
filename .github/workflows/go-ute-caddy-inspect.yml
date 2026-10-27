@@ -1,0 +1,47 @@
+name: G.O. revisar Caddy para HTTPS
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: oracle-production
+    steps:
+      - name: Inspección de Caddy sin cambiar configuración
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/oracle-ci.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/oracle-host.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"; chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo "=== Caddy activo ==="
+          systemctl is-active caddy
+          echo "=== Direcciones y rutas, sin mostrar secretos ==="
+          if sudo -n test -f /etc/caddy/Caddyfile; then
+            sudo -n awk '
+              /^[[:space:]]*#/ {next}
+              /^[[:space:]]*$/ {next}
+              /reverse_proxy/ {print "reverse_proxy [destino omitido]";next}
+              /header|tls|basicauth|basic_auth|environment|import/ {print "[directiva protegida]";next}
+              {print}
+            ' /etc/caddy/Caddyfile
+          else
+            echo "No se encontró /etc/caddy/Caddyfile"
+          fi
+          echo "=== Puerto G.O. ==="
+          if ss -ltnH | grep -q ':8020[[:space:]]'; then echo "Puerto 8020 ocupado"; else echo "Puerto 8020 libre"; fi
+          echo "=== Sin cambios realizados ==="
+          REMOTE
