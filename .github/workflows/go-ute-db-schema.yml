@@ -32,20 +32,22 @@ jobs:
           chmod 600 "$knownfile"
           ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
           set -euo pipefail
-          test "$(systemctl is-active iachat)" = active
-          test "$(systemctl is-active router)" = active
-          test -f /etc/go-ute/db.env
+          test "$(systemctl is-active iachat)" = active || { echo "::error::IAchat inactivo antes de la migración"; exit 1; }
+          test "$(systemctl is-active router)" = active || { echo "::error::Router inactivo antes de la migración"; exit 1; }
+          test -f /etc/go-ute/db.env || { echo "::error::Falta archivo privado de conexión DB"; exit 1; }
           root="$HOME/Proyecto/Aplicaciones/GestionObrasUTE"
-          test -d "$root/.git"
-          test -z "$(git -C "$root" status --porcelain)" || { echo "ERROR: repositorio G.O. con cambios locales"; exit 1; }
+          test -d "$root/.git" || { echo "::error::No está clonado G.O."; exit 1; }
+          test -z "$(git -C "$root" status --porcelain)" || { echo "::error::Repositorio G.O. tiene archivos modificados"; git -C "$root" status --short; exit 1; }
+          echo "OK: directorio Git limpio"
           tmp="$(mktemp)"
           trap 'rm -f "$tmp"' EXIT
-          ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$tmp"
-          test "$(ssh-keygen -lf "$tmp" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
+          ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$tmp" || { echo "::error::No se pudo consultar la clave pública del host GitHub"; exit 1; }
+          test "$(ssh-keygen -lf "$tmp" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU' || { echo "::error::No coincide huella SSH de GitHub"; exit 1; }
+          echo "OK: huella SSH GitHub validada"
           key="$HOME/.ssh/go_ute_repo_readonly"
           GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$tmp" git -C "$root" pull --ff-only origin main
-          test -f "$root/migrations/001_initial.sql"
-          test -x "$root/.venv/bin/python"
+          test -f "$root/migrations/001_initial.sql" || { echo "::error::No llegó la migración 001 al servidor"; exit 1; }
+          test -x "$root/.venv/bin/python" || { echo "::error::Entorno Python de G.O. no disponible"; exit 1; }
           # Solo el proceso root lee la contraseña; el script no imprime secretos.
           sudo -n env GOU_ROOT="$root" bash -se <<'DB'
           set -euo pipefail
