@@ -1,0 +1,82 @@
+name: G.O. habilitar HTTPS en Caddy
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: go-ute-caddy-https
+  cancel-in-progress: false
+jobs:
+  activar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 8
+    steps:
+      - name: Verificar DNS y agregar host G.O. con rollback
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/go-https-key.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/go-https-host.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          test "$(systemctl is-active caddy)" = active
+          test "$(systemctl is-active go-ute)" = active
+          test "$(systemctl is-active iachat)" = active
+          test "$(systemctl is-active router)" = active
+          curl -fsS --max-time 5 http://127.0.0.1:8020/health >/dev/null
+          oracle_ip="$(getent ahostsv4 ia-chat.duckdns.org | awk 'NR==1{print $1}')"
+          go_ip="$(getent ahostsv4 go-ute.duckdns.org | awk 'NR==1{print $1}')"
+          test -n "$oracle_ip" && test -n "$go_ip"
+          if [ "$oracle_ip" != "$go_ip" ]; then
+            echo "ERROR: G.O. DNS todavía no coincide con el dominio de IAchat"; exit 1
+          fi
+          echo "OK: G.O. e IAchat resuelven a la misma IP"
+          sudo -n bash -se <<'CADDY'
+          set -euo pipefail
+          conf=/etc/caddy/Caddyfile
+          test -f "$conf"
+          if grep -Eq '^[[:space:]]*go-ute[.]duckdns[.]org[[:space:]]*[{]' "$conf"; then
+            echo "G.O. ya figura en Caddy; no duplicar."
+            exit 0
+          fi
+          if grep -Fq 'go-ute.duckdns.org' "$conf"; then
+            echo "ERROR: referencia a dominio G.O. en configuración inesperada"; exit 1
+          fi
+          backup="$(mktemp /etc/caddy/.Caddyfile.go-ute-backup.XXXXXXXX)"
+          cp -p "$conf" "$backup"
+          restore() {
+            cp -p "$backup" "$conf"
+            caddy validate --config "$conf" --adapter caddyfile >/dev/null 2>&1 || true
+            systemctl reload caddy || true
+          }
+          trap 'restore; rm -f "$backup"' ERR
+          cat >> "$conf" <<'BLOCK'
+
+          go-ute.duckdns.org {
+              encode gzip
+              reverse_proxy 127.0.0.1:8020
+          }
+          BLOCK
+          caddy validate --config "$conf" --adapter caddyfile >/dev/null
+          systemctl reload caddy
+          systemctl is-active --quiet caddy
+          trap - ERR
+          rm -f "$backup"
+          echo "OK: virtual host HTTPS G.O. agregado; Caddy validado y recargado"
+          CADDY
+          test "$(systemctl is-active iachat)" = active
+          test "$(systemctl is-active router)" = active
+          echo "OK: IAchat y Router activos; Google aun pendiente de configurar."
+          REMOTE
