@@ -65,11 +65,15 @@ jobs:
               tables={r[0] for r in conn.execute("select table_name from information_schema.tables where table_schema=current_schema() and table_name in ('obras','propuestas','movimientos')")}
               assert tables=={"obras","propuestas","movimientos"},f"Faltan tablas: {tables}"
               # Prueba real de escritura y lectura revertida: no queda dato de ejemplo.
-              with conn.transaction() as tx:
+              # SAVEPOINT permite revertir sólo la fila de prueba con psycopg 3.
+              conn.execute("SAVEPOINT go_ute_smoketest")
+              try:
                   conn.execute("insert into obras (presupuesto,direccion) values (%s,%s)",("999999-PRUEBA-GO","PRUEBA TEMPORAL"))
                   got=conn.execute("select direccion from obras where presupuesto=%s",("999999-PRUEBA-GO",)).fetchone()
                   assert got and got[0]=="PRUEBA TEMPORAL"
-                  tx.rollback()
+              finally:
+                  conn.execute("ROLLBACK TO SAVEPOINT go_ute_smoketest")
+                  conn.execute("RELEASE SAVEPOINT go_ute_smoketest")
               assert conn.execute("select count(*) from obras where presupuesto=%s",("999999-PRUEBA-GO",)).fetchone()[0]==0
           print("OK: Tablas G.O. disponibles; escritura/lectura verificada; fila de prueba revertida.")
           PY
