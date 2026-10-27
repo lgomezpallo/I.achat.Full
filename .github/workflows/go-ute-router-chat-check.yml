@@ -1,0 +1,59 @@
+name: G.O. prueba conversacional Router
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 5
+    steps:
+      - name: Verificar conexión real del chat con Router
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/go-router-key.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/go-router-host.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          test "$(systemctl is-active go-ute)" = active
+          test "$(systemctl is-active router)" = active
+          sudo -n -u go-ute bash -se <<'CHECK'
+          set -euo pipefail
+          set -a
+          . /etc/go-ute/app.env
+          set +a
+          cd /opt/go-ute
+          /opt/go-ute/.venv/bin/python - <<'PY'
+          import os
+          from go_ute.router import answer,RouterUnavailable
+          token=os.getenv("GO_ROUTER_TOKEN","")
+          if not token:
+              print("BLOQUEO: GO_ROUTER_TOKEN no está configurado en G.O.; no se enviaron mensajes.")
+              raise SystemExit(2)
+          try:
+              result=answer([{"role":"user","content":"Respondé exactamente: G.O. CONECTADO"}])
+          except RouterUnavailable as exc:
+              print("ERROR: Router rechazó la solicitud:",str(exc))
+              raise SystemExit(3)
+          if not isinstance(result,str) or not result.strip():
+              print("ERROR: respuesta vacía del Router")
+              raise SystemExit(4)
+          print("OK: Router procesó solicitud conversacional de G.O.")
+          print("Longitud de respuesta:",len(result))
+          print("Coincidencia exacta solicitada:",result.strip()=="G.O. CONECTADO")
+          PY
+          CHECK
+          REMOTE
