@@ -15,7 +15,9 @@ CURRENT_QUERY = re.compile(
     r"(?i)\b(pr[oó]xim[oa]|siguiente|hoy|ma[ñn]ana|esta semana|"
     r"actual|actualizad[oa]|[uú]ltim[oa]s?|en vivo|ahora|"
     r"cu[aá]ndo juega|a qu[eé] hora|fecha y hora|cotizaci[oó]n|"
-    r"resultados? recientes?|noticias?)\b"
+    r"resultados? recientes?|noticias?|nuev[oa]s?|novedades?|reci[eé]n|reciente(?:mente)?|"
+    r"estren[oa]s?|estren[oó]|lanzamient[oa]s?|public[oó]|publicad[oa]s?|"
+    r"acaba de salir|sal[iió] hace poco|sal[iió] recientemente)\b"
 )
 
 
