@@ -1,0 +1,71 @@
+name: G.O. instalar PostgreSQL aislado en Oracle
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: go-ute-postgresql-install
+  cancel-in-progress: false
+jobs:
+  instalar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 15
+    steps:
+      - name: Instalar PostgreSQL y base G.O. con verificaciones
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          keyfile="$(mktemp "$HOME/.ssh/go-db-key.XXXXXXXX")"
+          knownfile="$(mktemp "$HOME/.ssh/go-db-host.XXXXXXXX")"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo '=== Precondiciones ==='
+          sudo -n true
+          test "$(systemctl is-active router)" = active
+          test "$(systemctl is-active iachat)" = active
+          test ! -e /etc/go-ute/db.env || { echo 'La configuración de BD G.O. ya existe: no sobrescribir.'; exit 1; }
+          if command -v psql >/dev/null 2>&1; then
+            echo 'PostgreSQL ya está instalado; no instalar un segundo servidor.'
+          else
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get update -qq
+            sudo -E apt-get install -y -qq postgresql postgresql-client
+          fi
+          sudo systemctl enable --now postgresql
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -Atqc 'SELECT 1' postgres | grep -qx 1
+          echo '=== Crear base y rol exclusivos de G.O. ==='
+          # Secretos quedan únicamente en Oracle. No imprimir URL ni contraseña.
+          pass="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          exists_role="$(sudo -u postgres psql -Atqc "SELECT 1 FROM pg_roles WHERE rolname='go_ute_app'" postgres)"
+          test -z "$exists_role" || { echo 'El rol go_ute_app ya existe: detener para inspección, sin cambiar contraseña'; exit 1; }
+          exists_db="$(sudo -u postgres psql -Atqc "SELECT 1 FROM pg_database WHERE datname='go_ute'" postgres)"
+          test -z "$exists_db" || { echo 'La base go_ute ya existe: detener para inspección'; exit 1; }
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -v newpass="$pass" postgres <<'SQL'
+          CREATE ROLE go_ute_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD :'newpass';
+          SQL
+          sudo -u postgres createdb --owner=go_ute_app go_ute
+          sudo install -d -o root -g root -m 700 /etc/go-ute
+          # Escribir mediante stdin en archivo root-only, sin poner contraseña en argumentos de procesos.
+          python3 -c 'import sys,urllib.parse; p=sys.stdin.readline().rstrip("\n"); print("GO_DATABASE_URL=postgresql://go_ute_app:"+urllib.parse.quote(p,safe="")+"@127.0.0.1:5432/go_ute")' <<< "$pass" | sudo tee /etc/go-ute/db.env >/dev/null
+          sudo chmod 600 /etc/go-ute/db.env
+          unset pass
+          echo '=== Comprobar aislamiento y acceso local ==='
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -Atqc "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='go_ute'" postgres | grep -qx go_ute_app
+          test "$(systemctl is-active router)" = active
+          test "$(systemctl is-active iachat)" = active
+          echo 'OK: PostgreSQL instalado; base y rol exclusivos creados; secreto guardado en /etc/go-ute/db.env (root).'
+          echo 'PENDIENTE: esquema de tablas, rol de servicio G.O., pruebas PostgreSQL de aplicación y despliegue PWA.'
+          REMOTE
