@@ -1,0 +1,63 @@
+name: G.O. verificar integración privada
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 6
+    steps:
+      - name: Probar G.O. PostgreSQL y Router sin publicar el servicio
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/go-check-key.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/go-check-host.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo "=== Servicios ==="
+          for service in go-ute router iachat postgresql; do
+            status="$(systemctl is-active "$service" || true)"
+            echo "$service: $status"
+            test "$status" = active
+          done
+          echo "=== Prueba DB G.O. desde usuario de servicio ==="
+          sudo -n -u go-ute env GO_ENV_FILE=/etc/go-ute/app.env bash -se <<'DB'
+          set -euo pipefail
+          set -a
+          . "$GO_ENV_FILE"
+          set +a
+          cd /opt/go-ute
+          /opt/go-ute/.venv/bin/python - <<'PY'
+          from go_ute.readiness import inspect_database,inspect_configuration
+          db=inspect_database()
+          cfg=inspect_configuration()
+          assert db["database_reachable"] and db["tables_ready"]
+          print("OK: PostgreSQL G.O. accesible desde usuario del servicio, tablas presentes.")
+          print("Router token configurado:",bool(cfg["router_configured"]))
+          print("Google configurado:",bool(cfg["production_auth_ready"]))
+          PY
+          DB
+          echo "=== HTTP interno y seguridad ==="
+          curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8020/health >/dev/null
+          status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST -H 'Content-Type: application/json' -d '{"message":"hola"}' http://127.0.0.1:8020/api/chat)"
+          test "$status" = 401
+          echo "OK: G.O. responde en loopback y rechaza chat no autenticado."
+          echo "=== Router /health ==="
+          curl --fail --silent --show-error --max-time 8 http://127.0.0.1:8010/health >/dev/null
+          echo "OK: Router HTTP activo; esto no prueba conversación ni autorización."
+          echo "FIN: comprobación sin cambios en configuración, DNS, Caddy ni datos."
+          REMOTE
