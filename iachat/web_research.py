@@ -41,7 +41,7 @@ def _prioritize_distinct_hosts(urls: list[str]) -> list[str]:
     return first_hosts + repeated_hosts
 
 
-def web_evidence_with_pages(query: str) -> str:
+def web_evidence_with_pages(query: str, *, news_fallback: bool = False) -> str:
     """Search once and read at most two public HTTPS pages (three attempts).
 
     No paid API, credentials, redirects or arbitrary model-selected URLs.
@@ -49,7 +49,9 @@ def web_evidence_with_pages(query: str) -> str:
     """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     query = query.strip()[:300]
-    results = search_web(query)[:MAX_RESULTS] if query else []
+    # A semantic search can require fresh evidence even when its rewritten
+    # query has no temporal keywords. Preserve the news-only RSS fallback.
+    results = (search_web(query, news_fallback=True) if news_fallback else search_web(query))[:MAX_RESULTS] if query else []
     if not results:
         return (
             f"Fecha de consulta: {now}. Se intentó una búsqueda web, pero no hubo "
