@@ -48,6 +48,16 @@ INFORMATIONAL_REQUEST = re.compile(
     re.IGNORECASE,
 )
 
+# Indirect factual requests can omit both a question mark and the fixed
+# introductory phrases above: "Averiguá si ...", "Confirmame qué ...",
+# "Revisá cómo ...". This is a grammatical signal to ASK the semantic
+# classifier, never a domain keyword that directly authorizes browsing.
+INDIRECT_INFORMATION_REQUEST = re.compile(
+    r"^\s*\S+\s+(?:si|qu[eé]|cu[aá]nt[oa]s?|cu[aá]ndo|"
+    r"d[oó]nde|c[oó]mo|qui[eé]n)\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class WebLookupPlan:
@@ -143,7 +153,11 @@ def plan_web_lookup_semantic(
     # Only informational questions need an additional model call. Preserve
     # direct chat/imperatives and personal-history recall as one-call tasks.
     # This is a negative fast path, NOT a list of subjects eligible for web.
-    if not (re.search(r"[¿?]", message) or INFORMATIONAL_REQUEST.search(message)) or re.search(
+    if not (
+        re.search(r"[¿?]", message)
+        or INFORMATIONAL_REQUEST.search(message)
+        or INDIRECT_INFORMATION_REQUEST.search(message)
+    ) or re.search(
         r"(?i)\b(?:record[aá]s|recuerd[oa]|dije|dijiste|te\s+acord[aá]s)\b", message
     ):
         return fallback
