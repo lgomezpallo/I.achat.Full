@@ -209,3 +209,30 @@ def test_semantic_does_not_send_attachments_to_classifier():
             raise AssertionError("attachments must not reach classifier")
 
     assert plan_web_lookup_semantic("Buscá esto", (), NoCall(), has_attachments=True).action == "answer"
+
+
+def test_semantic_informational_requests_without_question_marks():
+    from iachat.web_planner import plan_web_lookup_semantic
+    import json
+
+    class Classifier:
+        def __init__(self):
+            self.calls = 0
+        def answer(self, messages):
+            self.calls += 1
+            payload = json.loads(messages[-1]["content"])
+            return json.dumps({"action": "search", "query": payload["consulta"]})
+
+    classifier = Classifier()
+    for question in (
+        "Decime cuánto cuesta la renovación del DNI",
+        "Necesito saber los requisitos de ingreso a la universidad",
+        "Quiero saber qué cambios trae la nueva ley de alquileres",
+    ):
+        plan = plan_web_lookup_semantic(question, (), classifier)
+        assert plan.action == "search", question
+    assert classifier.calls == 3
+
+    # Ordinary chat must not spend a separate model call.
+    assert plan_web_lookup_semantic("Hola", (), classifier).action == "answer"
+    assert classifier.calls == 3
