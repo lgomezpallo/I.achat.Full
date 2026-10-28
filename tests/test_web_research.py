@@ -334,6 +334,6 @@ def test_chat_semantic_self_contained_request_does_not_browse(monkeypatch):
         lambda query: (_ for _ in ()).throw(AssertionError("no search expected")),
     )
     client = TestClient(app_module.app, base_url="https://testserver")
-    response = client.post("/api/chat", json={"text": "Traducí al italiano: buenos días"})
+    response = client.post("/api/chat", json={"text": "¿Podés traducir al italiano: buenos días?"})
     assert response.status_code == 200
     assert calls == ["classify", "answer"]
