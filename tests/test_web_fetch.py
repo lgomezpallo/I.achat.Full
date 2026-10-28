@@ -7,6 +7,8 @@ import pytest
 
 from iachat import web_fetch as wf
 
+REAL_CONNECTION = wf._PinnedHTTPSConnection
+
 
 class FakeResponse:
     def __init__(self, *, status=200, body=b"<p>Hello</p>", headers=None):
@@ -164,11 +166,7 @@ def test_tls_connect_uses_pinned_ip_and_original_hostname(monkeypatch):
         wf.socket, "create_connection",
         lambda address, timeout: (seen.append((address, timeout)), raw)[1],
     )
-    conn = wf._PinnedHTTPSConnection.__mro__[1] if False else None
-    # Retrieve original class by reloading module; only connect is exercised.
-    import importlib
-    original = importlib.reload(wf)._PinnedHTTPSConnection
-    connection = original("example.com", "93.184.216.34", 2.0)
+    connection = REAL_CONNECTION("example.com", "93.184.216.34", 2.0)
     connection._context = FakeTLSContext()
     connection.connect()
     assert seen == [(("93.184.216.34", 443), 2.0)]
