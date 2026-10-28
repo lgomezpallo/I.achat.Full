@@ -53,7 +53,7 @@ class _VisibleText(HTMLParser):
         attributes = dict(attrs)
         hidden = (
             "hidden" in attributes
-            or attributes.get("aria-hidden", "").lower() == "true"
+            or (attributes.get("aria-hidden") or "").lower() == "true"
             or bool(re.search(r"(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\b",
                               attributes.get("style") or "", re.I))
         )
