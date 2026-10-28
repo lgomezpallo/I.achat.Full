@@ -138,3 +138,33 @@ def test_invalid_batch_budget_rejected_without_fetch(monkeypatch, kwargs):
     )
     with pytest.raises(ValueError, match="budget"):
         reader.read_pages(["https://example.com/"], **kwargs)
+
+
+def test_batch_caps_candidate_iteration_even_when_urls_repeat_forever(monkeypatch):
+    from itertools import repeat
+
+    calls = []
+    def fake_read(url, *, timeout):
+        calls.append(url)
+        return reader.ReadPage(url, "ok")
+
+    monkeypatch.setattr(reader, "read_page", fake_read)
+    # A generator with no end must terminate after the candidate budget.
+    results = reader.read_pages(repeat("https://same.example/"))
+    assert len(results) == 1
+    assert calls == ["https://same.example/"]
+
+
+def test_batch_never_inspects_more_than_ten_candidates(monkeypatch):
+    seen = []
+    def candidates():
+        for index in range(100):
+            seen.append(index)
+            yield "https://same.example/"
+
+    monkeypatch.setattr(
+        reader, "read_page",
+        lambda url, *, timeout: reader.ReadPage(url, "ok"),
+    )
+    assert len(reader.read_pages(candidates())) == 1
+    assert len(seen) == reader.MAX_CANDIDATES
