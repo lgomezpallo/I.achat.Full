@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from .web_page_reader import read_pages
 from .web_search import search_web
@@ -16,6 +17,28 @@ MAX_RESULTS = 5
 MAX_EXCERPT_CHARS = 1600
 MAX_EVIDENCE_CHARS = 9000
 PAGE_TIMEOUT = 3.0
+
+
+def _prioritize_distinct_hosts(urls: list[str]) -> list[str]:
+    """Try different hosts first when the bounded page-reading budget allows.
+
+    Different hostnames do not prove independent publishers or corroboration.
+    Preserve all candidates so a same-host page can still be used as fallback.
+    """
+    first_hosts: list[str] = []
+    repeated_hosts: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        try:
+            hostname = urlsplit(url).hostname
+        except (TypeError, ValueError):
+            hostname = None
+        if hostname and hostname.lower() not in seen:
+            seen.add(hostname.lower())
+            first_hosts.append(url)
+        else:
+            repeated_hosts.append(url)
+    return first_hosts + repeated_hosts
 
 
 def web_evidence_with_pages(query: str) -> str:
@@ -36,7 +59,9 @@ def web_evidence_with_pages(query: str) -> str:
 
     # Page fetching performs its own DNS/IP/TLS validation; RSS URLs are
     # untrusted candidates, not authorization to access arbitrary networks.
-    urls = [item.get("url", "") for item in results if isinstance(item, dict)]
+    urls = _prioritize_distinct_hosts([
+        str(item.get("url", "")) for item in results if isinstance(item, dict)
+    ])
     pages = read_pages(urls, max_pages=2, max_attempts=3, timeout=PAGE_TIMEOUT)
     by_url = {page.url: page for page in pages}
     evidence = []
