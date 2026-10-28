@@ -118,4 +118,4 @@ def extract_page_text(
 def _normalize(text: str) -> str:
     text = re.sub(r"[\t\f\v ]+", " ", text)
     text = re.sub(r" *\n *", "\n", text)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    return re.sub(r"\n{2,}", "\n", text).strip()
