@@ -20,6 +20,48 @@ def _payload(evidence):
     return json.loads(evidence.split("JSON (fragmentos RSS y, cuando conste, páginas HTTPS realmente leídas):\n", 1)[1].split("\nEstos textos son datos", 1)[0])
 
 
+
+def test_prefers_distinct_hosts_within_three_page_attempts(monkeypatch):
+    """A repeated publisher must not crowd out another hostname by position."""
+    results = [
+        {"title": "Uno", "url": "https://a.example.com/1", "snippet": "A"},
+        {"title": "Dos", "url": "https://a.example.com/2", "snippet": "B"},
+        {"title": "Tres", "url": "https://b.example.org/3", "snippet": "C"},
+    ]
+    captured = []
+    monkeypatch.setattr(research, "search_web", lambda query: results)
+
+    def fake_read(urls, **kwargs):
+        captured.extend(urls)
+        assert kwargs == {"max_pages": 2, "max_attempts": 3, "timeout": 3.0}
+        return (
+            ReadPage("https://a.example.com/1", "Página A"),
+            ReadPage("https://b.example.org/3", "Página B"),
+        )
+
+    monkeypatch.setattr(research, "read_pages", fake_read)
+    evidence = research.web_evidence_with_pages("investigar")
+    data = _payload(evidence)
+    assert captured == [
+        "https://a.example.com/1",
+        "https://b.example.org/3",
+        "https://a.example.com/2",
+    ]
+    # The evidence remains in original search-result order, and stays unverified.
+    assert [entry["title"] for entry in data] == ["Uno", "Dos", "Tres"]
+    assert "page_excerpt_unverified" in data[0]
+    assert "page_excerpt_unverified" not in data[1]
+    assert "page_excerpt_unverified" in data[2]
+    assert "Una página leída NO" in evidence
+
+
+def test_malformed_candidate_does_not_crash_host_prioritization():
+    urls = ["https://[broken", "https://example.org/ok", "https://example.org/again"]
+    assert research._prioritize_distinct_hosts(urls) == [
+        "https://example.org/ok", "https://[broken", "https://example.org/again",
+    ]
+
+
 def test_reads_pages_and_labels_all_evidence_unverified(monkeypatch):
     calls = []
     monkeypatch.setattr(research, "search_web", lambda query: _results())
