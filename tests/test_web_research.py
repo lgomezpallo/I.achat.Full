@@ -113,3 +113,43 @@ def test_chat_evergreen_question_does_not_browse(monkeypatch):
     monkeypatch.setattr(research, "web_evidence_with_pages", lambda query: (_ for _ in ()).throw(AssertionError("unexpected search")))
     client = TestClient(app_module.app, base_url="https://testserver")
     assert client.post("/api/chat", json={"text": "Explicá el ciclo del agua"}).status_code == 200
+
+
+def test_research_uses_free_news_fallback_when_general_rss_fails(monkeypatch):
+    """End-to-end search-to-evidence path, without real HTTP or model calls."""
+    import httpx
+    from iachat import web_search
+
+    calls = []
+    original_client = httpx.Client
+
+    def handler(request):
+        calls.append(request.url.host)
+        if request.url.host == "www.bing.com":
+            return httpx.Response(503)
+        assert request.url.host == "news.google.com"
+        return httpx.Response(200, content=(
+            b"<rss><channel><item><title>Noticia</title>"
+            b"<link>https://example.com/noticia</link>"
+            b"<description>Horario por confirmar</description>"
+            b"</item></channel></rss>"
+        ))
+
+    def client(*args, **kwargs):
+        assert kwargs["follow_redirects"] is False
+        return original_client(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    read_urls = []
+    monkeypatch.setattr(web_search.httpx, "Client", client)
+    monkeypatch.setattr(
+        research, "read_pages",
+        lambda urls, **kwargs: read_urls.extend(urls) or (),
+    )
+    data = _payload(research.web_evidence_with_pages("¿Cuándo juega River?"))
+    assert calls == ["www.bing.com", "news.google.com"]
+    assert read_urls == ["https://example.com/noticia"]
+    assert data == [{
+        "title": "Noticia",
+        "url": "https://example.com/noticia",
+        "rss_snippet_unverified": "Horario por confirmar",
+    }]
