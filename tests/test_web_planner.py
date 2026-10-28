@@ -227,7 +227,7 @@ def test_semantic_informational_requests_without_question_marks():
     for question in (
         "Decime cuánto cuesta la renovación del DNI",
         "Necesito saber los requisitos de ingreso a la universidad",
-        "Quiero saber qué cambios trae la nueva ley de alquileres",
+        "Quiero saber qué exige el decreto 140/2026",
     ):
         plan = plan_web_lookup_semantic(question, (), classifier)
         assert plan.action == "search", question
