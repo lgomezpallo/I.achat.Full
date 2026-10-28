@@ -31,6 +31,25 @@ class FakeBackend:
         return "Entendido."
 
 
+def validate_live_backend() -> str:
+    """Fail closed before a quota-consuming live smoke; never select Router implicitly.
+
+    This only validates configuration, not provider billing or actual inference.
+    CI must keep using the offline mock path.
+    """
+    mode = os.getenv("IACHAT_BACKEND", "integrated").strip().lower()
+    if mode == "router":
+        if not os.getenv("ROUTER_URL", "").strip() or not os.getenv("ROUTER_TOKEN", "").strip():
+            raise SystemExit("LIVE Router smoke requires ROUTER_URL and ROUTER_TOKEN")
+        return "router"
+    if mode not in ("", "integrated"):
+        raise SystemExit("Unsupported IACHAT_BACKEND for live smoke")
+    from iachat.backend import ProviderBackend
+    if not ProviderBackend.configured():
+        raise SystemExit("LIVE integrated smoke requires a configured provider")
+    return "integrated"
+
+
 def run(live: bool = False):
     with tempfile.TemporaryDirectory(prefix="iachat-smoke-") as directory:
         database = Path(directory) / "isolated.sqlite"
@@ -171,7 +190,7 @@ def run(live: bool = False):
                 assert len(module.store.get(long_id, "smoke")) == len(long_history) + 2
                 assert module.store is not previous_store
                 print("PASS: isolated continuity, unknown facts, conversation isolation and persistence")
-                print("MODE:", "LIVE ROUTER" if live else "OFFLINE MOCK")
+                print("MODE:", ("LIVE " + os.getenv("IACHAT_BACKEND", "integrated").strip().upper()) if live else "OFFLINE MOCK")
                 print("DATA: temporary SQLite, deleted after run")
         finally:
             module.store = previous_store
@@ -185,6 +204,6 @@ def run(live: bool = False):
 
 if __name__ == "__main__":
     live = os.getenv("IACHAT_SMOKE_LIVE") == "1"
-    if live and (not os.getenv("ROUTER_URL") or not os.getenv("ROUTER_TOKEN")):
-        raise SystemExit("LIVE mode requires ROUTER_URL and ROUTER_TOKEN")
+    if live:
+        print("LIVE_BACKEND:", validate_live_backend().upper(), flush=True)
     run(live)
