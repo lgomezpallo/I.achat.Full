@@ -7,6 +7,7 @@ This module is intentionally not connected to the chat handler yet.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import islice
 from typing import Iterable
 
 from .web_content import MAX_TEXT_CHARS, extract_page_text
@@ -14,6 +15,7 @@ from .web_fetch import PageFetchError, fetch_page
 
 MAX_PAGES = 2
 MAX_ATTEMPTS = 3
+MAX_CANDIDATES = 10
 
 
 class PageReadError(ValueError):
@@ -64,7 +66,8 @@ def read_pages(
     seen: set[str] = set()
     found: list[ReadPage] = []
     attempts = 0
-    for url in urls:
+    # Duplicates and malformed entries must not make an infinite iterable hang.
+    for url in islice(urls, MAX_CANDIDATES):
         if attempts >= max_attempts or len(found) >= max_pages:
             break
         if not isinstance(url, str) or url in seen:
