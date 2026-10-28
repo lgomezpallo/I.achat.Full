@@ -162,3 +162,65 @@ def test_rollback_rehearsal_restores_code_and_preserves_runtime_files(tmp_path):
     assert (app / "runtime.sqlite3-wal").read_text() == "preserve WAL"
     assert (app / ".env").read_text() == "preserve local configuration"
     assert (app / "uploads" / "created-after-backup.txt").exists()
+
+
+def test_rollback_health_requires_every_restore_step(tmp_path):
+    """Run the actual rollback shell function with isolated command stubs.
+
+    A green /health is insufficient if cleanup, rsync, pip or restart failed.
+    This test never invokes sudo, systemd, Oracle or a network provider.
+    """
+    import os
+
+    script = DEPLOY.read_text(encoding="utf-8")
+    rollback_function = "rollback() {" + script.split("rollback() {", 1)[1].split("\n}", 1)[0] + "\n}"
+    app = tmp_path / "app"
+    (app / ".venv" / "bin").mkdir(parents=True)
+    python_stub = app / ".venv" / "bin" / "python"
+    python_stub.write_text('#!/bin/sh\n[ "$FAIL_STEP" != "pip" ]\n', encoding="utf-8")
+    python_stub.chmod(0o755)
+    for folder in ("stage", "backup"):
+        (tmp_path / folder).mkdir()
+
+    shell = """
+set -Eeuo pipefail
+app="$APP"
+stage="$STAGE"
+backup="$BACKUP"
+archive="$ARCHIVE"
+deployed=1
+dropin_changed=0
+dropin_existed=0
+cleanup() { :; }
+python3() { [[ "$FAIL_STEP" != "cleanup" ]]; }
+rsync() { [[ "$FAIL_STEP" != "rsync" ]]; }
+sudo() {
+  if [[ "$FAIL_STEP" == "restart" && "$*" == *"systemctl restart iachat"* ]]; then
+    return 1
+  fi
+  return 0
+}
+curl() { return 0; }
+""" + rollback_function + """
+false
+rollback
+"""
+    for failing_step in ("", "cleanup", "rsync", "pip", "restart"):
+        env = os.environ.copy()
+        env.update({
+            "APP": str(app),
+            "STAGE": str(tmp_path / "stage"),
+            "BACKUP": str(tmp_path / "backup"),
+            "ARCHIVE": str(tmp_path / "release.tar.gz"),
+            "FAIL_STEP": failing_step,
+        })
+        result = subprocess.run(
+            ["bash", "-c", shell], env=env, capture_output=True, text=True,
+            check=False,
+        )
+        assert result.returncode == 1  # original deployment failure stays failed
+        if failing_step:
+            assert "Rollback health: OK" not in result.stdout, failing_step
+            assert "Rollback health check failed" in result.stdout, failing_step
+        else:
+            assert "Rollback health: OK" in result.stdout
