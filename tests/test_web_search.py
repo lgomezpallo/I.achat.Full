@@ -169,3 +169,35 @@ def test_snippets_are_not_described_as_verified_pages(monkeypatch):
     evidence = web_search.web_evidence("hoy")
     assert "no páginas leídas ni hechos verificados" in evidence
     assert "https://example.com/x" in evidence
+
+
+def test_rss_pubdate_is_normalized_to_utc_without_changing_event_date(monkeypatch):
+    feed = rss(("Evento", "https://example.com/evento", "El evento será mañana"))
+    feed = feed.replace(
+        b"</item>",
+        b"<pubDate>Tue, 27 Oct 2026 23:30:00 -0300</pubDate></item>",
+    )
+    install_http(monkeypatch, lambda request: httpx.Response(200, content=feed))
+    results = web_search.search_web("evento")
+    assert results == [{
+        "title": "Evento",
+        "url": "https://example.com/evento",
+        "snippet": "El evento será mañana",
+        "published_at_utc": "2026-10-28T02:30:00+00:00",
+    }]
+
+
+def test_rss_pubdate_missing_invalid_or_without_timezone_is_omitted(monkeypatch):
+    feed = (
+        b"<rss><channel>"
+        b"<item><title>Sin fecha</title><link>https://example.com/a</link></item>"
+        b"<item><title>Sin zona</title><link>https://example.com/b</link>"
+        b"<pubDate>Tue, 27 Oct 2026 23:30:00</pubDate></item>"
+        b"<item><title>Malformada</title><link>https://example.com/c</link>"
+        b"<pubDate>no es fecha</pubDate></item>"
+        b"</channel></rss>"
+    )
+    install_http(monkeypatch, lambda request: httpx.Response(200, content=feed))
+    results = web_search.search_web("documentación")
+    assert len(results) == 3
+    assert all("published_at_utc" not in item for item in results)
