@@ -59,7 +59,7 @@ jobs:
           . /etc/go-ute/app.env
           set +a
           if ! grep -q '^GO_PUBLIC_ORIGIN=' /etc/go-ute/app.env; then
-            echo 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
+            printf '\\n%s\\n' 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
           else
             grep -qx 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' /etc/go-ute/app.env || { echo 'ERROR: origen HTTPS diferente al esperado'; exit 1; }
           fi
