@@ -80,6 +80,32 @@ jobs:
                         ("http_200" if response.status == 200 else "non_200"))
           except Exception:
               print("GO_ROUTER_DIAG local_health=unreachable")
+          # Inspección de inventario por HTTP GET local, sin inferencia ni credenciales.
+          # Los estados de facturación son metadata, NO autorizan cobros ni tráfico.
+          sudo -n python3 - <<'PYCATALOG'
+          import json
+          import urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8010/catalog", timeout=4) as response:
+                  payload = json.load(response)
+              providers = payload.get("providers", [])
+              if not isinstance(providers, list):
+                  raise ValueError("invalid_catalog")
+              for name in ("groq", "nvidia", "cloudflare", "openrouter"):
+                  provider = next((p for p in providers if isinstance(p, dict) and p.get("id") == name), {})
+                  models = provider.get("models", [])
+                  if not isinstance(models, list):
+                      models = []
+                  counts = {status: sum(1 for m in models if isinstance(m, dict) and m.get("billing_status") == status)
+                            for status in ("free", "paid", "unknown")}
+                  verified = sum(1 for m in models if isinstance(m, dict)
+                                 and "chat" in m.get("verified_capabilities", []))
+                  print(f"GO_ROUTER_CATALOG provider={name} models={len(models)} "
+                        f"free={counts['free']} paid={counts['paid']} unknown={counts['unknown']} "
+                        f"chat_verified={verified}")
+          except Exception:
+              print("GO_ROUTER_CATALOG status=unavailable")
+          PYCATALOG
           # Prueba negativa de autenticación: cuerpo inválido, imposible invocar modelos.
           # Se usa exclusivamente loopback; no se imprime ningún token.
           if local and token:
