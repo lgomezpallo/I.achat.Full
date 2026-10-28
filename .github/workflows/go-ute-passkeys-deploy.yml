@@ -107,6 +107,7 @@ jobs:
           PYDIAG
           if [ "$revision" = "$deployed" ]; then
             echo "G.O. sin cambios: no reinstalar ni reiniciar."
+            echo "GO_DEPLOY_REVISION=$revision (sin cambios)"
             exit 0
           fi
           # Preparar dependencias y ejecutar pruebas ANTES de reemplazar el código vivo.
@@ -138,6 +139,11 @@ jobs:
           print("GO_ROUTER_CONTRACT status=" + str(result["status"])
                 + " anonymous_http=" + str(result.get("anonymous_http", "-"))
                 + " authorized_http=" + str(result.get("authorized_http", "-")))
+          # Nunca habilitar un Router sin contrato local comprobado.
+          # La verificación no envía solicitudes válidas ni ejecuta modelos.
+          import os
+          if os.getenv("GO_ROUTER_ENABLED") == "1" and result["status"] != "verified":
+              raise SystemExit("ERROR: contrato del Router no verificado")
           PYROUTER
           /opt/go-ute/.venv/bin/python - "$src/migrations/002_passkeys.sql" <<'PY'
           import os,sys,psycopg
@@ -202,6 +208,7 @@ jobs:
           then
             sudo -n install -d -m 755 /var/lib/go-ute
             printf "%s\n" "$revision" | sudo -n tee /var/lib/go-ute/deployed-revision >/dev/null
+            echo "GO_DEPLOY_REVISION=$revision"
           else
             rc=$?
             if [ "$rc" -eq 75 ]; then
