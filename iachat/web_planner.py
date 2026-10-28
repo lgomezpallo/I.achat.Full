@@ -130,6 +130,13 @@ def plan_web_lookup_semantic(
     fallback = plan_web_lookup(message, history, has_attachments=has_attachments)
     if fallback.action == "search" or has_attachments or not message.strip():
         return fallback
+    # Only informational questions need an additional model call. Preserve
+    # direct chat/imperatives and personal-history recall as one-call tasks.
+    # This is a negative fast path, NOT a list of subjects eligible for web.
+    if not re.search(r"[¿?]", message) or re.search(
+        r"(?i)\\b(?:record[aá]s|recuerd[oa]|dije|dijiste|te\\s+acord[aá]s)\\b", message
+    ):
+        return fallback
 
     recent_users = [
         turn["content"][:250]
