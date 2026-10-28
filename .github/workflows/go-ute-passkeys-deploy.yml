@@ -97,7 +97,7 @@ jobs:
                      VALUES (1,%s,now()+interval '24 hours',NULL)
                      ON CONFLICT (id) DO UPDATE SET secret_hash=excluded.secret_hash,
                      expires_at=excluded.expires_at,used_at=NULL WHERE go_auth_bootstrap.used_at IS NULL""",(hashed,))
-                  print("CODIGO TEMPORAL DE ACTIVACION (24 HORAS; no compartir): "+code)
+                  print("Código generado: nunca mostrar secretos en GitHub Actions")
           PY
           echo "OK: servicio G.O. con WebAuthn y HTTPS; Caddy/IAchat/Router no modificados."
           DEPLOY
