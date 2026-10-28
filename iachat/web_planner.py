@@ -184,7 +184,7 @@ def plan_web_lookup_semantic(
         decision_text = raw.strip()
         if decision_text.startswith("```"):
             fenced = re.fullmatch(
-                r"```(?:json)?[ \\t]*\\r?\\n(.*?)\\r?\\n```",
+                r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```",
                 decision_text,
                 flags=re.IGNORECASE | re.DOTALL,
             )
