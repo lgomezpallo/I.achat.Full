@@ -42,6 +42,12 @@ jobs:
           test "$(ssh-keygen -lf "$tmp" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
           GIT_SSH_COMMAND="ssh -i $HOME/.ssh/go_ute_repo_readonly -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$tmp" git -C "$root" pull --ff-only origin main
           test -f "$root/migrations/002_passkeys.sql"
+          revision="$(git -C "$root" rev-parse HEAD)"
+          deployed="$(sudo -n cat /var/lib/go-ute/deployed-revision 2>/dev/null || true)"
+          if [ "$revision" = "$deployed" ]; then
+            echo "G.O. sin cambios: no reinstalar ni reiniciar."
+            exit 0
+          fi
           # Preparar dependencias y ejecutar pruebas ANTES de reemplazar el código vivo.
           "$root/.venv/bin/python" -m pip install --quiet -r "$root/requirements-chat.txt"
           (cd "$root" && .venv/bin/python -m pytest -q)
@@ -93,4 +99,6 @@ jobs:
           echo "No se emite ningún código de activación por GitHub Actions."
           echo "OK: servicio G.O. con WebAuthn y HTTPS; Caddy/IAchat/Router no modificados."
           DEPLOY
+          sudo -n install -m 644 /dev/null /var/lib/go-ute/deployed-revision
+          printf "%s\\n" "$revision" | sudo -n tee /var/lib/go-ute/deployed-revision >/dev/null
           REMOTE
