@@ -10,6 +10,7 @@ import ipaddress
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 
 import httpx
@@ -73,6 +74,22 @@ def _clean_snippet(value: str, limit: int) -> str:
     return re.sub(r"\s+", " ", value).strip()[:limit]
 
 
+def _rss_publication_date(value: str) -> str | None:
+    """Normalize an explicitly supplied RSS publication date, never infer one.
+
+    Missing timezone or malformed dates must not become apparent UTC facts.
+    """
+    if not value or len(value) > 120:
+        return None
+    try:
+        published = parsedate_to_datetime(value)
+        if published.tzinfo is None or published.utcoffset() is None:
+            return None
+        return published.astimezone(timezone.utc).isoformat(timespec="seconds")
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _fetch_feed(url: str, params: dict[str, str], timeout: float) -> list[dict[str, str]]:
     # Stream instead of downloading an unbounded body before checking its size.
     with httpx.Client(timeout=timeout, follow_redirects=False) as client:
@@ -95,7 +112,11 @@ def _fetch_feed(url: str, params: dict[str, str], timeout: float) -> list[dict[s
         if not title or not _public_https_link(link) or link in seen:
             continue
         seen.add(link)
-        results.append({"title": title, "url": link, "snippet": snippet})
+        record = {"title": title, "url": link, "snippet": snippet}
+        published_at = _rss_publication_date(item.findtext("pubDate") or "")
+        if published_at:
+            record["published_at_utc"] = published_at
+        results.append(record)
         if len(results) >= MAX_RESULTS:
             break
     return results
