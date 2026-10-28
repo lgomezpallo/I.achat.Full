@@ -219,3 +219,22 @@ def test_sports_question_without_date_uses_free_news_fallback(monkeypatch):
     results = web_search.search_web("¿Cómo salió la F1?")
     assert calls == ["www.bing.com", "news.google.com"]
     assert results[0]["url"] == "https://example.com/f1"
+
+
+def test_semantic_current_query_without_date_keeps_free_news_fallback(monkeypatch):
+    """The model can request fresh evidence using a query with no date words."""
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.host)
+        if request.url.host == "www.bing.com":
+            return httpx.Response(503)
+        assert request.url.host == "news.google.com"
+        return httpx.Response(200, content=rss(
+            ("Trámite", "https://example.com/tramite", "Requisitos por verificar")
+        ))
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("requisitos habilitación comercial", news_fallback=True)
+    assert calls == ["www.bing.com", "news.google.com"]
+    assert results[0]["url"] == "https://example.com/tramite"
