@@ -59,6 +59,18 @@ INDIRECT_INFORMATION_REQUEST = re.compile(
 )
 
 
+# User-provided text is sufficient for these transformations even if it
+# mentions changing facts (e.g. a quote containing "hoy" or a news headline).
+# This is a negative safety/latency gate, not a domain-specific web trigger.
+SELF_CONTAINED_TRANSFORMATION = re.compile(
+    r"^\\s*(?:traduc(?:[ií]|e|ir)|resum(?:[ií]|e|ir)|"
+    r"reescrib(?:[ií]|e|ir)|reformul(?:[aá]|a|ar)|"
+    r"correg(?:[ií]|e|ir)|mejor(?:[aá]|a|ar))\\b"
+    r"[^:\\n]{0,120}:\\s*\\S.{2,}",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 @dataclass(frozen=True)
 class WebLookupPlan:
     action: Literal["answer", "search"]
@@ -80,6 +92,8 @@ def plan_web_lookup(
     question = message.strip()
     if not question or has_attachments:
         return WebLookupPlan("answer", reason="empty_or_attachment")
+    if SELF_CONTAINED_TRANSFORMATION.match(question):
+        return WebLookupPlan("answer", reason="self_contained_text")
     if needs_current_information(question):
         return WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "current_question")
     if EXPLICIT_SEARCH.search(question):
@@ -148,7 +162,8 @@ def plan_web_lookup_semantic(
     No source text, attachments, secrets or tool results enter this prompt.
     """
     fallback = plan_web_lookup(message, history, has_attachments=has_attachments)
-    if fallback.action == "search" or has_attachments or not message.strip():
+    if (fallback.action == "search" or has_attachments or not message.strip()
+            or fallback.reason == "self_contained_text"):
         return fallback
     # Only informational questions need an additional model call. Preserve
     # direct chat/imperatives and personal-history recall as one-call tasks.
