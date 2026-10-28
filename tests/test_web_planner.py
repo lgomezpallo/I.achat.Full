@@ -80,3 +80,27 @@ def test_old_conversation_does_not_trigger_lookup():
         assistant("Respuesta"), user("Otro tema")
     ] * 6
     assert plan_web_lookup("¿Y dónde?", history).action == "answer"
+
+
+def test_sports_scores_and_broadcasts_without_today():
+    # These were previously answered without even attempting web lookup.
+    for question in (
+        "¿Cómo salió la F1?",
+        "¿Qué canal pasa River - Racing?",
+        "¿Quién ganó el Gran Premio?",
+        "¿Dónde transmiten el partido?",
+        "¿Qué pasó en el GP de Mónaco?",
+    ):
+        plan = plan_web_lookup(question)
+        assert plan.action == "search", question
+        assert plan.reason == "current_question", question
+
+
+def test_sports_heuristic_does_not_browse_unrelated_questions():
+    for question in (
+        "¿Cómo salió la torta?",
+        "¿Qué canal pasa por el barrio?",
+        "¿Quién ganó el premio Nobel de Literatura en 1982?",
+        "Explicá las reglas del fútbol",
+    ):
+        assert plan_web_lookup(question).action == "answer", question
