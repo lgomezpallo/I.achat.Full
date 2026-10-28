@@ -30,15 +30,31 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 2
+      - name: Evitar despliegues de IAchat por cambios administrativos de G.O.
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only HEAD^ HEAD | grep -Eq '^(iachat/|scripts/deploy_oracle[.]sh$|pyproject[.]toml$|requirements[^/]*[.]txt$|Dockerfile$|docker-compose[^/]*[.]ya?ml$)'; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Sin cambios de runtime IAchat: no se despliega."
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Pruebas antes del despliegue
+        if: steps.changes.outputs.deploy == 'true'
         run: |
           python -m pip install -e ".[dev]"
           python -m pytest -q
           python -m compileall -q iachat
       - name: Comprobar configuración de conexión
+        if: steps.changes.outputs.deploy == 'true'
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
           ORACLE_USER: ${{ secrets.ORACLE_USER }}
@@ -60,6 +76,7 @@ jobs:
           test "$actual" = "$expected" || { echo "::error::La huella SSH cambió. No se despliega."; exit 1; }
           chmod 600 ~/.ssh/known_hosts
       - name: Transferir y desplegar con reversión
+        if: steps.changes.outputs.deploy == 'true'
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
           ORACLE_USER: ${{ secrets.ORACLE_USER }}
