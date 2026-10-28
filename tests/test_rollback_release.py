@@ -101,3 +101,63 @@ def test_deploy_excludes_sqlite_and_env_files_in_every_rsync():
             "*.sqlite3", "*.sqlite3-*", ".env", ".env.*",
         ):
             assert f"--exclude='{pattern}'" in line, pattern
+
+
+def test_failed_release_restores_original_systemd_dropin():
+    """The release must restore service configuration as well as Python files."""
+    script = DEPLOY.read_text(encoding="utf-8")
+    rollback = script.split("rollback() {", 1)[1].split("\n}", 1)[0]
+    backup_call = 'sudo -n cp -p "$dropin" "$dropin_backup"'
+    restore_call = 'sudo -n cp -p "$dropin_backup" "$dropin"'
+    remove_call = 'sudo -n rm -f "$dropin"'
+    assert backup_call in script
+    assert restore_call in rollback
+    assert remove_call in rollback  # no previous drop-in: remove the new one
+    assert script.index(backup_call) < script.index("dropin_changed=1")
+    assert script.index("dropin_changed=1") < script.index('sudo -n tee "$dropin"')
+    assert rollback.index(restore_call) < rollback.index("systemctl daemon-reload")
+    assert rollback.index("systemctl daemon-reload") < rollback.index("systemctl restart iachat")
+    assert '"$config_restored" -eq 1' in rollback
+    # A failed restore must not be reported as a healthy rollback.
+    assert "Rollback health: OK" in rollback
+
+
+def test_rollback_rehearsal_restores_code_and_preserves_runtime_files(tmp_path):
+    """Exercise the same cleanup + rsync sequence in an isolated directory.
+
+    No Oracle access, service restart, credentials, inference or user data.
+    """
+    stage, backup, app = (tmp_path / name for name in ("stage", "backup", "app"))
+    for folder in (stage, backup, app):
+        folder.mkdir()
+    _write(backup / "iachat" / "app.py", "old working code")
+    _write(stage / "iachat" / "app.py", "new failing code")
+    _write(app / "iachat" / "app.py", "new failing code")
+    _write(stage / "iachat" / "new_module.py", "new release only")
+    _write(app / "iachat" / "new_module.py", "new release only")
+    _write(stage / ".env.iachat-systemd-rollback", "internal backup")
+    _write(app / "runtime.sqlite3", "preserve database")
+    _write(app / "runtime.sqlite3-wal", "preserve WAL")
+    _write(app / ".env", "preserve local configuration")
+    _write(app / "uploads" / "created-after-backup.txt", "preserve upload")
+
+    subprocess.run(
+        [sys.executable, str(HELPER), str(stage), str(backup), str(app)],
+        check=True, capture_output=True, text=True,
+    )
+    # Match the deployment rollback's exclusion contract exactly.
+    exclusions = (
+        ".venv/", ".git/", "*.db", "*.db-*", "*.sqlite", "*.sqlite-*",
+        "*.sqlite3", "*.sqlite3-*", ".env", ".env.*",
+    )
+    subprocess.run(
+        ["rsync", "-a", *(f"--exclude={pattern}" for pattern in exclusions),
+         str(backup) + "/", str(app) + "/"],
+        check=True, capture_output=True, text=True,
+    )
+    assert (app / "iachat" / "app.py").read_text() == "old working code"
+    assert not (app / "iachat" / "new_module.py").exists()
+    assert (app / "runtime.sqlite3").read_text() == "preserve database"
+    assert (app / "runtime.sqlite3-wal").read_text() == "preserve WAL"
+    assert (app / ".env").read_text() == "preserve local configuration"
+    assert (app / "uploads" / "created-after-backup.txt").exists()
