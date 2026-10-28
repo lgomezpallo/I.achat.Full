@@ -63,10 +63,10 @@ INDIRECT_INFORMATION_REQUEST = re.compile(
 # mentions changing facts (e.g. a quote containing "hoy" or a news headline).
 # This is a negative safety/latency gate, not a domain-specific web trigger.
 SELF_CONTAINED_TRANSFORMATION = re.compile(
-    r"^\\s*(?:traduc(?:[ií]|e|ir)|resum(?:[ií]|e|ir)|"
+    r"^\s*(?:traduc(?:[ií]|e|ir)|resum(?:[ií]|e|ir)|"
     r"reescrib(?:[ií]|e|ir)|reformul(?:[aá]|a|ar)|"
-    r"correg(?:[ií]|e|ir)|mejor(?:[aá]|a|ar))\\b"
-    r"[^:\\n]{0,120}:\\s*\\S.{2,}",
+    r"correg(?:[ií]|e|ir)|mejor(?:[aá]|a|ar))\b"
+    r"[^:\n]{0,120}:\s*\S.{2,}",
     re.IGNORECASE | re.DOTALL,
 )
 
