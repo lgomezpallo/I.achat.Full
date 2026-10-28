@@ -202,8 +202,7 @@ sudo() {
 }
 curl() { return 0; }
 """ + rollback_function + """
-false
-rollback
+false || rollback
 """
     for failing_step in ("", "cleanup", "rsync", "pip", "restart"):
         env = os.environ.copy()
