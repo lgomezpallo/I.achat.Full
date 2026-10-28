@@ -156,10 +156,12 @@ def plan_web_lookup_semantic(
         if action != "search":
             return fallback
         query = decision.get("query")
-        if not isinstance(query, str) or not query.strip():
+        if query is not None and not isinstance(query, str):
+            return fallback
+        if not query or not query.strip():
             query = " ".join([*recent_users[-1:], message.strip()])
         query = query.strip()[:MAX_SEARCH_QUERY]
         return WebLookupPlan("search", query, "semantic_current") if query else fallback
-    except (Exception):
+    except Exception:
         # A classifier outage must not prevent the normal chat response.
         return fallback
