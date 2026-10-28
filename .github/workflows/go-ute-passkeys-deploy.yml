@@ -1,8 +1,6 @@
 name: G.O. desplegar acceso con huella
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '*/5 * * * *'
 permissions:
   contents: read
 concurrency:
@@ -48,6 +46,11 @@ jobs:
             echo "G.O. sin cambios: no reinstalar ni reiniciar."
             exit 0
           fi
+          # Bloqueo de seguridad: no activar passkeys hasta que exista una
+          # credencial válida o un canal privado de alta inicial comprobado.
+          # Se evita publicar una versión que deje al propietario sin acceso.
+          echo "Despliegue retenido: falta completar alta inicial WebAuthn privada."
+          exit 1
           # Preparar dependencias y ejecutar pruebas ANTES de reemplazar el código vivo.
           "$root/.venv/bin/python" -m pip install --quiet -r "$root/requirements-chat.txt"
           (cd "$root" && .venv/bin/python -m pytest -q)
