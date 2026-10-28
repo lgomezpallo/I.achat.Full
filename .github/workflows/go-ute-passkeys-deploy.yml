@@ -121,7 +121,7 @@ jobs:
                   models = provider.get("models", [])
                   if not isinstance(models, list):
                       models = []
-                  counts = {status: sum(1 for m in models if isinstance(m, dict) and m.get("billing_status") == status)
+                  counts = {status: sum(1 for m in models if isinstance(m, dict) and m.get("billing_status", "unknown") == status)
                             for status in ("free", "paid", "unknown")}
                   verified = sum(1 for m in models if isinstance(m, dict)
                                  and "chat" in m.get("verified_capabilities", []))
