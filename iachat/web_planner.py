@@ -39,6 +39,16 @@ REFERENTIAL_FOLLOWUP = re.compile(
 )
 
 
+# Generic informational phrasing without question marks is also eligible for
+# semantic classification. These are intent forms, not domain-specific topics.
+INFORMATIONAL_REQUEST = re.compile(
+    r"^\\s*(?:decime|dime|informame|quiero\\s+saber|necesito\\s+saber|"
+    r"me\\s+pod[eé]s\\s+decir|pod[eé]s\\s+decirme|"
+    r"dame\\s+(?:datos|informaci[oó]n))\\b",
+    re.IGNORECASE,
+)
+
+
 @dataclass(frozen=True)
 class WebLookupPlan:
     action: Literal["answer", "search"]
@@ -133,7 +143,7 @@ def plan_web_lookup_semantic(
     # Only informational questions need an additional model call. Preserve
     # direct chat/imperatives and personal-history recall as one-call tasks.
     # This is a negative fast path, NOT a list of subjects eligible for web.
-    if not re.search(r"[¿?]", message) or re.search(
+    if not (re.search(r"[¿?]", message) or INFORMATIONAL_REQUEST.search(message)) or re.search(
         r"(?i)\b(?:record[aá]s|recuerd[oa]|dije|dijiste|te\s+acord[aá]s)\b", message
     ):
         return fallback
