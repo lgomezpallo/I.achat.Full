@@ -21,7 +21,8 @@ rollback() {
     # Only remove files introduced by this release; preserve runtime data.
     python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app" || \
       echo "::error::New release file cleanup failed; manual inspection required."
-    rsync -a --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
+    # --checksum avoids rsync skipping changed files with identical size/mtime.
+    rsync -a --checksum --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
       "$backup/" "$app/" || true
     "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q || true
     # Restore the original backend configuration before restarting old code.
