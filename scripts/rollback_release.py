@@ -11,10 +11,19 @@ from pathlib import Path
 
 
 def _protected(relative: Path) -> bool:
+    name = relative.name
+    # SQLite may use .db, .sqlite or .sqlite3, with -wal/-shm/-journal
+    # companions. Local environment files can contain credentials.
+    protected_suffixes = (".db", ".sqlite", ".sqlite3")
     return (
         any(part in {".git", ".venv"} for part in relative.parts)
-        or fnmatch.fnmatch(relative.name, "*.db")
-        or fnmatch.fnmatch(relative.name, "*.db-*")
+        or name == ".env"
+        or name.startswith(".env.")
+        or any(
+            fnmatch.fnmatch(name, f"*{suffix}")
+            or fnmatch.fnmatch(name, f"*{suffix}-*")
+            for suffix in protected_suffixes
+        )
     )
 
 

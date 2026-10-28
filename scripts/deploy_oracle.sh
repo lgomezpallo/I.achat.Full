@@ -16,7 +16,7 @@ rollback() {
     # Only remove files introduced by this release; preserve runtime data.
     python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app" || \
       echo "::error::New release file cleanup failed; manual inspection required."
-    rsync -a --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' \
+    rsync -a --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
       "$backup/" "$app/" || true
     "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q || true
 sudo -n systemctl restart iachat || true
@@ -39,10 +39,10 @@ tar -xzf "$archive" -C "$stage" --no-same-owner
 test -f "$stage/pyproject.toml"
 test -f "$stage/iachat/app.py"
 # Preserve local repository, SQLite data, secrets, and Python environment.
-rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' \
+rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$app/" "$backup/"
 deployed=1
-rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' \
+rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$stage/" "$app/"
 "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q
 "$app/.venv/bin/python" -m compileall -q "$app/iachat"

@@ -64,3 +64,40 @@ def test_deploy_uses_targeted_cleanup_before_backup_restore():
     rollback = script.split("rollback() {", 1)[1].split("\n}", 1)[0]
     assert rollback.index(helper_call) < rollback.index('"$backup/" "$app/"')
     assert "--delete" not in rollback
+
+
+def test_rollback_preserves_sqlite_variants_and_environment_files(tmp_path):
+    stage, backup, app = (tmp_path / name for name in ("stage", "backup", "app"))
+    for folder in (stage, backup, app):
+        folder.mkdir()
+    protected = (
+        "runtime.sqlite", "runtime.sqlite-wal", "runtime.sqlite-shm",
+        "runtime.sqlite3", "runtime.sqlite3-journal", "runtime.db",
+        "runtime.db-wal", ".env", ".env.local",
+    )
+    for filename in protected:
+        _write(stage / filename, "release")
+        _write(app / filename, "runtime: preserve")
+    _write(stage / "new_release.py")
+    _write(app / "new_release.py")
+
+    result = subprocess.run(
+        [sys.executable, str(HELPER), str(stage), str(backup), str(app)],
+        check=True, capture_output=True, text=True,
+    )
+    assert "removed 1 new release files" in result.stdout
+    assert not (app / "new_release.py").exists()
+    for filename in protected:
+        assert (app / filename).read_text() == "runtime: preserve", filename
+
+
+def test_deploy_excludes_sqlite_and_env_files_in_every_rsync():
+    script = DEPLOY.read_text(encoding="utf-8")
+    rsync_lines = [line for line in script.splitlines() if "rsync -a " in line]
+    assert len(rsync_lines) == 3
+    for line in rsync_lines:
+        for pattern in (
+            "*.db", "*.db-*", "*.sqlite", "*.sqlite-*",
+            "*.sqlite3", "*.sqlite3-*", ".env", ".env.*",
+        ):
+            assert f"--exclude='{pattern}'" in line, pattern
