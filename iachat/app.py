@@ -300,9 +300,9 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         # Fetch current evidence before inference; the integrated minirouter does
         # not itself provide internet browsing.
         if message.text and not message.attachments:
-            from .web_planner import plan_web_lookup
+            from .web_planner import plan_web_lookup_semantic
             from .web_research import web_evidence_with_pages
-            lookup = plan_web_lookup(message.text, history)
+            lookup = plan_web_lookup_semantic(message.text, history, get_backend())
             if lookup.action == "search":
                 # Keep instructions in the trusted system role, but NEVER put
                 # fetched RSS/page text there: it is attacker-controlled data.
