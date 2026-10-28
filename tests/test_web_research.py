@@ -337,3 +337,33 @@ def test_chat_semantic_self_contained_request_does_not_browse(monkeypatch):
     response = client.post("/api/chat", json={"text": "¿Podés traducir al italiano: buenos días?"})
     assert response.status_code == 200
     assert calls == ["classify", "answer"]
+
+
+def test_chat_indirect_current_request_without_question_mark_uses_web(monkeypatch):
+    """A general factual imperative must reach the semantic classifier and web."""
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    events = []
+
+    class Backend:
+        def answer(self, messages):
+            if messages[0]["role"] == "system" and "clasificador" in messages[0]["content"]:
+                events.append("classify")
+                return '{"action":"search","query":"requisitos de habilitación comercial"}'
+            events.append("answer")
+            assert any("EVIDENCIA_INDIRECTA" in m["content"] for m in messages)
+            return "Respuesta de prueba"
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: Backend())
+    monkeypatch.setattr(
+        research, "web_evidence_with_pages",
+        lambda query: events.append("search:" + query) or "EVIDENCIA_INDIRECTA",
+    )
+    client = TestClient(app_module.app, base_url="https://testserver")
+    response = client.post(
+        "/api/chat", json={"text": "Revisá cómo se solicita la habilitación comercial"}
+    )
+    assert response.status_code == 200
+    assert events == [
+        "classify", "search:requisitos de habilitación comercial", "answer"
+    ]
