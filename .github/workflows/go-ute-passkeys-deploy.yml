@@ -177,6 +177,19 @@ jobs:
               conn.execute(open(sys.argv[1],encoding="utf-8").read())
           print("OK: tablas de autenticación WebAuthn aplicadas.")
           PY
+          # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
+          # Solo se imprimen estados booleanos, nunca filas ni credenciales.
+          PYTHONPATH="$src" /opt/go-ute/.venv/bin/python - <<'PYDBREADY'
+          from go_ute.readiness import inspect_database
+          status = inspect_database()
+          print("GO_DATABASE_READINESS reachable=" + str(bool(status.get("database_reachable"))).lower()
+                + " tables=" + str(bool(status.get("tables_ready"))).lower()
+                + " passkey_tables=" + str(bool(status.get("passkey_tables_ready"))).lower()
+                + " passkey_enrolled=" + str(bool(status.get("passkey_enrolled"))).lower())
+          if not (status.get("database_reachable") and status.get("tables_ready")
+                  and status.get("passkey_tables_ready")):
+              raise SystemExit("ERROR: esquema PostgreSQL incompleto; despliegue no iniciado")
+          PYDBREADY
           # Antes de cambiar la autenticación, exigir una passkey ya registrada
           # o una activación válida creada SOLO desde terminal privada de Oracle.
           /opt/go-ute/.venv/bin/python - <<'PY'
