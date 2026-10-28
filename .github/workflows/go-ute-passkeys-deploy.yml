@@ -143,3 +143,11 @@ jobs:
             exit "$rc"
           fi
           REMOTE
+          # Comprobar acceso público HTTPS desde el runner, no solo loopback de Oracle.
+          public_page="$(mktemp)"
+          trap 'rm -f "$k" "$h" "$public_page"' EXIT
+          curl -fsS --max-time 15 https://go-ute.duckdns.org/ -o "$public_page"
+          grep -Fq 'Ingresar con huella' "$public_page" || { echo 'ERROR: pantalla WebAuthn no disponible por HTTPS'; exit 1; }
+          public_session="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://go-ute.duckdns.org/api/session)"
+          test "$public_session" = 401 || { echo 'ERROR: sesión pública sin autenticación no devuelve 401'; exit 1; }
+          echo 'OK: HTTPS público y acceso no autenticado rechazado.'
