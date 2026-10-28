@@ -1,6 +1,9 @@
 name: G.O. desplegar acceso con huella
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/go-ute-passkeys-deploy.yml']
   schedule:
     - cron: '*/10 * * * *'
 permissions:
