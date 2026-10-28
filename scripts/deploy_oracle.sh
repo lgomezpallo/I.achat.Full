@@ -13,7 +13,7 @@ rollback() {
   status=$?
   if [[ "$status" -ne 0 && "$deployed" -eq 1 ]]; then
     echo "Deployment failed; reverting application code."
-    # Only remove files introduced by this release. Never --delete runtime data.
+    # Only remove files introduced by this release; preserve runtime data.
     python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app" || \
       echo "::error::New release file cleanup failed; manual inspection required."
     rsync -a --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' \
