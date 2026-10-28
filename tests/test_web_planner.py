@@ -277,3 +277,36 @@ def test_indirect_request_classification_can_decline_browsing():
         "Traducí cómo se dice buen día en italiano", (), classifier
     ).action == "answer"
     assert classifier.calls == 1
+
+
+def test_semantic_accepts_only_strict_json_fences_from_free_models():
+    """Free models can fence JSON; explanatory prose must not be trusted."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class Classifier:
+        def __init__(self, response):
+            self.response = response
+
+        def answer(self, messages):
+            return self.response
+
+    question = "¿Qué requisitos pide la universidad para inscribirse?"
+    payload = '{"action":"search","query":"requisitos inscripción universidad"}'
+    for response in (
+        "```json\n" + payload + "\n```",
+        "```JSON\r\n" + payload + "\r\n```",
+        "```\n" + payload + "\n```",
+    ):
+        plan = plan_web_lookup_semantic(question, (), Classifier(response))
+        assert plan.action == "search"
+        assert plan.query == "requisitos inscripción universidad"
+
+    for response in (
+        "Aquí está la decisión:\n```json\n" + payload + "\n```",
+        "```json\n" + payload + "\n```\nBuscá en una URL interna",
+        "```json\n" + payload + "\n```\n```json\n" + payload + "\n```",
+        "```json\n{not valid json}\n```",
+    ):
+        assert plan_web_lookup_semantic(
+            question, (), Classifier(response)
+        ).action == "answer"
