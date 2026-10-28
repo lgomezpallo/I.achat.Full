@@ -24,6 +24,22 @@ CURRENT_QUERY = re.compile(
     r"acaba de salir|sal[iió] hace poco|sal[iió] recientemente)\b"
 )
 
+
+# Sports questions often omit words like "hoy" or "último", but their
+# result/broadcast answer depends on recent schedules and scores.
+# Require BOTH a result/broadcast question and a sports subject to avoid
+# browsing unrelated questions such as "¿Cómo salió la torta?".
+SPORTS_RESULT_QUERY = re.compile(
+    r"\b(?:c[oó]mo\s+(?:sali[oó]|termin[oó]|qued[oó])|"
+    r"qui[eé]n\s+(?:gan[oó]|juega|transmite)|"
+    r"qu[eé]\s+canal\s+(?:pasa|transmite)|"
+    r"d[oó]nde\s+(?:pasan|transmiten)|"
+    r"qu[eé]\s+pas[oó])\b.{0,90}"
+    r"\b(?:f1|f[oó]rmula\s*1|gran\s+premio|gp|"
+    r"river|boca|racing|selecci[oó]n|f[uú]tbol|partido|carrera)\b",
+    re.IGNORECASE,
+)
+
 MAX_RESPONSE_BYTES = 400_000
 MAX_RESULTS = 5
 RSS_HEADERS = {
@@ -36,7 +52,7 @@ GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
 
 
 def needs_current_information(text: str) -> bool:
-    return bool(CURRENT_QUERY.search(text))
+    return bool(CURRENT_QUERY.search(text) or SPORTS_RESULT_QUERY.search(text))
 
 
 def _public_https_link(link: str) -> bool:
