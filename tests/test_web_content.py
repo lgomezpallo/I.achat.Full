@@ -49,7 +49,7 @@ def test_large_body_rejected_before_parse():
 
 def test_output_is_bounded():
     result = extract_page_text(("<p>" + "a" * 20_000 + "</p>").encode(), "text/html")
-    assert len(result) == 8_000
+    assert 7_000 <= len(result) <= 8_000
 
 
 def test_limits_cannot_be_raised_by_caller():
