@@ -129,6 +129,16 @@ jobs:
           fi
           export GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org
           /opt/go-ute/.venv/bin/python -m pip install --quiet -r "$src/requirements-chat.txt"
+          # Prueba real de G.O. -> Router en loopback, sin inferencia ni facturación.
+          # El cuerpo {} falla validación 422 antes de ejecutar router.process.
+          # Nunca imprimir tokens, respuestas ni variables de entorno.
+          PYTHONPATH="$src" /opt/go-ute/.venv/bin/python - <<'PYROUTER'
+          from go_ute.router import probe_contract
+          result = probe_contract()
+          print("GO_ROUTER_CONTRACT status=" + str(result["status"])
+                + " anonymous_http=" + str(result.get("anonymous_http", "-"))
+                + " authorized_http=" + str(result.get("authorized_http", "-")))
+          PYROUTER
           /opt/go-ute/.venv/bin/python - "$src/migrations/002_passkeys.sql" <<'PY'
           import os,sys,psycopg
           with psycopg.connect(os.environ["GO_DATABASE_URL"]) as conn:
