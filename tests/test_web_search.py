@@ -201,3 +201,21 @@ def test_rss_pubdate_missing_invalid_or_without_timezone_is_omitted(monkeypatch)
     results = web_search.search_web("documentación")
     assert len(results) == 3
     assert all("published_at_utc" not in item for item in results)
+
+
+def test_sports_question_without_date_uses_free_news_fallback(monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.host)
+        if request.url.host == "www.bing.com":
+            return httpx.Response(503)
+        assert request.url.host == "news.google.com"
+        return httpx.Response(200, content=rss(
+            ("Resultado", "https://example.com/f1", "Resultado pendiente de verificar")
+        ))
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("¿Cómo salió la F1?")
+    assert calls == ["www.bing.com", "news.google.com"]
+    assert results[0]["url"] == "https://example.com/f1"
