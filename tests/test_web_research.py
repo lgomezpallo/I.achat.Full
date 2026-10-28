@@ -280,3 +280,60 @@ def test_research_does_not_invent_missing_publication_date(monkeypatch):
     monkeypatch.setattr(research, "read_pages", lambda urls, **kwargs: ())
     data = _payload(research.web_evidence_with_pages("noticias"))
     assert "rss_published_at_utc" not in data[0]
+
+
+def test_chat_semantic_multidomain_search_precedes_answer(monkeypatch):
+    """A current non-sports, non-keyword question must consult web before answer."""
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    calls = []
+
+    class Backend:
+        def answer(self, messages):
+            if "clasificador de uso de búsqueda web" in messages[0]["content"]:
+                calls.append("classify")
+                return json.dumps({
+                    "action": "search",
+                    "query": "requisitos ANSES asignación",
+                })
+            calls.append("answer")
+            assert any("EVIDENCIA_MULTIDOMINIO" in m["content"] for m in messages)
+            return "Respuesta con fuentes"
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: Backend())
+    monkeypatch.setattr(
+        research, "web_evidence_with_pages",
+        lambda query: calls.append("search:" + query) or "EVIDENCIA_MULTIDOMINIO",
+    )
+    client = TestClient(app_module.app, base_url="https://testserver")
+    response = client.post("/api/chat", json={"text": "¿Qué requisitos pide ANSES para tramitar la asignación?"})
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Respuesta con fuentes"
+    assert calls == ["classify", "search:requisitos ANSES asignación", "answer"]
+    saved = app_module.store.get(response.json()["conversation_id"], "admin")
+    assert len(saved) == 2
+    assert all("EVIDENCIA_MULTIDOMINIO" not in m["content"] for m in saved)
+
+
+def test_chat_semantic_self_contained_request_does_not_browse(monkeypatch):
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    calls = []
+
+    class Backend:
+        def answer(self, messages):
+            if "clasificador de uso de búsqueda web" in messages[0]["content"]:
+                calls.append("classify")
+                return '{"action":"answer"}'
+            calls.append("answer")
+            return "Traducción completada"
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: Backend())
+    monkeypatch.setattr(
+        research, "web_evidence_with_pages",
+        lambda query: (_ for _ in ()).throw(AssertionError("no search expected")),
+    )
+    client = TestClient(app_module.app, base_url="https://testserver")
+    response = client.post("/api/chat", json={"text": "Traducí al italiano: buenos días"})
+    assert response.status_code == 200
+    assert calls == ["classify", "answer"]
