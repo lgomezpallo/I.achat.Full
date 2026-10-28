@@ -310,3 +310,27 @@ def test_semantic_accepts_only_strict_json_fences_from_free_models():
         assert plan_web_lookup_semantic(
             question, (), Classifier(response)
         ).action == "answer"
+
+
+def test_pasted_text_with_current_words_stays_offline():
+    """Quoted news/fixtures are user data, not a request for fresh facts."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class NeverClassify:
+        def answer(self, messages):
+            raise AssertionError("self-contained transformations need no model classification")
+
+    for prompt in (
+        "Traducí al inglés: ¿Cuándo juega River?",
+        "Resumí esta noticia: Hoy anunciaron un cambio de horarios.",
+        "Reescribí este mensaje: Últimas noticias, llego tarde.",
+        "Corregí el texto: ¿Quién ganó el partido?",
+        "Mejorá este párrafo: La cotización de hoy no está confirmada.",
+    ):
+        plan = plan_web_lookup(prompt)
+        assert plan.action == "answer", prompt
+        assert plan.reason == "self_contained_text", prompt
+        assert plan_web_lookup_semantic(prompt, (), NeverClassify()).action == "answer"
+
+    # A request to retrieve news rather than transform supplied text still searches.
+    assert plan_web_lookup("Resumí las últimas noticias del diario").action == "search"
