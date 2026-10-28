@@ -178,7 +178,20 @@ def plan_web_lookup_semantic(
         ])
         if not isinstance(raw, str) or len(raw) > 1200:
             return fallback
-        decision = json.loads(raw.strip())
+        # Free chat models sometimes wrap otherwise valid JSON in a single
+        # Markdown JSON fence. Accept only an exact fence, not explanatory
+        # prose or multiple blocks that could conceal a conflicting decision.
+        decision_text = raw.strip()
+        if decision_text.startswith("```"):
+            fenced = re.fullmatch(
+                r"```(?:json)?[ \\t]*\\r?\\n(.*?)\\r?\\n```",
+                decision_text,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            if fenced is None:
+                return fallback
+            decision_text = fenced.group(1).strip()
+        decision = json.loads(decision_text)
         if not isinstance(decision, dict):
             return fallback
         action = decision.get("action")
