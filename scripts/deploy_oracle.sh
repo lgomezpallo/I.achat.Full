@@ -13,6 +13,9 @@ rollback() {
   status=$?
   if [[ "$status" -ne 0 && "$deployed" -eq 1 ]]; then
     echo "Deployment failed; reverting application code."
+    # Only remove files introduced by this release. Never --delete runtime data.
+    python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app" || \
+      echo "::error::New release file cleanup failed; manual inspection required."
     rsync -a --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' \
       "$backup/" "$app/" || true
     "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q || true
@@ -31,6 +34,7 @@ test -f "$archive"
 test -d "$app/.venv"
 test -d "$app/.git"
 command -v rsync >/dev/null
+command -v python3 >/dev/null
 tar -xzf "$archive" -C "$stage" --no-same-owner
 test -f "$stage/pyproject.toml"
 test -f "$stage/iachat/app.py"
