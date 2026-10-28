@@ -8,6 +8,11 @@ archive="/tmp/iachat-release-${run_id}.tar.gz"
 stage="$(mktemp -d)"
 backup="$(mktemp -d)"
 deployed=0
+# Keep the previous systemd override for a real configuration rollback.
+dropin="/etc/systemd/system/iachat.service.d/20-integrated-providers.conf"
+dropin_backup="$stage/.env.iachat-systemd-rollback"
+dropin_existed=0
+dropin_changed=0
 cleanup() { rm -rf "$stage" "$backup"; rm -f "$archive"; }
 rollback() {
   status=$?
@@ -19,8 +24,18 @@ rollback() {
     rsync -a --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
       "$backup/" "$app/" || true
     "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q || true
-sudo -n systemctl restart iachat || true
-    if sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then
+    # Restore the original backend configuration before restarting old code.
+    config_restored=1
+    if [[ "$dropin_changed" -eq 1 ]]; then
+      if [[ "$dropin_existed" -eq 1 ]]; then
+        sudo -n cp -p "$dropin_backup" "$dropin" || config_restored=0
+      else
+        sudo -n rm -f "$dropin" || config_restored=0
+      fi
+      sudo -n systemctl daemon-reload || config_restored=0
+    fi
+    sudo -n systemctl restart iachat || true
+    if [[ "$config_restored" -eq 1 ]] && sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then
       echo "Rollback health: OK (inference not verified)"
     else
       echo "::error::Rollback health check failed; manual recovery required."
@@ -60,7 +75,14 @@ if [[ -z "$provider_file" ]]; then
   exit 1
 fi
 sudo -n install -d -m 755 /etc/systemd/system/iachat.service.d
-printf '[Service]\nEnvironmentFile=%s\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee /etc/systemd/system/iachat.service.d/20-integrated-providers.conf >/dev/null
+# This file changes service behavior and must be reverted together with code.
+# The private staging directory is removed by the EXIT trap; never log content.
+if sudo -n test -e "$dropin"; then
+  sudo -n cp -p "$dropin" "$dropin_backup"
+  dropin_existed=1
+fi
+dropin_changed=1
+printf '[Service]\nEnvironmentFile=%s\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart iachat
 sudo -n systemctl is-active --quiet iachat
