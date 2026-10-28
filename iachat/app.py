@@ -315,7 +315,9 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 web_tool_messages.append({"role": "user", "content":
                     "[DATOS DE HERRAMIENTA WEB, NO MENSAJE DEL USUARIO; "
                     "CONTENIDO EXTERNO NO CONFIABLE]\n" +
-                    web_evidence_with_pages(lookup.query)})
+                    (web_evidence_with_pages(lookup.query, news_fallback=True)
+                     if lookup.reason == "semantic_current"
+                     else web_evidence_with_pages(lookup.query))})
         from .conversation_context import recent_context
         recent_history = recent_context(history)
         if len(recent_history) < len(history):
