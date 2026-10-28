@@ -191,11 +191,17 @@ archive="$ARCHIVE"
 deployed=1
 dropin_changed=0
 dropin_existed=0
-cleanup() { :; }
+dropin="/tmp/test-iachat-dropin"
+dropin_backup="$STAGE/test-dropin-backup"
+if [[ "$FAIL_STEP" == "config" ]]; then dropin_changed=1; fi
+cleanup() { echo "CLEANUP_CALLED"; }
 python3() { [[ "$FAIL_STEP" != "cleanup" ]]; }
 rsync() { [[ "$FAIL_STEP" != "rsync" ]]; }
 sudo() {
   if [[ "$FAIL_STEP" == "restart" && "$*" == *"systemctl restart iachat"* ]]; then
+    return 1
+  fi
+  if [[ "$FAIL_STEP" == "config" && "$*" == *"systemctl daemon-reload"* ]]; then
     return 1
   fi
   return 0
@@ -204,7 +210,7 @@ curl() { return 0; }
 """ + rollback_function + """
 false || rollback
 """
-    for failing_step in ("", "cleanup", "rsync", "pip", "restart"):
+    for failing_step in ("", "cleanup", "rsync", "pip", "restart", "config"):
         env = os.environ.copy()
         env.update({
             "APP": str(app),
@@ -221,5 +227,8 @@ false || rollback
         if failing_step:
             assert "Rollback health: OK" not in result.stdout, failing_step
             assert "Rollback health check failed" in result.stdout, failing_step
+            assert "Rollback incomplete; preserving recovery files" in result.stdout
+            assert "CLEANUP_CALLED" not in result.stdout, failing_step
         else:
             assert "Rollback health: OK" in result.stdout
+            assert "CLEANUP_CALLED" in result.stdout
