@@ -138,11 +138,12 @@ def _fetch_feed(url: str, params: dict[str, str], timeout: float) -> list[dict[s
     return results
 
 
-def search_web(query: str, *, timeout: float = 8.0) -> list[dict[str, str]]:
-    """Try general RSS first; use a news-only fallback for current questions.
+def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False) -> list[dict[str, str]]:
+    """Try general RSS first; optionally use a news-only fallback.
 
-    At most two public requests, no paid APIs, no requests to result URLs.
-    Returns [] when sources fail; no invented search results.
+    The semantic planner can identify a current question whose rewritten
+    search query has no temporal words. It explicitly opts into this fallback.
+    At most two public requests, no paid APIs or invented search results.
     """
     query = query.strip()[:300]
     if not query:
@@ -152,7 +153,7 @@ def search_web(query: str, *, timeout: float = 8.0) -> list[dict[str, str]]:
     except (TypeError, ValueError):
         bounded_timeout = 8.0
     sources = [(BING_RSS, {"q": query, "format": "rss"})]
-    if needs_current_information(query):
+    if needs_current_information(query) or news_fallback:
         sources.append((
             GOOGLE_NEWS_RSS,
             {"q": query, "hl": "es-419", "gl": "AR", "ceid": "AR:es-419"},
