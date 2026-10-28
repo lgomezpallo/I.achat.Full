@@ -303,7 +303,7 @@ def test_chat_semantic_multidomain_search_precedes_answer(monkeypatch):
     monkeypatch.setattr(app_module, "get_backend", lambda: Backend())
     monkeypatch.setattr(
         research, "web_evidence_with_pages",
-        lambda query: calls.append("search:" + query) or "EVIDENCIA_MULTIDOMINIO",
+        lambda query, **kwargs: calls.append("search:" + query) or "EVIDENCIA_MULTIDOMINIO",
     )
     client = TestClient(app_module.app, base_url="https://testserver")
     response = client.post("/api/chat", json={"text": "¿Qué requisitos pide ANSES para tramitar la asignación?"})
@@ -357,7 +357,7 @@ def test_chat_indirect_current_request_without_question_mark_uses_web(monkeypatc
     monkeypatch.setattr(app_module, "get_backend", lambda: Backend())
     monkeypatch.setattr(
         research, "web_evidence_with_pages",
-        lambda query: events.append("search:" + query) or "EVIDENCIA_INDIRECTA",
+        lambda query, **kwargs: events.append("search:" + query) or "EVIDENCIA_INDIRECTA",
     )
     client = TestClient(app_module.app, base_url="https://testserver")
     response = client.post(
@@ -367,3 +367,26 @@ def test_chat_indirect_current_request_without_question_mark_uses_web(monkeypatc
     assert events == [
         "classify", "search:requisitos de habilitación comercial", "answer"
     ]
+
+
+def test_semantic_current_search_preserves_news_fallback_through_chat(monkeypatch):
+    """The classifier may rewrite a fresh query without any time keywords."""
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    flags = []
+
+    class Backend:
+        def answer(self, messages):
+            if "clasificador de uso de búsqueda web" in messages[0]["content"]:
+                return '{"action":"search","query":"requisitos habilitación comercial"}'
+            return "No hay datos verificados"
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: Backend())
+    monkeypatch.setattr(
+        research, "web_evidence_with_pages",
+        lambda query, **kwargs: flags.append((query, kwargs)) or "Sin fuentes confirmadas",
+    )
+    client = TestClient(app_module.app, base_url="https://testserver")
+    response = client.post("/api/chat", json={"text": "¿Qué exige el trámite de habilitación comercial?"})
+    assert response.status_code == 200
+    assert flags == [("requisitos habilitación comercial", {"news_fallback": True})]
