@@ -83,6 +83,9 @@ jobs:
               sys.exit(75)
           print("Alta inicial preautorizada en PostgreSQL (sin revelar códigos).")
           PY
+          if [ "${#GO_SESSION_SECRET}" -lt 48 ]; then
+            echo "ERROR: secreto de sesión no configurado"; exit 1
+          fi
           # Mantener respaldos en disco para revertir si falla el nuevo servicio.
           backup="$(mktemp -d /opt/.go-ute-pre-passkeys.XXXXXXXX)"
           cp -a /opt/go-ute/go_ute "$backup/go_ute"
@@ -104,11 +107,22 @@ jobs:
             systemctl restart go-ute || true
             echo "ERROR: health falló, código revertido"; exit 1
           fi
-          # La activación inicial exige mecanismo de entrega privado ya probado.
-          # No generar un código que después no se pueda recuperar.
-          echo "Acceso WebAuthn desplegado; alta inicial requiere un canal privado verificado."
-          # Idempotencia: token inicial solamente si no existen passkeys.
-          echo "No se emite ningún código de activación por GitHub Actions."
+          # Smoke de autenticación real sin códigos ni credenciales:
+          # 403 por código inválido, 401 sin sesión y pantalla WebAuthn presente.
+          ui="$(curl -fsS --max-time 5 http://127.0.0.1:8020/)"
+          register_status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
+            -H 'Origin: https://go-ute.duckdns.org' -H 'Content-Type: application/json' \
+            -d '{"code":"not-a-valid-bootstrap-code-1234567890"}' \
+            http://127.0.0.1:8020/api/auth/passkey/register/options)"
+          session_status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:8020/api/session)"
+          if [[ "$ui" != *"Ingresar con huella"* || "$register_status" != 403 || "$session_status" != 401 ]]; then
+            rm -rf /opt/go-ute/go_ute
+            cp -a "$backup/go_ute" /opt/go-ute/go_ute
+            systemctl restart go-ute || true
+            echo "ERROR: smoke WebAuthn falló, código revertido"; exit 1
+          fi
+          echo "OK: smoke HTTP de WebAuthn y sesión no autenticada."
           echo "OK: servicio G.O. con WebAuthn y HTTPS; Caddy/IAchat/Router no modificados."
           DEPLOY
           then
