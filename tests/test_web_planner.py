@@ -104,3 +104,108 @@ def test_sports_heuristic_does_not_browse_unrelated_questions():
         "Explicá las reglas del fútbol",
     ):
         assert plan_web_lookup(question).action == "answer", question
+
+
+def test_semantic_multidomain_without_temporal_markers():
+    """No domain-specific keyword list is needed for changing external facts."""
+    from iachat.web_planner import plan_web_lookup_semantic
+    import json
+
+    questions = (
+        "¿A cuánto está el litro de nafta en YPF?",
+        "¿Qué requisitos pide ANSES para tramitar la asignación?",
+        "¿Quién preside actualmente el Banco Central?",
+        "¿Qué versión de Python recomienda Django para instalarlo?",
+        "¿Dónde consigo el repuesto original del Fiat Cronos?",
+        "¿Cuáles son los horarios de atención del Registro Civil?",
+        "¿Qué dice la resolución 204/2026 del ministerio?",
+        "¿Cuándo abren las inscripciones de la universidad?",
+    )
+
+    class Classifier:
+        def __init__(self):
+            self.calls = []
+        def answer(self, messages):
+            self.calls.append(messages)
+            user_payload = json.loads(messages[-1]["content"])
+            return json.dumps({"action": "search", "query": user_payload["consulta"]})
+
+    classifier = Classifier()
+    for question in questions:
+        plan = plan_web_lookup_semantic(question, (), classifier)
+        assert plan.action == "search", question
+        assert plan.query == question, question
+    assert len(classifier.calls) >= 6
+    assert all("role" in call[0] and call[0]["role"] == "system" for call in classifier.calls)
+
+
+def test_semantic_rejects_web_for_self_contained_requests():
+    from iachat.web_planner import plan_web_lookup_semantic
+    import json
+
+    class Classifier:
+        def answer(self, messages):
+            return '{"action":"answer"}'
+
+    for question in (
+        "Traducí al italiano: buenos días",
+        "Resumí este párrafo: El agua se evapora y forma nubes.",
+        "Calculá 23 por 47.",
+        "Escribí un mensaje amable para mi vecino.",
+        "Explicá cómo funciona la recursión.",
+        "Hola, ¿cómo estás?",
+    ):
+        assert plan_web_lookup_semantic(question, (), Classifier()).action == "answer", question
+
+
+def test_semantic_followup_uses_user_context_and_bounded_query():
+    from iachat.web_planner import plan_web_lookup_semantic
+    import json
+
+    class Classifier:
+        def answer(self, messages):
+            payload = json.loads(messages[-1]["content"])
+            assert payload["contexto_usuario"] == ["¿Cuánto sale la patente del auto?"]
+            return json.dumps({"action": "search", "query": "patente ARBA " + "X" * 500})
+
+    plan = plan_web_lookup_semantic(
+        "¿Y cómo se paga?", [user("¿Cuánto sale la patente del auto?"), assistant("Respuesta")],
+        Classifier(),
+    )
+    assert plan.action == "search"
+    assert plan.reason == "semantic_current"
+    assert len(plan.query) == 300
+
+
+def test_semantic_classifier_failure_or_invalid_json_falls_back():
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class Bad:
+        def __init__(self, result=None, fail=False):
+            self.result, self.fail, self.calls = result, fail, 0
+        def answer(self, messages):
+            self.calls += 1
+            if self.fail:
+                raise RuntimeError("providers_unavailable")
+            return self.result
+
+    for response in ("No sé", '{"action":"maybe"}', '{"action":"search","query":7}', "[]" ):
+        bad = Bad(response)
+        assert plan_web_lookup_semantic("¿Cuánto cuesta renovar el DNI?", (), bad).action == "answer"
+        assert bad.calls == 1
+    assert plan_web_lookup_semantic("¿Cuánto cuesta renovar el DNI?", (), Bad(fail=True)).action == "answer"
+
+    # A direct explicit/current signal does not spend a second inference.
+    bad = Bad(fail=True)
+    assert plan_web_lookup_semantic("Buscá información sobre un trámite", (), bad).action == "search"
+    assert bad.calls == 0
+
+
+def test_semantic_does_not_send_attachments_to_classifier():
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class NoCall:
+        def answer(self, messages):
+            raise AssertionError("attachments must not reach classifier")
+
+    assert plan_web_lookup_semantic("Buscá esto", (), NoCall(), has_attachments=True).action == "answer"
