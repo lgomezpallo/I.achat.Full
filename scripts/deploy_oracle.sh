@@ -16,6 +16,7 @@ dropin_changed=0
 cleanup() { rm -rf "$stage" "$backup"; rm -f "$archive"; }
 rollback() {
   status=$?
+  rollback_incomplete=0
   if [[ "$status" -ne 0 && "$deployed" -eq 1 ]]; then
     echo "Deployment failed; reverting application code."
     # Only remove files introduced by this release; preserve runtime data.
@@ -52,10 +53,17 @@ rollback() {
     if [[ "$rollback_ok" -eq 1 && "$config_restored" -eq 1 ]] && sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then
       echo "Rollback health: OK (inference not verified)"
     else
+      rollback_incomplete=1
       echo "::error::Rollback health check failed; manual recovery required."
     fi
   fi
-  cleanup
+  if [[ "$rollback_incomplete" -eq 1 ]]; then
+    # Keep both the previous code and systemd drop-in backup for manual repair.
+    # mktemp directories are private; do not print their contents or secrets.
+    echo "::error::Rollback incomplete; preserving recovery files: backup=$backup stage=$stage"
+  else
+    cleanup
+  fi
   exit "$status"
 }
 trap rollback EXIT
