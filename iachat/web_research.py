@@ -51,6 +51,14 @@ def web_evidence_with_pages(query: str) -> str:
         }
         if url in by_url:
             record["page_excerpt_unverified"] = by_url[url].text[:MAX_EXCERPT_CHARS]
+        # Keep the JSON complete even when hostile source text expands on
+        # escaping; never slice a serialized JSON document mid-record.
+        proposed = json.dumps([*evidence, record], ensure_ascii=False)
+        if len(proposed) > MAX_EVIDENCE_CHARS:
+            record.pop("page_excerpt_unverified", None)
+            proposed = json.dumps([*evidence, record], ensure_ascii=False)
+        if len(proposed) > MAX_EVIDENCE_CHARS:
+            break
         evidence.append(record)
 
     body = json.dumps(evidence, ensure_ascii=False)
@@ -66,4 +74,4 @@ def web_evidence_with_pages(query: str) -> str:
         "hay evidencia suficiente, decí que no pudiste confirmarlo. "
         "Citá solamente las URLs presentes cuando sustenten la respuesta."
     )
-    return (prefix + body[:MAX_EVIDENCE_CHARS] + suffix)
+    return (prefix + body + suffix)
