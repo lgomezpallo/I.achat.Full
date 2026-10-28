@@ -134,7 +134,7 @@ def plan_web_lookup_semantic(
     # direct chat/imperatives and personal-history recall as one-call tasks.
     # This is a negative fast path, NOT a list of subjects eligible for web.
     if not re.search(r"[¿?]", message) or re.search(
-        r"(?i)\\b(?:record[aá]s|recuerd[oa]|dije|dijiste|te\\s+acord[aá]s)\\b", message
+        r"(?i)\b(?:record[aá]s|recuerd[oa]|dije|dijiste|te\s+acord[aá]s)\b", message
     ):
         return fallback
 
