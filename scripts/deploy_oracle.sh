@@ -19,12 +19,21 @@ rollback() {
   if [[ "$status" -ne 0 && "$deployed" -eq 1 ]]; then
     echo "Deployment failed; reverting application code."
     # Only remove files introduced by this release; preserve runtime data.
-    python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app" || \
+    rollback_ok=1
+    if ! python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app"; then
+      rollback_ok=0
       echo "::error::New release file cleanup failed; manual inspection required."
+    fi
     # --checksum avoids rsync skipping changed files with identical size/mtime.
-    rsync -a --checksum --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
-      "$backup/" "$app/" || true
-    "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q || true
+    if ! rsync -a --checksum --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
+      "$backup/" "$app/"; then
+      rollback_ok=0
+      echo "::error::Previous application files could not be fully restored."
+    fi
+    if ! "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q; then
+      rollback_ok=0
+      echo "::error::Previous application dependencies could not be restored."
+    fi
     # Restore the original backend configuration before restarting old code.
     config_restored=1
     if [[ "$dropin_changed" -eq 1 ]]; then
@@ -35,8 +44,12 @@ rollback() {
       fi
       sudo -n systemctl daemon-reload || config_restored=0
     fi
-    sudo -n systemctl restart iachat || true
-    if [[ "$config_restored" -eq 1 ]] && sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then
+    if ! sudo -n systemctl restart iachat; then
+      rollback_ok=0
+      echo "::error::Previous IAchat service could not be restarted."
+    fi
+    # Health alone cannot prove rollback: all restore operations must succeed.
+    if [[ "$rollback_ok" -eq 1 && "$config_restored" -eq 1 ]] && sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then
       echo "Rollback health: OK (inference not verified)"
     else
       echo "::error::Rollback health check failed; manual recovery required."
