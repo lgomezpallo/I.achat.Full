@@ -1,0 +1,99 @@
+name: G.O. desplegar acceso con huella
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: go-ute-passkeys-deploy
+  cancel-in-progress: false
+jobs:
+  instalar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 12
+    steps:
+      - name: Migrar WebAuthn y publicar acceso seguro
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          k="$(mktemp ~/.ssh/go-webauthn-key.XXXXXXXX)"
+          h="$(mktemp ~/.ssh/go-webauthn-host.XXXXXXXX)"
+          trap 'rm -f "$k" "$h"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$k"
+          chmod 600 "$k"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$h"
+          test "$(ssh-keygen -lf "$h" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$h"
+          ssh -i "$k" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$h" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          root="$HOME/Proyecto/Aplicaciones/GestionObrasUTE"
+          test -d "$root/.git"
+          test -z "$(git -C "$root" status --porcelain)"
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$tmp"
+          test "$(ssh-keygen -lf "$tmp" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/go_ute_repo_readonly -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$tmp" git -C "$root" pull --ff-only origin main
+          test -f "$root/migrations/002_passkeys.sql"
+          # Preparar dependencias y ejecutar pruebas ANTES de reemplazar el código vivo.
+          "$root/.venv/bin/python" -m pip install --quiet -r "$root/requirements-chat.txt"
+          (cd "$root" && .venv/bin/python -m pytest -q)
+          echo 'OK: pruebas G.O. superadas.'
+          sudo -n env GOU_SRC="$root" bash -se <<'DEPLOY'
+          set -euo pipefail
+          src="$GOU_SRC"
+          set -a
+          . /etc/go-ute/app.env
+          set +a
+          export GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org
+          /opt/go-ute/.venv/bin/python -m pip install --quiet -r "$src/requirements-chat.txt"
+          /opt/go-ute/.venv/bin/python - "$src/migrations/002_passkeys.sql" <<'PY'
+          import os,sys,psycopg
+          with psycopg.connect(os.environ["GO_DATABASE_URL"]) as conn:
+              conn.execute(open(sys.argv[1],encoding="utf-8").read())
+          print("OK: tablas de autenticación WebAuthn aplicadas.")
+          PY
+          # Mantener respaldos en disco para revertir si falla el nuevo servicio.
+          backup="$(mktemp -d /opt/.go-ute-pre-passkeys.XXXXXXXX)"
+          cp -a /opt/go-ute/go_ute "$backup/go_ute"
+          cp -a "$src/go_ute/." /opt/go-ute/go_ute/
+          if ! systemctl restart go-ute; then
+            rm -rf /opt/go-ute/go_ute
+            cp -a "$backup/go_ute" /opt/go-ute/go_ute
+            systemctl restart go-ute || true
+            echo "ERROR: restaurado código anterior"; exit 1
+          fi
+          ready=false
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 3 http://127.0.0.1:8020/health >/dev/null; then ready=true; break; fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            rm -rf /opt/go-ute/go_ute
+            cp -a "$backup/go_ute" /opt/go-ute/go_ute
+            systemctl restart go-ute || true
+            echo "ERROR: health falló, código revertido"; exit 1
+          fi
+          # Idempotencia: token inicial solamente si no existen passkeys.
+          /opt/go-ute/.venv/bin/python - <<'PY'
+          import os,secrets,hashlib,psycopg
+          with psycopg.connect(os.environ["GO_DATABASE_URL"]) as conn:
+              if conn.execute("SELECT count(*) FROM go_auth_credentials").fetchone()[0]:
+                  print("YA EXISTE PASSKEY: no emitir otro código inicial")
+              else:
+                  code=secrets.token_urlsafe(32)
+                  hashed=hashlib.sha256(code.encode()).hexdigest()
+                  conn.execute("""INSERT INTO go_auth_bootstrap (id,secret_hash,expires_at,used_at)
+                     VALUES (1,%s,now()+interval '24 hours',NULL)
+                     ON CONFLICT (id) DO UPDATE SET secret_hash=excluded.secret_hash,
+                     expires_at=excluded.expires_at,used_at=NULL WHERE go_auth_bootstrap.used_at IS NULL""",(hashed,))
+                  print("CODIGO TEMPORAL DE ACTIVACION (24 HORAS; no compartir): "+code)
+          PY
+          echo "OK: servicio G.O. con WebAuthn y HTTPS; Caddy/IAchat/Router no modificados."
+          DEPLOY
+          REMOTE
