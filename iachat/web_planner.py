@@ -42,9 +42,9 @@ REFERENTIAL_FOLLOWUP = re.compile(
 # Generic informational phrasing without question marks is also eligible for
 # semantic classification. These are intent forms, not domain-specific topics.
 INFORMATIONAL_REQUEST = re.compile(
-    r"^\\s*(?:decime|dime|informame|quiero\\s+saber|necesito\\s+saber|"
-    r"me\\s+pod[eé]s\\s+decir|pod[eé]s\\s+decirme|"
-    r"dame\\s+(?:datos|informaci[oó]n))\\b",
+    r"^\s*(?:decime|dime|informame|quiero\s+saber|necesito\s+saber|"
+    r"me\s+pod[eé]s\s+decir|pod[eé]s\s+decirme|"
+    r"dame\s+(?:datos|informaci[oó]n))\b",
     re.IGNORECASE,
 )
 
