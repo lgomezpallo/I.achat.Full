@@ -1,0 +1,267 @@
+name: G.O. desplegar acceso con huella
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/go-ute-passkeys-deploy.yml']
+  schedule:
+    - cron: '*/10 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: go-ute-passkeys-deploy
+  cancel-in-progress: false
+jobs:
+  instalar:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 12
+    steps:
+      - name: Migrar WebAuthn y publicar acceso seguro
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          k="$(mktemp ~/.ssh/go-webauthn-key.XXXXXXXX)"
+          h="$(mktemp ~/.ssh/go-webauthn-host.XXXXXXXX)"
+          trap 'rm -f "$k" "$h"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$k"
+          chmod 600 "$k"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$h"
+          test "$(ssh-keygen -lf "$h" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$h"
+          ssh -i "$k" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$h" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          root="$HOME/Proyecto/Aplicaciones/GestionObrasUTE"
+          test -d "$root/.git"
+          test -z "$(git -C "$root" status --porcelain)"
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          ssh-keyscan -T 10 -t ed25519 github.com 2>/dev/null > "$tmp"
+          test "$(ssh-keygen -lf "$tmp" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/go_ute_repo_readonly -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$tmp" git -C "$root" pull --ff-only origin main
+          test -f "$root/migrations/002_passkeys.sql"
+          revision="$(git -C "$root" rev-parse HEAD)"
+          deployed="$(sudo -n cat /var/lib/go-ute/deployed-revision 2>/dev/null || true)"
+          # Diagnóstico P0 solo local: sin llamadas a modelos, sin imprimir secretos.
+          sudo -n python3 - <<'PYDIAG'
+          from pathlib import Path
+          import subprocess
+          import urllib.request
+          try:
+              values = {}
+              for line in Path("/etc/go-ute/app.env").read_text().splitlines():
+                  for key in ("GO_ROUTER_ENABLED", "GO_ROUTER_URL", "GO_ROUTER_TOKEN"):
+                      if line.startswith(key + "="):
+                          values[key] = line.partition("=")[2].strip().strip("'\\\"")
+              gate = values.get("GO_ROUTER_ENABLED") == "1"
+              token = bool(values.get("GO_ROUTER_TOKEN"))
+              target = values.get("GO_ROUTER_URL", "")
+              local = target.rstrip("/") in ("http://127.0.0.1:8010", "http://localhost:8010")
+              print("GO_ROUTER_DIAG gate=" + ("enabled" if gate else "disabled")
+                    + " token=" + ("present" if token else "missing")
+                    + " target=" + ("loopback_8010" if local else "other_or_missing"))
+          except Exception:
+              print("GO_ROUTER_DIAG config=unreadable")
+          try:
+              state = subprocess.run(["systemctl", "is-active", "router"],
+                                     capture_output=True, text=True, timeout=3)
+              print("GO_ROUTER_DIAG service=" +
+                    ("active" if state.stdout.strip() == "active" else "inactive_or_unknown"))
+          except Exception:
+              print("GO_ROUTER_DIAG service=unknown")
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8010/health", timeout=3) as response:
+                  print("GO_ROUTER_DIAG local_health=" +
+                        ("http_200" if response.status == 200 else "non_200"))
+          except Exception:
+              print("GO_ROUTER_DIAG local_health=unreachable")
+          # Prueba negativa de autenticación: cuerpo inválido, imposible invocar modelos.
+          # Se usa exclusivamente loopback; no se imprime ningún token.
+          if local and token:
+              from urllib.error import HTTPError
+              def invalid_body_status(bearer=None):
+                  headers = {"Content-Type": "application/json"}
+                  if bearer:
+                      headers["Authorization"] = "Bearer " + bearer
+                  request = urllib.request.Request(
+                      "http://127.0.0.1:8010/route", data=b"{}",
+                      headers=headers, method="POST")
+                  try:
+                      with urllib.request.urlopen(request, timeout=3) as response:
+                          return response.status
+                  except HTTPError as error:
+                      return error.code
+                  except Exception:
+                      return 0
+              unauth = invalid_body_status()
+              authorized = invalid_body_status(values["GO_ROUTER_TOKEN"])
+              print("GO_ROUTER_DIAG auth_no_token=" + str(unauth)
+                    + " auth_go_token=" + str(authorized))
+          else:
+              print("GO_ROUTER_DIAG auth_probe=skipped")
+          PYDIAG
+          # Inspección de inventario por HTTP GET local, sin inferencia ni credenciales.
+          # Los estados de facturación son metadata, NO autorizan cobros ni tráfico.
+          sudo -n python3 - <<'PYCATALOG'
+          import json
+          import urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8010/catalog", timeout=4) as response:
+                  payload = json.load(response)
+              providers = payload.get("providers", [])
+              if not isinstance(providers, list):
+                  raise ValueError("invalid_catalog")
+              for name in ("groq", "nvidia", "cloudflare", "openrouter"):
+                  provider = next((p for p in providers if isinstance(p, dict) and p.get("id") == name), {})
+                  models = provider.get("models", [])
+                  if not isinstance(models, list):
+                      models = []
+                  counts = {status: sum(1 for m in models if isinstance(m, dict) and m.get("billing_status", "unknown") == status)
+                            for status in ("free", "paid", "unknown")}
+                  verified = sum(1 for m in models if isinstance(m, dict)
+                                 and "chat" in m.get("verified_capabilities", []))
+                  print(f"GO_ROUTER_CATALOG provider={name} models={len(models)} "
+                        f"free={counts['free']} paid={counts['paid']} unknown={counts['unknown']} "
+                        f"chat_verified={verified}")
+          except Exception:
+              print("GO_ROUTER_CATALOG status=unavailable")
+          PYCATALOG
+          if [ "$revision" = "$deployed" ]; then
+            echo "G.O. sin cambios: no reinstalar ni reiniciar."
+            echo "GO_DEPLOY_REVISION=$revision (sin cambios)"
+            exit 0
+          fi
+          # Preparar dependencias y ejecutar pruebas ANTES de reemplazar el código vivo.
+          "$root/.venv/bin/python" -m pip install --quiet -r "$root/requirements-chat.txt"
+          (cd "$root" && .venv/bin/python -m pytest -q)
+          echo 'OK: pruebas G.O. superadas.'
+          if sudo -n env GOU_SRC="$root" bash -se <<'DEPLOY'
+          set -euo pipefail
+          src="$GOU_SRC"
+          # Eliminar la entrada GO_PUBLIC_ORIGIN defectuosa sin mostrar el archivo.
+          sed -i '/GO_PUBLIC_ORIGIN=/d' /etc/go-ute/app.env
+          printf '%s\n' 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
+          set -a
+          . /etc/go-ute/app.env
+          set +a
+          if ! grep -q '^GO_PUBLIC_ORIGIN=' /etc/go-ute/app.env; then
+            printf '\n%s\n' 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
+          else
+            grep -qx 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' /etc/go-ute/app.env || { echo 'ERROR: origen HTTPS diferente al esperado'; exit 1; }
+          fi
+          export GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org
+          /opt/go-ute/.venv/bin/python -m pip install --quiet -r "$src/requirements-chat.txt"
+          # Prueba real de G.O. -> Router en loopback, sin inferencia ni facturación.
+          # El cuerpo {} falla validación 422 antes de ejecutar router.process.
+          # Nunca imprimir tokens, respuestas ni variables de entorno.
+          PYTHONPATH="$src" /opt/go-ute/.venv/bin/python - <<'PYROUTER'
+          from go_ute.router import probe_contract
+          result = probe_contract()
+          print("GO_ROUTER_CONTRACT status=" + str(result["status"])
+                + " anonymous_http=" + str(result.get("anonymous_http", "-"))
+                + " authorized_http=" + str(result.get("authorized_http", "-")))
+          # Nunca habilitar un Router sin contrato local comprobado.
+          # La verificación no envía solicitudes válidas ni ejecuta modelos.
+          import os
+          if os.getenv("GO_ROUTER_ENABLED") == "1" and result["status"] != "verified":
+              raise SystemExit("ERROR: contrato del Router no verificado")
+          PYROUTER
+          /opt/go-ute/.venv/bin/python - "$src/migrations/002_passkeys.sql" <<'PY'
+          import os,sys,psycopg
+          with psycopg.connect(os.environ["GO_DATABASE_URL"]) as conn:
+              conn.execute(open(sys.argv[1],encoding="utf-8").read())
+          print("OK: tablas de autenticación WebAuthn aplicadas.")
+          PY
+          # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
+          # Solo se imprimen estados booleanos, nunca filas ni credenciales.
+          PYTHONPATH="$src" /opt/go-ute/.venv/bin/python - <<'PYDBREADY'
+          from go_ute.readiness import inspect_database
+          status = inspect_database()
+          print("GO_DATABASE_READINESS reachable=" + str(bool(status.get("database_reachable"))).lower()
+                + " tables=" + str(bool(status.get("tables_ready"))).lower()
+                + " passkey_tables=" + str(bool(status.get("passkey_tables_ready"))).lower()
+                + " passkey_enrolled=" + str(bool(status.get("passkey_enrolled"))).lower())
+          if not (status.get("database_reachable") and status.get("tables_ready")
+                  and status.get("passkey_tables_ready")):
+              raise SystemExit("ERROR: esquema PostgreSQL incompleto; despliegue no iniciado")
+          PYDBREADY
+          # Antes de cambiar la autenticación, exigir una passkey ya registrada
+          # o una activación válida creada SOLO desde terminal privada de Oracle.
+          /opt/go-ute/.venv/bin/python - <<'PY'
+          import os,sys,psycopg
+          with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+              enrolled=conn.execute("SELECT EXISTS (SELECT 1 FROM go_auth_credentials)").fetchone()[0]
+              pending=conn.execute("SELECT EXISTS (SELECT 1 FROM go_auth_bootstrap WHERE used_at IS NULL AND expires_at>now())").fetchone()[0]
+          if not (enrolled or pending):
+              print("Alta inicial privada pendiente: no se cambia el servicio.")
+              sys.exit(75)
+          print("Alta inicial preautorizada en PostgreSQL (sin revelar códigos).")
+          PY
+          if [ "${#GO_SESSION_SECRET}" -lt 48 ]; then
+            echo "ERROR: secreto de sesión no configurado"; exit 1
+          fi
+          # Mantener respaldos en disco para revertir si falla el nuevo servicio.
+          backup="$(mktemp -d /opt/.go-ute-pre-passkeys.XXXXXXXX)"
+          cp -a /opt/go-ute/go_ute "$backup/go_ute"
+          cp -a "$src/go_ute/." /opt/go-ute/go_ute/
+          if ! systemctl restart go-ute; then
+            rm -rf /opt/go-ute/go_ute
+            cp -a "$backup/go_ute" /opt/go-ute/go_ute
+            systemctl restart go-ute || true
+            echo "ERROR: restaurado código anterior"; exit 1
+          fi
+          ready=false
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 3 http://127.0.0.1:8020/health >/dev/null; then ready=true; break; fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            rm -rf /opt/go-ute/go_ute
+            cp -a "$backup/go_ute" /opt/go-ute/go_ute
+            systemctl restart go-ute || true
+            echo "ERROR: health falló, código revertido"; exit 1
+          fi
+          # Smoke de autenticación real sin códigos ni credenciales:
+          # 403 por código inválido, 401 sin sesión y pantalla WebAuthn presente.
+          ui="$(curl -fsS --max-time 5 http://127.0.0.1:8020/)"
+          register_status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
+            -H 'Origin: https://go-ute.duckdns.org' -H 'Content-Type: application/json' \
+            -d '{"code":"not-a-valid-bootstrap-code-1234567890"}' \
+            http://127.0.0.1:8020/api/auth/passkey/register/options)"
+          session_status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:8020/api/session)"
+          if [[ "$ui" != *"Ingresar con huella"* || "$register_status" != 403 || "$session_status" != 401 ]]; then
+            rm -rf /opt/go-ute/go_ute
+            cp -a "$backup/go_ute" /opt/go-ute/go_ute
+            systemctl restart go-ute || true
+            echo "ERROR: smoke WebAuthn falló, código revertido"; exit 1
+          fi
+          echo "OK: smoke HTTP de WebAuthn y sesión no autenticada."
+          echo "OK: servicio G.O. con WebAuthn y HTTPS; Caddy/IAchat/Router no modificados."
+          DEPLOY
+          then
+            sudo -n install -d -m 755 /var/lib/go-ute
+            printf "%s\n" "$revision" | sudo -n tee /var/lib/go-ute/deployed-revision >/dev/null
+            echo "GO_DEPLOY_REVISION=$revision"
+          else
+            rc=$?
+            if [ "$rc" -eq 75 ]; then
+              echo "Pendiente activación inicial privada; servicio anterior intacto."
+              exit 0
+            fi
+            exit "$rc"
+          fi
+          REMOTE
+          # Comprobar acceso público HTTPS desde el runner, no solo loopback de Oracle.
+          public_page="$(mktemp)"
+          trap 'rm -f "$k" "$h" "$public_page"' EXIT
+          curl -fsS --max-time 15 https://go-ute.duckdns.org/ -o "$public_page"
+          grep -Fq 'Ingresar con huella' "$public_page" || { echo 'ERROR: pantalla WebAuthn no disponible por HTTPS'; exit 1; }
+          public_session="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://go-ute.duckdns.org/api/session)"
+          test "$public_session" = 401 || { echo 'ERROR: sesión pública sin autenticación no devuelve 401'; exit 1; }
+          echo 'OK: HTTPS público y acceso no autenticado rechazado.'

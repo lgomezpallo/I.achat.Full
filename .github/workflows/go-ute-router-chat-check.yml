@@ -1,4 +1,4 @@
-name: G.O. prueba conversacional Router
+name: G.O. contrato Router sin inferencia
 on:
   workflow_dispatch:
 permissions:
@@ -9,7 +9,7 @@ jobs:
     environment: oracle-production
     timeout-minutes: 5
     steps:
-      - name: Verificar conexión real del chat con Router
+      - name: Verificar autenticación y contrato local sin invocar modelos
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
           ORACLE_USER: ${{ secrets.ORACLE_USER }}
@@ -38,22 +38,18 @@ jobs:
           cd /opt/go-ute
           /opt/go-ute/.venv/bin/python - <<'PY'
           import os
-          from go_ute.router import answer,RouterUnavailable
-          token=os.getenv("GO_ROUTER_TOKEN","")
-          if not token:
-              print("BLOQUEO: GO_ROUTER_TOKEN no está configurado en G.O.; no se enviaron mensajes.")
-              raise SystemExit(2)
-          try:
-              result=answer([{"role":"user","content":"Respondé exactamente: G.O. CONECTADO"}])
-          except RouterUnavailable as exc:
-              print("ERROR: Router rechazó la solicitud:",str(exc))
-              raise SystemExit(3)
-          if not isinstance(result,str) or not result.strip():
-              print("ERROR: respuesta vacía del Router")
-              raise SystemExit(4)
-          print("OK: Router procesó solicitud conversacional de G.O.")
-          print("Longitud de respuesta:",len(result))
-          print("Coincidencia exacta solicitada:",result.strip()=="G.O. CONECTADO")
+          from go_ute.router import probe_contract
+          # Nunca llamar a answer() desde este workflow: podría activar inferencia
+          # y facturación de un proveedor todavía no autorizado.
+          result = probe_contract()
+          print("GO_ROUTER_CONTRACT status=" + str(result["status"])
+                + " anonymous_http=" + str(result.get("anonymous_http", "-"))
+                + " authorized_http=" + str(result.get("authorized_http", "-")))
+          print("GO_ROUTER_GATE " +
+                ("enabled" if os.getenv("GO_ROUTER_ENABLED") == "1" else "disabled"))
+          if result["status"] != "verified":
+              raise SystemExit("ERROR: contrato local G.O. -> Router no verificado")
+          print("OK: autenticación y validación HTTP verificadas; 0 inferencias ejecutadas.")
           PY
           CHECK
           REMOTE
