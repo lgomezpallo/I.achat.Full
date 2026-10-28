@@ -64,6 +64,7 @@ def test_deploy_uses_targeted_cleanup_before_backup_restore():
     rollback = script.split("rollback() {", 1)[1].split("\n}", 1)[0]
     assert rollback.index(helper_call) < rollback.index('"$backup/" "$app/"')
     assert "--delete" not in rollback
+    assert "rsync -a --checksum " in rollback  # mtime/size collisions must restore old code
 
 
 def test_rollback_preserves_sqlite_variants_and_environment_files(tmp_path):
@@ -151,7 +152,7 @@ def test_rollback_rehearsal_restores_code_and_preserves_runtime_files(tmp_path):
         "*.sqlite3", "*.sqlite3-*", ".env", ".env.*",
     )
     subprocess.run(
-        ["rsync", "-a", *(f"--exclude={pattern}" for pattern in exclusions),
+        ["rsync", "-a", "--checksum", *(f"--exclude={pattern}" for pattern in exclusions),
          str(backup) + "/", str(app) + "/"],
         check=True, capture_output=True, text=True,
     )
