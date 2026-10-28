@@ -145,6 +145,32 @@ def test_chat_current_question_uses_page_evidence_not_legacy_rss(monkeypatch):
     assert any("EVIDENCIA_DE_PAGINA" in message["content"] for message in captured)
 
 
+
+def test_chat_sports_question_without_date_uses_web_tool(monkeypatch):
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    queries = []
+    captured = []
+
+    class Backend:
+        def answer(self, messages):
+            captured.extend(messages)
+            return "Sin resultado confirmado"
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: Backend())
+    monkeypatch.setattr(
+        research, "web_evidence_with_pages",
+        lambda query: queries.append(query) or "SIN_EVIDENCIA_CONFIRMADA",
+    )
+    client = TestClient(app_module.app, base_url="https://testserver")
+    response = client.post("/api/chat", json={"text": "¿Cómo salió la F1?"})
+    assert response.status_code == 200
+    assert queries == ["¿Cómo salió la F1?"]
+    assert any("SIN_EVIDENCIA_CONFIRMADA" in m["content"] for m in captured)
+    assert captured[-1] == {"role": "user", "content": "¿Cómo salió la F1?"}
+
+
+
 def test_chat_evergreen_question_does_not_browse(monkeypatch):
     app_module.store = ConversationStore(":memory:")
     monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
