@@ -390,3 +390,30 @@ def test_semantic_current_search_preserves_news_fallback_through_chat(monkeypatc
     response = client.post("/api/chat", json={"text": "¿Qué exige el trámite de habilitación comercial?"})
     assert response.status_code == 200
     assert flags == [("requisitos habilitación comercial", {"news_fallback": True})]
+
+
+def test_chat_pasted_current_text_skips_search_and_classifier(monkeypatch):
+    """Even a question about a live event can be quoted for translation."""
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    calls = []
+
+    class Backend:
+        def answer(self, messages):
+            calls.append(messages)
+            return "When does River play?"
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: Backend())
+    monkeypatch.setattr(
+        research, "web_evidence_with_pages",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("no web lookup for supplied translation text")
+        ),
+    )
+    client = TestClient(app_module.app, base_url="https://testserver")
+    response = client.post(
+        "/api/chat", json={"text": "Traducí al inglés: ¿Cuándo juega River?"}
+    )
+    assert response.status_code == 200
+    assert response.json()["answer"] == "When does River play?"
+    assert len(calls) == 1
