@@ -80,6 +80,31 @@ jobs:
                         ("http_200" if response.status == 200 else "non_200"))
           except Exception:
               print("GO_ROUTER_DIAG local_health=unreachable")
+          # Prueba negativa de autenticación: cuerpo inválido, imposible invocar modelos.
+          # Se usa exclusivamente loopback; no se imprime ningún token.
+          if local and token:
+              from urllib.error import HTTPError
+              def invalid_body_status(bearer=None):
+                  headers = {"Content-Type": "application/json"}
+                  if bearer:
+                      headers["Authorization"] = "Bearer " + bearer
+                  request = urllib.request.Request(
+                      "http://127.0.0.1:8010/route", data=b"{}",
+                      headers=headers, method="POST")
+                  try:
+                      with urllib.request.urlopen(request, timeout=3) as response:
+                          return response.status
+                  except HTTPError as error:
+                      return error.code
+                  except Exception:
+                      return 0
+              unauth = invalid_body_status()
+              authorized = invalid_body_status(values["GO_ROUTER_TOKEN"])
+              print("GO_ROUTER_DIAG auth_no_token=" + str(unauth)
+                    + " auth_go_token=" + str(authorized))
+          else:
+              print("GO_ROUTER_DIAG auth_probe=skipped")
+          PYDIAG
           # Inspección de inventario por HTTP GET local, sin inferencia ni credenciales.
           # Los estados de facturación son metadata, NO autorizan cobros ni tráfico.
           sudo -n python3 - <<'PYCATALOG'
@@ -106,31 +131,6 @@ jobs:
           except Exception:
               print("GO_ROUTER_CATALOG status=unavailable")
           PYCATALOG
-          # Prueba negativa de autenticación: cuerpo inválido, imposible invocar modelos.
-          # Se usa exclusivamente loopback; no se imprime ningún token.
-          if local and token:
-              from urllib.error import HTTPError
-              def invalid_body_status(bearer=None):
-                  headers = {"Content-Type": "application/json"}
-                  if bearer:
-                      headers["Authorization"] = "Bearer " + bearer
-                  request = urllib.request.Request(
-                      "http://127.0.0.1:8010/route", data=b"{}",
-                      headers=headers, method="POST")
-                  try:
-                      with urllib.request.urlopen(request, timeout=3) as response:
-                          return response.status
-                  except HTTPError as error:
-                      return error.code
-                  except Exception:
-                      return 0
-              unauth = invalid_body_status()
-              authorized = invalid_body_status(values["GO_ROUTER_TOKEN"])
-              print("GO_ROUTER_DIAG auth_no_token=" + str(unauth)
-                    + " auth_go_token=" + str(authorized))
-          else:
-              print("GO_ROUTER_DIAG auth_probe=skipped")
-          PYDIAG
           if [ "$revision" = "$deployed" ]; then
             echo "G.O. sin cambios: no reinstalar ni reiniciar."
             echo "GO_DEPLOY_REVISION=$revision (sin cambios)"
