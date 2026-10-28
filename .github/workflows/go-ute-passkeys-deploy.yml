@@ -47,6 +47,40 @@ jobs:
           test -f "$root/migrations/002_passkeys.sql"
           revision="$(git -C "$root" rev-parse HEAD)"
           deployed="$(sudo -n cat /var/lib/go-ute/deployed-revision 2>/dev/null || true)"
+          # Diagnóstico P0 solo local: sin llamadas a modelos, sin imprimir secretos.
+          sudo -n python3 - <<'PYDIAG'
+          from pathlib import Path
+          import subprocess
+          import urllib.request
+          try:
+              values = {}
+              for line in Path("/etc/go-ute/app.env").read_text().splitlines():
+                  for key in ("GO_ROUTER_ENABLED", "GO_ROUTER_URL", "GO_ROUTER_TOKEN"):
+                      if line.startswith(key + "="):
+                          values[key] = line.partition("=")[2].strip().strip("'\\\"")
+              gate = values.get("GO_ROUTER_ENABLED") == "1"
+              token = bool(values.get("GO_ROUTER_TOKEN"))
+              target = values.get("GO_ROUTER_URL", "")
+              local = target.rstrip("/") in ("http://127.0.0.1:8010", "http://localhost:8010")
+              print("GO_ROUTER_DIAG gate=" + ("enabled" if gate else "disabled")
+                    + " token=" + ("present" if token else "missing")
+                    + " target=" + ("loopback_8010" if local else "other_or_missing"))
+          except Exception:
+              print("GO_ROUTER_DIAG config=unreadable")
+          try:
+              state = subprocess.run(["systemctl", "is-active", "router"],
+                                     capture_output=True, text=True, timeout=3)
+              print("GO_ROUTER_DIAG service=" +
+                    ("active" if state.stdout.strip() == "active" else "inactive_or_unknown"))
+          except Exception:
+              print("GO_ROUTER_DIAG service=unknown")
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8010/health", timeout=3) as response:
+                  print("GO_ROUTER_DIAG local_health=" +
+                        ("http_200" if response.status == 200 else "non_200"))
+          except Exception:
+              print("GO_ROUTER_DIAG local_health=unreachable")
+          PYDIAG
           if [ "$revision" = "$deployed" ]; then
             echo "G.O. sin cambios: no reinstalar ni reiniciar."
             exit 0
