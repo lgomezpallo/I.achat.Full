@@ -236,3 +236,44 @@ def test_semantic_informational_requests_without_question_marks():
     # Ordinary chat must not spend a separate model call.
     assert plan_web_lookup_semantic("Hola", (), classifier).action == "answer"
     assert classifier.calls == 3
+
+
+def test_semantic_classifies_indirect_requests_without_question_marks():
+    """Any topic can be classified via intent, not a sports/domain word list."""
+    from iachat.web_planner import plan_web_lookup_semantic
+    import json
+
+    class Classifier:
+        def __init__(self):
+            self.queries = []
+        def answer(self, messages):
+            payload = json.loads(messages[-1]["content"])
+            self.queries.append(payload["consulta"])
+            return json.dumps({"action": "search", "query": payload["consulta"]})
+
+    classifier = Classifier()
+    questions = (
+        "Averiguá si el trámite requiere turno",
+        "Confirmame qué versión admite esta biblioteca",
+        "Revisá cómo se solicita la habilitación comercial",
+    )
+    for question in questions:
+        assert plan_web_lookup_semantic(question, (), classifier).action == "search"
+    assert classifier.queries == list(questions)
+
+
+def test_indirect_request_classification_can_decline_browsing():
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class Classifier:
+        def __init__(self):
+            self.calls = 0
+        def answer(self, messages):
+            self.calls += 1
+            return '{"action":"answer"}'
+
+    classifier = Classifier()
+    assert plan_web_lookup_semantic(
+        "Traducí cómo se dice buen día en italiano", (), classifier
+    ).action == "answer"
+    assert classifier.calls == 1
