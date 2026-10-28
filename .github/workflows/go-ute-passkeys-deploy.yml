@@ -1,6 +1,8 @@
 name: G.O. desplegar acceso con huella
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
 permissions:
   contents: read
 concurrency:
@@ -46,16 +48,11 @@ jobs:
             echo "G.O. sin cambios: no reinstalar ni reiniciar."
             exit 0
           fi
-          # Bloqueo de seguridad: no activar passkeys hasta que exista una
-          # credencial válida o un canal privado de alta inicial comprobado.
-          # Se evita publicar una versión que deje al propietario sin acceso.
-          echo "Despliegue retenido: falta completar alta inicial WebAuthn privada."
-          exit 1
           # Preparar dependencias y ejecutar pruebas ANTES de reemplazar el código vivo.
           "$root/.venv/bin/python" -m pip install --quiet -r "$root/requirements-chat.txt"
           (cd "$root" && .venv/bin/python -m pytest -q)
           echo 'OK: pruebas G.O. superadas.'
-          sudo -n env GOU_SRC="$root" bash -se <<'DEPLOY'
+          if sudo -n env GOU_SRC="$root" bash -se <<'DEPLOY'
           set -euo pipefail
           src="$GOU_SRC"
           set -a
@@ -73,6 +70,18 @@ jobs:
           with psycopg.connect(os.environ["GO_DATABASE_URL"]) as conn:
               conn.execute(open(sys.argv[1],encoding="utf-8").read())
           print("OK: tablas de autenticación WebAuthn aplicadas.")
+          PY
+          # Antes de cambiar la autenticación, exigir una passkey ya registrada
+          # o una activación válida creada SOLO desde terminal privada de Oracle.
+          /opt/go-ute/.venv/bin/python - <<'PY'
+          import os,sys,psycopg
+          with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+              enrolled=conn.execute("SELECT EXISTS (SELECT 1 FROM go_auth_credentials)").fetchone()[0]
+              pending=conn.execute("SELECT EXISTS (SELECT 1 FROM go_auth_bootstrap WHERE used_at IS NULL AND expires_at>now())").fetchone()[0]
+          if not (enrolled or pending):
+              print("Alta inicial privada pendiente: no se cambia el servicio.")
+              sys.exit(75)
+          print("Alta inicial preautorizada en PostgreSQL (sin revelar códigos).")
           PY
           # Mantener respaldos en disco para revertir si falla el nuevo servicio.
           backup="$(mktemp -d /opt/.go-ute-pre-passkeys.XXXXXXXX)"
@@ -102,6 +111,15 @@ jobs:
           echo "No se emite ningún código de activación por GitHub Actions."
           echo "OK: servicio G.O. con WebAuthn y HTTPS; Caddy/IAchat/Router no modificados."
           DEPLOY
-          sudo -n install -m 644 /dev/null /var/lib/go-ute/deployed-revision
-          printf "%s\\n" "$revision" | sudo -n tee /var/lib/go-ute/deployed-revision >/dev/null
+          then
+            sudo -n install -d -m 755 /var/lib/go-ute
+            printf "%s\\n" "$revision" | sudo -n tee /var/lib/go-ute/deployed-revision >/dev/null
+          else
+            rc=$?
+            if [ "$rc" -eq 75 ]; then
+              echo "Pendiente activación inicial privada; servicio anterior intacto."
+              exit 0
+            fi
+            exit "$rc"
+          fi
           REMOTE
