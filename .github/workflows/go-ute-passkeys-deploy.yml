@@ -62,7 +62,7 @@ jobs:
           . /etc/go-ute/app.env
           set +a
           if ! grep -q '^GO_PUBLIC_ORIGIN=' /etc/go-ute/app.env; then
-            printf '\\n%s\\n' 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
+            printf '\n%s\n' 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
           else
             grep -qx 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' /etc/go-ute/app.env || { echo 'ERROR: origen HTTPS diferente al esperado'; exit 1; }
           fi
@@ -130,7 +130,7 @@ jobs:
           DEPLOY
           then
             sudo -n install -d -m 755 /var/lib/go-ute
-            printf "%s\\n" "$revision" | sudo -n tee /var/lib/go-ute/deployed-revision >/dev/null
+            printf "%s\n" "$revision" | sudo -n tee /var/lib/go-ute/deployed-revision >/dev/null
           else
             rc=$?
             if [ "$rc" -eq 75 ]; then
