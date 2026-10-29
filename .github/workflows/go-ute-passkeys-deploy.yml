@@ -327,6 +327,27 @@ jobs:
           print("GO_FLEXIBLE_SCHEMA=ready")
           PYFLEX
           fi
+          # Referencias de propuestas flexibles en historial, FK aislada de propuestas clásicas.
+          # Migración idempotente; no mostrar filas, SQL, secretos ni datos de obra.
+          if [ -f "$src/migrations/006_flexible_chat_refs.sql" ]; then
+            /opt/go-ute/.venv/bin/python - "$src/migrations/006_flexible_chat_refs.sql" <<'PYFLEXCHAT'
+          import os,sys,psycopg
+          try:
+              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+                  with open(sys.argv[1],encoding="utf-8") as migration:
+                      conn.execute(migration.read())
+                  ready = conn.execute(
+                      "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                      "WHERE table_schema=current_schema() AND table_name='go_chat_turns' "
+                      "AND column_name='flexible_proposal_id')"
+                  ).fetchone()[0]
+                  if not ready:
+                      raise RuntimeError("missing_column")
+          except Exception:
+              raise SystemExit("ERROR: migración de referencias flexibles no verificada") from None
+          print("GO_FLEXIBLE_CHAT_REFS_SCHEMA=ready")
+          PYFLEXCHAT
+          fi
           # Prueba transaccional de adjuntos y chat DESPUÉS de migraciones 003/004.
           # El script revierte todos los datos y nunca muestra credenciales.
           # Prueba integrada de parser -> propuesta -> confirmación -> historial
