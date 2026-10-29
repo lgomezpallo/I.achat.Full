@@ -78,6 +78,7 @@ def runtime_hash(name: str) -> str | None:
 
 def build_report() -> dict:
     active, service = command("systemctl", "is-active", "iachat.service")
+    git_ok, git_revision = command("git", "-C", str(APP), "rev-parse", "--verify", "HEAD")
     _, dropins = command("systemctl", "show", "iachat.service", "-p", "DropInPaths", "--value")
     logs_ok, logs = command(
         "journalctl", "-u", "iachat.service", "--since", "-2 hours",
@@ -86,6 +87,8 @@ def build_report() -> dict:
     return {
         "service": service if service in ("active", "inactive", "failed", "activating") else "unknown",
         "service_command_ok": active,
+        # Checkout metadata is not proof of the running process revision.
+        "checkout_commit": git_revision if git_ok and re.fullmatch(r"[0-9a-f]{40}", git_revision) else None,
         "systemd_override_present": bool(dropins),
         "health": probe("/health"),
         "ready": probe("/ready"),
