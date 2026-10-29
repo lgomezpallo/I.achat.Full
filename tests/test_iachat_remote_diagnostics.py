@@ -124,7 +124,7 @@ def test_checkout_commit_is_allowlisted_and_not_confused_with_loaded_code(monkey
 def test_oracle_diagnostic_requires_explicit_manual_dispatch():
     """No PR/push event may automatically open SSH with production secrets."""
     workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "oracle-status.yml").read_text()
-    triggers = workflow.split("\\non:\\n", 1)[1].split("\\npermissions:", 1)[0]
+    triggers = workflow.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
     assert "  workflow_dispatch:" in triggers
     for event in ("push:", "pull_request:", "workflow_run:", "schedule:"):
         assert event not in triggers
