@@ -137,7 +137,10 @@ jobs:
           sudo -n bash -se <<'DBROLLBACK'
           set -euo pipefail
           set -a
-          . /etc/go-ute/app.env
+          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
+            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
+            exit 1
+          fi
           set +a
           /opt/go-ute/.venv/bin/python - <<'PYDBROLLBACK'
           import os
@@ -182,7 +185,10 @@ jobs:
           set -euo pipefail
           source_root="$1"
           set -a
-          . /etc/go-ute/app.env
+          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
+            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
+            exit 1
+          fi
           set +a
           cd "$source_root"
           PYTHONPATH="$source_root" /opt/go-ute/.venv/bin/python "$source_root/scripts/check_postgres_flow.py"
@@ -194,7 +200,10 @@ jobs:
             sudo -n bash -se <<'HISTORYROLLBACK'
           set -euo pipefail
           set -a
-          . /etc/go-ute/app.env
+          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
+            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
+            exit 1
+          fi
           set +a
           /opt/go-ute/.venv/bin/python - <<'PYHISTORY'
           import os,uuid,psycopg
@@ -240,7 +249,10 @@ jobs:
           sed -i '/GO_PUBLIC_ORIGIN=/d' /etc/go-ute/app.env
           printf '%s\n' 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
           set -a
-          . /etc/go-ute/app.env
+          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
+            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
+            exit 1
+          fi
           set +a
           if ! grep -q '^GO_PUBLIC_ORIGIN=' /etc/go-ute/app.env; then
             printf '\n%s\n' 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
