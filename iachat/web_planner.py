@@ -78,6 +78,40 @@ class WebLookupPlan:
     reason: str = ""
 
 
+def _clarification_query(
+    question: str,
+    history: Sequence[Mapping[str, str]],
+) -> str:
+    """Re-search a short entity clarification after a fresh-information question.
+
+    Require an immediately preceding assistant clarification AND an earlier
+    user search intent. Never use assistant wording as a query or instruction.
+    This is domain-neutral and does not browse on ordinary acknowledgments.
+    """
+    if len(question) > 80 or len(question.split()) > 10:
+        return ""
+    if not re.fullmatch(r"[\\w][\\w .,'-]*", question, flags=re.UNICODE):
+        return ""
+    if question.casefold().strip(" .,") in {
+        "sí", "si", "no", "ok", "dale", "gracias", "perfecto", "bueno",
+    }:
+        return ""
+    if len(history) < 2 or (
+        history[-2].get("role") != "user"
+        or history[-1].get("role") != "assistant"
+    ):
+        return ""
+    prior_user = history[-2].get("content")
+    prior_assistant = history[-1].get("content")
+    if not isinstance(prior_user, str) or not isinstance(prior_assistant, str):
+        return ""
+    if "?" not in prior_assistant[-250:]:
+        return ""
+    if not (needs_current_information(prior_user) or EXPLICIT_SEARCH.search(prior_user)):
+        return ""
+    return f"{prior_user} {question}"[:MAX_SEARCH_QUERY]
+
+
 def plan_web_lookup(
     message: str,
     history: Sequence[Mapping[str, str]] = (),
@@ -98,6 +132,9 @@ def plan_web_lookup(
         return WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "current_question")
     if EXPLICIT_SEARCH.search(question):
         return WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "explicit_search")
+    clarification = _clarification_query(question, history)
+    if clarification:
+        return WebLookupPlan("search", clarification, "clarification_followup")
     if not REFERENTIAL_FOLLOWUP.match(question) or len(question) > 180:
         return WebLookupPlan("answer", reason="no_web_signal")
 
