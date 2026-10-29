@@ -90,7 +90,7 @@ def _clarification_query(
     """
     if len(question) > 80 or len(question.split()) > 10:
         return ""
-    if not re.fullmatch(r"[\\w][\\w .,'-]*", question, flags=re.UNICODE):
+    if not re.fullmatch(r"[\w][\w .,'-]*", question, flags=re.UNICODE):
         return ""
     if question.casefold().strip(" .,") in {
         "sí", "si", "no", "ok", "dale", "gracias", "perfecto", "bueno",
