@@ -4,7 +4,24 @@ on:
 permissions:
   contents: read
 jobs:
+  # This job has no environment, SSH credentials, or access to production.
+  # It can run even when oracle-production rejects the selected branch before
+  # scheduling the protected job. Keep the ref visible for branch-rule triage.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Registrar referencia de diagnóstico sin secretos
+        env:
+          DIAGNOSTIC_REF: ${{ github.ref }}
+          DIAGNOSTIC_SHA: ${{ github.sha }}
+        run: |
+          echo "Diagnostic workflow ref: $DIAGNOSTIC_REF"
+          echo "Diagnostic workflow SHA: $DIAGNOSTIC_SHA"
+          echo "If the protected job fails with zero steps, review the"
+          echo "oracle-production environment deployment branch rules."
   estado:
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: oracle-production
