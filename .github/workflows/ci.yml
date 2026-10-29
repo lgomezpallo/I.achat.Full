@@ -31,3 +31,29 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - name: Comprobar RSS multidominio y lectura HTTPS real
         run: python scripts/smoke_web_public.py
+
+  oracle_diagnostic_dispatch:
+    # This job never receives SSH credentials. It only requests the existing
+    # protected, read-only workflow on the candidate branch, once CI passes.
+    # The production environment's approvals/restrictions remain authoritative.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.number == 31 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'automation/web-source-host-diversity-20261028'
+    needs: [tests, public_web_smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Solicitar diagnóstico P0 protegido (solo lectura)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DIAG_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          gh workflow run oracle-status.yml --ref "$DIAG_BRANCH"
+          echo "Diagnostic requested; the protected workflow result must be checked separately."
