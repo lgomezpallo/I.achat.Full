@@ -130,3 +130,20 @@ def test_oracle_diagnostic_requires_explicit_manual_dispatch():
         assert event not in triggers
     assert "environment: oracle-production" in workflow
     assert "bash scripts/diagnostico_oracle.sh" in workflow
+
+
+def test_candidate_diagnostic_dispatch_cannot_bypass_protected_workflow():
+    """The PR job has no Oracle secrets and dispatches only after CI passes."""
+    workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml").read_text()
+    job = workflow.split("  oracle_diagnostic_dispatch:\n", 1)[1]
+    assert "github.event.pull_request.number == 31" in job
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in job
+    assert "github.event.pull_request.head.ref == 'automation/web-source-host-diversity-20261028'" in job
+    assert "needs: [tests, public_web_smoke]" in job
+    assert "actions: write" in job
+    assert "gh workflow run oracle-status.yml --ref \"$DIAG_BRANCH\"" in job
+    assert "secrets.ORACLE_" not in job
+    assert "ssh " not in job
+    protected = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "oracle-status.yml").read_text()
+    assert "environment: oracle-production" in protected
+    assert "  workflow_dispatch:" in protected
