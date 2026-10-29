@@ -1,3 +1,4 @@
+# G.O. delivery: deploy main after CI; never enables Router or paid models.
 name: G.O. desplegar acceso con huella
 on:
   workflow_dispatch:
