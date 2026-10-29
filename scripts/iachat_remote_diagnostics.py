@@ -95,8 +95,18 @@ def build_report() -> dict:
         "runtime_sha256": {
             "app_py": runtime_hash("app.py"),
             "backend_py": runtime_hash("backend.py"),
+            # A missing module (null) distinguishes old web lookup code from
+            # the unshipped semantic-research candidate without inference.
+            "web_search_py": runtime_hash("web_search.py"),
+            "web_planner_py": runtime_hash("web_planner.py"),
+            "web_research_py": runtime_hash("web_research.py"),
         },
-        "interpretation": "Read-only. /ready does not prove live inference. HTTP code mentions are not attributed to providers.",
+        "interpretation": (
+            "Read-only. /ready does not prove live inference. HTTP code mentions "
+            "are not attributed to providers. Runtime hashes identify files at "
+            "the expected deployment path, not necessarily the code loaded by "
+            "the running process."
+        ),
     }
 
 
