@@ -85,20 +85,18 @@ trap rollback EXIT
 test -f "$archive"
 test -d "$app/.venv"
 test -d "$app/.git"
-# Validate the incoming archive before comparing any production files.
-# Dirty tracked files are allowed only when their bytes already match the
-# staged source exactly. Different edits, secrets, renames and symlinks abort.
-# The check runs before backup/rsync and never resets git or prints paths.
+# Clean code replacement, explicitly approved: production edits are not a release gate.
+# Back up the complete existing application code (including modified tracked
+# files) BEFORE replacing it. Runtime databases, credentials and venv remain
+# excluded from rsync and are never deleted by the deployment.
+# The Git checkout itself is not reset, rewritten or removed.
 command -v rsync >/dev/null
 command -v python3 >/dev/null
 tar -xzf "$archive" -C "$stage" --no-same-owner
 test -f "$stage/pyproject.toml"
 test -f "$stage/iachat/app.py"
-test -f "$stage/scripts/reconcile_release.py"
-if ! python3 "$stage/scripts/reconcile_release.py" "$app" "$stage"; then
-  echo "::error::Tracked production files differ from release; reconcile before deployment."
-  exit 1
-fi
+# Require the existing rollback script to be present in the release.
+test -f "$stage/scripts/rollback_release.py"
 rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$app/" "$backup/"
 deployed=1
