@@ -334,3 +334,32 @@ def test_pasted_text_with_current_words_stays_offline():
 
     # A request to retrieve news rather than transform supplied text still searches.
     assert plan_web_lookup("Resumí las últimas noticias del diario").action == "search"
+
+
+def test_short_entity_clarification_inherits_only_immediate_user_search():
+    history = [
+        user("¿Cuándo juega River?"),
+        assistant("No pude precisar el equipo. ¿A cuál te referís?"),
+    ]
+    plan = plan_web_lookup("River Plate.", history)
+    assert plan.action == "search"
+    assert plan.reason == "clarification_followup"
+    assert "¿Cuándo juega River?" in plan.query
+    assert "River Plate." in plan.query
+    assert "No pude precisar" not in plan.query
+
+
+def test_short_clarification_does_not_turn_any_chat_into_web_search():
+    assert plan_web_lookup("River Plate.", [
+        user("¿Cuándo juega River?"), assistant("No tengo la respuesta."),
+    ]).action == "answer"
+    assert plan_web_lookup("River Plate.", [
+        user("Explicá la fotosíntesis"), assistant("¿Qué parte?"),
+    ]).action == "answer"
+    assert plan_web_lookup("Gracias", [
+        user("¿Cuándo juega River?"), assistant("¿A cuál te referís?"),
+    ]).action == "answer"
+    assert plan_web_lookup("River Plate.", [
+        user("¿Cuándo juega River?"), assistant("¿A cuál te referís?"),
+        user("Otro tema"), assistant("¿Cuál?"),
+    ]).action == "answer"
