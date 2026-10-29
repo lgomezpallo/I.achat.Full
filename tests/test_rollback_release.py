@@ -242,7 +242,7 @@ def test_successful_deploy_retains_private_recovery_snapshot(tmp_path):
     script = DEPLOY.read_text(encoding="utf-8")
     assert "umask 077" in script
     assert 'install -d -m 700 "$recovery_base"' in script
-    assert 'recovery_dir="$(mktemp -d "$recovery_base/\${run_id}.XXXXXX")"' in script
+    assert 'recovery_dir="$(mktemp -d "$recovery_base/${run_id}.XXXXXX")"' in script
     assert 'stage="$recovery_dir/stage"' in script
     assert 'backup="$recovery_dir/backup"' in script
     assert 'mkdir -m 700 "$stage" "$backup"' in script
