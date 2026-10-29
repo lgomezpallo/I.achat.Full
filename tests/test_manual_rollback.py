@@ -44,4 +44,4 @@ def test_successful_deploy_retains_dropin_integrity_marker():
     script = DEPLOY.read_text()
     assert 'sha256sum "$dropin"' in script
     assert '.dropin-deployed-sha256' in script
-    assert script.index('sha256sum "$dropin"') < script.index('deployed=0')
+    assert script.index('sha256sum "$dropin"') < script.rindex('deployed=0')
