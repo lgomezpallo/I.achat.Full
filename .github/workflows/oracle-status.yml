@@ -6,11 +6,15 @@ on:
   push:
     branches: [automation/web-source-host-diversity-20261028]
     paths: [scripts/iachat_remote_diagnostics.py]
+  # Temporary same-repository PR gate for observable diagnostics in PR checks.
+  pull_request:
+    branches: [main]
+    paths: [scripts/iachat_remote_diagnostics.py]
 permissions:
   contents: read
 jobs:
   estado:
-    if: github.repository == 'lgomezpallo/I.achat.Full' && (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/automation/web-source-host-diversity-20261028')
+    if: github.repository == 'lgomezpallo/I.achat.Full' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/automation/web-source-host-diversity-20261028') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'automation/web-source-host-diversity-20261028'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: oracle-production
