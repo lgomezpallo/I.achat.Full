@@ -320,3 +320,16 @@ jobs:
           public_session="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://go-ute.duckdns.org/api/session)"
           test "$public_session" = 401 || { echo 'ERROR: sesión pública sin autenticación no devuelve 401'; exit 1; }
           echo 'OK: HTTPS público y acceso no autenticado rechazado.'
+          # Nuevos adjuntos: comprobar rechazo de POST sin sesión WebAuthn.
+          # Cuerpos vacíos o ficticios; nunca usar códigos, cookies ni archivos reales.
+          attachment_status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Origin: https://go-ute.duckdns.org' -H 'X-GO-Filename: test.pdf' \
+            --data-binary '' https://go-ute.duckdns.org/api/attachments)"
+          decision_status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Origin: https://go-ute.duckdns.org' -H 'Content-Type: application/json' \
+            -d '{"attachment_id":"00000000-0000-4000-8000-000000000001","confirm":true}' \
+            https://go-ute.duckdns.org/api/attachments/decision)"
+          if [ "$attachment_status" != 401 ] || [ "$decision_status" != 401 ]; then
+            echo 'ERROR: adjuntos deben rechazar peticiones sin sesión'; exit 1
+          fi
+          echo 'GO_ATTACHMENTS_UNAUTHENTICATED=blocked'
