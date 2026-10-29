@@ -1,5 +1,6 @@
 """Offline tests for the read-only production incident diagnostic."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 from urllib.error import HTTPError
@@ -62,3 +63,37 @@ def test_report_has_no_inference_or_provider_calls(monkeypatch):
     assert report["log_signals"]["http_429_mentions"] == 1
     assert "SECRET" not in json.dumps(report)
     assert all(args[0] in ("systemctl", "journalctl") for args in seen)
+
+
+def test_web_pipeline_fingerprints_distinguish_unreleased_code(monkeypatch, tmp_path):
+    """Presence/hash of web modules is observable without accessing user data."""
+    monkeypatch.setattr(diag, "APP", tmp_path)
+    module_dir = tmp_path / "iachat"
+    module_dir.mkdir()
+    (module_dir / "web_search.py").write_text("legacy RSS only\n")
+    (module_dir / "web_planner.py").write_text("semantic decision\n")
+    assert diag.runtime_hash("web_research.py") is None
+    assert diag.runtime_hash("web_search.py") == hashlib.sha256(b"legacy RSS only\n").hexdigest()
+    assert diag.runtime_hash("web_planner.py") == hashlib.sha256(b"semantic decision\n").hexdigest()
+
+
+def test_report_includes_web_pipeline_hashes_without_reading_secrets(monkeypatch):
+    monkeypatch.setattr(diag, "command", lambda *args: (True, "active"))
+    monkeypatch.setattr(diag, "probe", lambda path: {"http": 200})
+    seen = []
+    def fingerprint(name):
+        seen.append(name)
+        return None if name in ("web_planner.py", "web_research.py") else "fake-code-hash"
+    monkeypatch.setattr(diag, "runtime_hash", fingerprint)
+    report = diag.build_report()
+    assert report["runtime_sha256"] == {
+        "app_py": "fake-code-hash",
+        "backend_py": "fake-code-hash",
+        "web_search_py": "fake-code-hash",
+        "web_planner_py": None,
+        "web_research_py": None,
+    }
+    assert set(seen) == {
+        "app.py", "backend.py", "web_search.py", "web_planner.py", "web_research.py"
+    }
+    assert "not necessarily the code loaded" in report["interpretation"]
