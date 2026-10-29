@@ -1,6 +1,15 @@
 name: Estado de Oracle
 on:
   workflow_dispatch:
+  # The protected diagnostic runs only from main for automatic triggers.
+  schedule:
+    - cron: '17 */4 * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/oracle-status.yml
+      - scripts/diagnostico_oracle.sh
+      - scripts/iachat_remote_diagnostics.py
 permissions:
   contents: read
 jobs:
