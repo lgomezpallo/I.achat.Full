@@ -147,3 +147,22 @@ def test_oracle_preflight_is_unprotected_and_never_receives_ssh_secrets():
     assert "needs: preflight" in protected
     assert "environment: oracle-production" in protected
     assert "bash scripts/diagnostico_oracle.sh" in protected
+
+
+def test_tracked_change_summary_hides_secret_paths_and_never_prints_diff(monkeypatch):
+    raw = (
+        " M iachat/app.py\\n"
+        "M  scripts/deploy_oracle.sh\\n"
+        " M .env.production\\n"
+        " M private/secret.txt\\n"
+        " M iachat/../../secrets.py\\n"
+    )
+    monkeypatch.setattr(diag, "command", lambda *args: (True, raw))
+    summary = diag.tracked_change_summary()
+    assert summary == {
+        "count": 5,
+        "source_paths": ["iachat/app.py", "scripts/deploy_oracle.sh"],
+    }
+    assert "secret" not in json.dumps(summary)
+    monkeypatch.setattr(diag, "command", lambda *args: (False, ""))
+    assert diag.tracked_change_summary() == {"count": None, "source_paths": []}
