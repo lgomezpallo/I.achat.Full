@@ -76,6 +76,18 @@ def runtime_hash(name: str) -> str | None:
         return None
 
 
+def tracked_change_summary() -> dict:
+    # Only source-code paths with conservative characters are safe to print.
+    # Never emit diff content, .env paths, user uploads, or untrusted filenames.
+    ok, raw = command("git", "-C", str(APP), "status", "--porcelain", "--untracked-files=no")
+    if not ok:
+        return {"count": None, "source_paths": []}
+    entries = raw.splitlines()
+    allowed = re.compile(r"(?:iachat/[a-zA-Z0-9_./-]+\\.py|scripts/[a-zA-Z0-9_./-]+\\.(?:py|sh))\\Z")
+    paths = sorted({line[3:] for line in entries if len(line) > 3 and allowed.fullmatch(line[3:])})
+    return {"count": len(entries), "source_paths": paths}
+
+
 def build_report() -> dict:
     active, service = command("systemctl", "is-active", "iachat.service")
     git_ok, git_revision = command("git", "-C", str(APP), "rev-parse", "--verify", "HEAD")
@@ -90,6 +102,7 @@ def build_report() -> dict:
         # Checkout metadata is not proof of the running process revision.
         "checkout_commit": git_revision if git_ok and re.fullmatch(r"[0-9a-f]{40}", git_revision) else None,
         "systemd_override_present": bool(dropins),
+        "tracked_checkout_changes": tracked_change_summary(),
         "health": probe("/health"),
         "ready": probe("/ready"),
         "private_router_status": probe("/api/router/status"),
