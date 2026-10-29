@@ -12,6 +12,27 @@ on:
 permissions:
   contents: read
 jobs:
+  candidata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # This job never receives Oracle credentials or the protected environment.
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout candidate sources (data only)
+        uses: actions/checkout@v4
+        with:
+          ref: automation/web-source-host-diversity-20261028
+          persist-credentials: false
+      - name: SHA-256 of candidate files (no execution)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in iachat/app.py iachat/backend.py iachat/web.py scripts/deploy_oracle.sh; do
+            test -f "$file"
+            printf 'candidate_hash_%s: ' "$file"
+            sha256sum "$file" | cut -d ' ' -f1
+          done
   estado:
     runs-on: ubuntu-latest
     timeout-minutes: 5
