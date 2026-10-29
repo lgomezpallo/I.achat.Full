@@ -260,6 +260,27 @@ jobs:
           except Exception:
               raise SystemExit("ERROR: migración de historial no completada") from None
           print("GO_CHAT_HISTORY_SCHEMA=ready")
+          # Verificación PostgreSQL real con rollback, sin filas ni UUID en logs.
+          import uuid
+          probe = uuid.uuid4()
+          try:
+              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+                  try:
+                      conn.execute(
+                          "INSERT INTO go_chat_turns(id,message,reply,phase) VALUES (%s,%s,%s,%s)",
+                          (probe, "test-transaccional", "sin-datos-reales", "probe"),
+                      )
+                      assert conn.execute(
+                          "SELECT EXISTS (SELECT 1 FROM go_chat_turns WHERE id=%s)", (probe,)
+                      ).fetchone()[0]
+                  finally:
+                      conn.rollback()
+                  assert not conn.execute(
+                      "SELECT EXISTS (SELECT 1 FROM go_chat_turns WHERE id=%s)", (probe,)
+                  ).fetchone()[0]
+          except Exception:
+              raise SystemExit("ERROR: prueba transaccional de historial falló") from None
+          print("GO_CHAT_HISTORY_WRITE_ROLLBACK=passed")
           PYCHAT
           fi
           # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
@@ -350,6 +371,9 @@ jobs:
           public_session="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://go-ute.duckdns.org/api/session)"
           test "$public_session" = 401 || { echo 'ERROR: sesión pública sin autenticación no devuelve 401'; exit 1; }
           echo 'OK: HTTPS público y acceso no autenticado rechazado.'
+          history_status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://go-ute.duckdns.org/api/chat/history)"
+          test "$history_status" = 401 || { echo 'ERROR: historial debe rechazar acceso sin sesión'; exit 1; }
+          echo 'GO_CHAT_HISTORY_UNAUTHENTICATED=blocked'
           # Nuevos adjuntos: comprobar rechazo de POST sin sesión WebAuthn.
           # Cuerpos vacíos o ficticios; nunca usar códigos, cookies ni archivos reales.
           attachment_status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
