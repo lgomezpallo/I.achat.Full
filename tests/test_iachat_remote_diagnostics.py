@@ -135,16 +135,14 @@ def test_oracle_diagnostic_only_auto_runs_from_main():
     assert "bash scripts/diagnostico_oracle.sh" in workflow
 
 
-def test_oracle_preflight_is_unprotected_and_never_receives_ssh_secrets():
-    """Preflight must leave production protection intact while exposing ref."""
+def test_candidate_hash_job_is_unprotected_and_never_receives_ssh_secrets():
+    """Candidate hash comparison has no Oracle credentials or protected environment."""
     workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "oracle-status.yml").read_text()
-    preflight = workflow.split("\n  preflight:\n", 1)[1].split("\n  estado:\n", 1)[0]
+    candidate = workflow.split("\n  candidata:\n", 1)[1].split("\n  estado:\n", 1)[0]
     protected = workflow.split("\n  estado:\n", 1)[1]
-    assert "environment:" not in preflight
-    assert "secrets." not in preflight
-    assert "github.ref" in preflight
-    assert "github.sha" in preflight
-    assert "needs: preflight" in protected
+    assert "environment:" not in candidate
+    assert "secrets." not in candidate
+    assert "persist-credentials: false" in candidate
     assert "environment: oracle-production" in protected
     assert "bash scripts/diagnostico_oracle.sh" in protected
 

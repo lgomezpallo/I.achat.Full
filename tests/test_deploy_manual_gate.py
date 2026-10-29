@@ -8,19 +8,25 @@ WORKFLOW = (
 )
 
 
-def test_oracle_deploy_requires_manual_dispatch():
+def test_oracle_deploy_requires_successful_main_ci_or_manual_dispatch():
     text = WORKFLOW.read_text(encoding="utf-8")
     triggers = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
     assert "  workflow_dispatch:" in triggers
-    for event in ("workflow_run", "push:", "pull_request:", "schedule:"):
-        assert event not in triggers, f"Automatic Oracle deployment trigger: {event}"
+    assert "  workflow_run:" in triggers
+    assert 'workflows: ["IAchat CI"]' in triggers
+    assert "types: [completed]" in triggers
+    for event in ("  push:", "  pull_request:", "  schedule:"):
+        assert event not in triggers
 
 
-def test_oracle_deploy_is_gated_to_main_and_explicit_environment():
+def test_oracle_deploy_is_gated_to_main_success_and_explicit_environment():
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in text
+    assert "github.event.workflow_run.event == 'push'" in text
+    assert "github.event.workflow_run.head_branch == 'main'" in text
+    assert "github.event.workflow_run.conclusion == 'success'" in text
     assert "environment: oracle-production" in text
-    assert "ref: ${{ github.sha }}" in text
+    assert "github.event.workflow_run.head_sha || github.sha" in text
     assert "persist-credentials: false" in text
     assert "python -m pytest -q" in text
 

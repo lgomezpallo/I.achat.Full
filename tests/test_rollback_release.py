@@ -272,12 +272,10 @@ def test_successful_deploy_retains_private_recovery_snapshot(tmp_path):
     assert not archive.exists()
 
 
-def test_deploy_requires_safe_reconciliation_before_install():
-    """A dirty Oracle checkout may pass only if staged source is byte-identical."""
+def test_deploy_retains_private_backup_before_overwriting_dirty_code():
     script = DEPLOY.read_text(encoding="utf-8")
-    gate = 'python3 "$stage/scripts/reconcile_release.py" "$app" "$stage"'
-    assert gate in script
-    assert "Tracked production files differ from release" in script
-    assert script.index(gate) < script.index("deployed=1")
-    assert script.index(gate) < script.index("rsync -a --exclude=")
+    assert 'test -f "$stage/scripts/rollback_release.py"' in script
+    assert 'recovery_dir="$(mktemp -d' in script
+    assert script.index('"$app/" "$backup/"') < script.index("deployed=1")
+    assert script.index("deployed=1") < script.index('"$stage/" "$app/"')
     assert "git reset" not in script

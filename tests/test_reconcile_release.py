@@ -80,11 +80,11 @@ def test_staged_or_deleted_source_is_blocked(tmp_path):
         module.reconcile(app, stage)
 
 
-def test_deploy_reconciles_before_first_production_rsync():
+def test_deploy_backups_before_clean_code_replacement():
     script = (ROOT / "scripts" / "deploy_oracle.sh").read_text()
-    call = 'python3 "$stage/scripts/reconcile_release.py" "$app" "$stage"'
-    assert call in script
-    assert script.index('tar -xzf "$archive"') < script.index(call)
-    assert script.index(call) < script.index('rsync -a --exclude=')
-    assert script.index(call) < script.index("deployed=1")
+    assert 'test -f "$stage/scripts/rollback_release.py"' in script
+    assert script.index('tar -xzf "$archive"') < script.index('rsync -a --exclude=')
+    assert script.index('"$app/" "$backup/"') < script.index("deployed=1")
+    assert script.index("deployed=1") < script.index('"$stage/" "$app/"')
     assert "git reset" not in script
+    assert "rsync --delete" not in script
