@@ -1,3 +1,5 @@
+# G.O. delivery: deploy main after CI; never enables Router or paid models.
+# 2026-10-29: trigger delivery of G.O. main 8ee4e862 (explicit work evidence guard, 150 tests).
 name: G.O. desplegar acceso con huella
 on:
   workflow_dispatch:
@@ -306,6 +308,48 @@ jobs:
           print("GO_CHAT_HISTORY_SCHEMA=ready")
           PYCHAT
           fi
+          # Núcleo flexible: metadatos versionados y eventos JSONB. Sin datos precargados.
+          # El script no imprime filas, SQL, códigos, claves ni DSN, incluso si falla.
+          if [ -f "$src/migrations/005_flexible_records.sql" ]; then
+            /opt/go-ute/.venv/bin/python - "$src/migrations/005_flexible_records.sql" <<'PYFLEX'
+          import os,sys,psycopg
+          try:
+              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+                  with open(sys.argv[1],encoding="utf-8") as migration:
+                      conn.execute(migration.read())
+                  ready = conn.execute(
+                      "SELECT to_regclass('go_record_types') IS NOT NULL "
+                      "AND to_regclass('go_record_proposals') IS NOT NULL "
+                      "AND to_regclass('go_record_events') IS NOT NULL"
+                  ).fetchone()[0]
+                  if not ready:
+                      raise RuntimeError("missing_flexible_schema")
+          except Exception:
+              raise SystemExit("ERROR: migración flexible no verificada") from None
+          print("GO_FLEXIBLE_SCHEMA=ready")
+          PYFLEX
+          fi
+          # Referencias de propuestas flexibles en historial, FK aislada de propuestas clásicas.
+          # Migración idempotente; no mostrar filas, SQL, secretos ni datos de obra.
+          if [ -f "$src/migrations/006_flexible_chat_refs.sql" ]; then
+            /opt/go-ute/.venv/bin/python - "$src/migrations/006_flexible_chat_refs.sql" <<'PYFLEXCHAT'
+          import os,sys,psycopg
+          try:
+              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+                  with open(sys.argv[1],encoding="utf-8") as migration:
+                      conn.execute(migration.read())
+                  ready = conn.execute(
+                      "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                      "WHERE table_schema=current_schema() AND table_name='go_chat_turns' "
+                      "AND column_name='flexible_proposal_id')"
+                  ).fetchone()[0]
+                  if not ready:
+                      raise RuntimeError("missing_column")
+          except Exception:
+              raise SystemExit("ERROR: migración de referencias flexibles no verificada") from None
+          print("GO_FLEXIBLE_CHAT_REFS_SCHEMA=ready")
+          PYFLEXCHAT
+          fi
           # Prueba transaccional de adjuntos y chat DESPUÉS de migraciones 003/004.
           # El script revierte todos los datos y nunca muestra credenciales.
           # Prueba integrada de parser -> propuesta -> confirmación -> historial
@@ -324,6 +368,11 @@ jobs:
           cd "$source_root"
           PYTHONPATH="$source_root" /opt/go-ute/.venv/bin/python "$source_root/scripts/check_postgres_flow.py"
           GOFLOW
+          fi
+          # E2E PostgreSQL de categorías/registro/corrección/auditoría, con ROLLBACK.
+          # No ejecuta Router ni expone filas o credenciales.
+          if [ -f "$src/scripts/check_flexible_flow.py" ]; then
+            PYTHONPATH="$src" /opt/go-ute/.venv/bin/python "$src/scripts/check_flexible_flow.py"
           fi
           # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
           # Solo se imprimen estados booleanos, nunca filas ni credenciales.

@@ -1,7 +1,7 @@
 name: Estado de Oracle
 on:
   workflow_dispatch:
-  # The protected diagnostic runs only from main for automatic triggers.
+  # Scheduled runs use the default branch, authorized for protected read-only diagnostics.
   schedule:
     - cron: '17 */4 * * *'
   push:
@@ -9,28 +9,31 @@ on:
     paths:
       - .github/workflows/oracle-status.yml
       - scripts/diagnostico_oracle.sh
-      - scripts/iachat_remote_diagnostics.py
 permissions:
   contents: read
 jobs:
-  # This job has no environment, SSH credentials, or access to production.
-  # It can run even when oracle-production rejects the selected branch before
-  # scheduling the protected job. Keep the ref visible for branch-rule triage.
-  preflight:
+  candidata:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
+    # This job never receives Oracle credentials or the protected environment.
+    permissions:
+      contents: read
     steps:
-      - name: Registrar referencia de diagnóstico sin secretos
-        env:
-          DIAGNOSTIC_REF: ${{ github.ref }}
-          DIAGNOSTIC_SHA: ${{ github.sha }}
+      - name: Checkout candidate sources (data only)
+        uses: actions/checkout@v4
+        with:
+          ref: automation/web-source-host-diversity-20261028
+          persist-credentials: false
+      - name: SHA-256 of candidate files (no execution)
+        shell: bash
         run: |
-          echo "Diagnostic workflow ref: $DIAGNOSTIC_REF"
-          echo "Diagnostic workflow SHA: $DIAGNOSTIC_SHA"
-          echo "If the protected job fails with zero steps, review the"
-          echo "oracle-production environment deployment branch rules."
+          set -euo pipefail
+          for file in iachat/app.py iachat/backend.py iachat/web.py scripts/deploy_oracle.sh; do
+            test -f "$file"
+            printf 'candidate_hash_%s: ' "$file"
+            sha256sum "$file" | cut -d ' ' -f1
+          done
   estado:
-    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: oracle-production
