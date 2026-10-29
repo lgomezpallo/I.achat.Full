@@ -220,6 +220,16 @@ jobs:
               conn.execute(open(sys.argv[1],encoding="utf-8").read())
           print("OK: tablas de autenticación WebAuthn aplicadas.")
           PY
+          # Adjuntos: migración idempotente, solo si la revisión de G.O. la incluye.
+          # No registrar nombres, contenidos, hashes, credenciales ni DSN.
+          if [ -f "$src/migrations/003_attachments.sql" ]; then
+            /opt/go-ute/.venv/bin/python - "$src/migrations/003_attachments.sql" <<'PYATTACH'
+          import os,sys,psycopg
+          with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+              conn.execute(open(sys.argv[1],encoding="utf-8").read())
+          print("GO_ATTACHMENTS_SCHEMA=ready")
+          PYATTACH
+          fi
           # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
           # Solo se imprimen estados booleanos, nunca filas ni credenciales.
           PYTHONPATH="$src" /opt/go-ute/.venv/bin/python - <<'PYDBREADY'
