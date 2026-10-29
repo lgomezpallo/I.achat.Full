@@ -1,7 +1,11 @@
 name: Desplegar IAchat en Oracle
-# Release is an explicit, approved action: CI success never deploys automatically.
+# Deploy a tested main commit automatically after IAchat CI succeeds.
+# Manual dispatch remains available for an authorized retry.
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["IAchat CI"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -12,14 +16,14 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: oracle-production
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
