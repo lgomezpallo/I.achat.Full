@@ -131,6 +131,49 @@ jobs:
           except Exception:
               print("GO_ROUTER_CATALOG status=unavailable")
           PYCATALOG
+          # Verificar permisos reales de escritura PostgreSQL sin persistir datos.
+          # Una transacción explícita revierte ambas inserciones de prueba.
+          # No imprimir DSN, filas, UUID, códigos de activación ni secretos.
+          sudo -n bash -se <<'DBROLLBACK'
+          set -euo pipefail
+          set -a
+          . /etc/go-ute/app.env
+          set +a
+          /opt/go-ute/.venv/bin/python - <<'PYDBROLLBACK'
+          import os
+          import uuid
+          import psycopg
+
+          ref = uuid.uuid4()
+          budget = "GO-ROLLBACK-" + uuid.uuid4().hex
+          with psycopg.connect(os.environ["GO_DATABASE_URL"], connect_timeout=5) as conn:
+              try:
+                  conn.execute(
+                      "INSERT INTO propuestas(id,presupuesto,tipo,estado,fecha,descripcion) "
+                      "VALUES (%s,%s,%s,%s,CURRENT_DATE,%s)",
+                      (ref, budget, "alta_obra", "pendiente", "prueba transaccional no persistente"),
+                  )
+                  conn.execute(
+                      "INSERT INTO obras(presupuesto,direccion) VALUES (%s,%s)",
+                      (budget, "prueba transaccional no persistente"),
+                  )
+                  assert conn.execute(
+                      "SELECT EXISTS (SELECT 1 FROM propuestas WHERE id=%s)", (ref,)
+                  ).fetchone()[0]
+                  assert conn.execute(
+                      "SELECT EXISTS (SELECT 1 FROM obras WHERE presupuesto=%s)", (budget,)
+                  ).fetchone()[0]
+              finally:
+                  conn.rollback()
+              assert not conn.execute(
+                  "SELECT EXISTS (SELECT 1 FROM propuestas WHERE id=%s)", (ref,)
+              ).fetchone()[0]
+              assert not conn.execute(
+                  "SELECT EXISTS (SELECT 1 FROM obras WHERE presupuesto=%s)", (budget,)
+              ).fetchone()[0]
+          print("GO_DATABASE_WRITE_ROLLBACK=passed")
+          PYDBROLLBACK
+          DBROLLBACK
           if [ "$revision" = "$deployed" ]; then
             echo "G.O. sin cambios: no reinstalar ni reiniciar."
             echo "GO_DEPLOY_REVISION=$revision (sin cambios)"
@@ -177,6 +220,18 @@ jobs:
               conn.execute(open(sys.argv[1],encoding="utf-8").read())
           print("OK: tablas de autenticación WebAuthn aplicadas.")
           PY
+          # Adjuntos: migración idempotente, solo si la revisión de G.O. la incluye.
+          # No registrar nombres, contenidos, hashes, credenciales ni DSN.
+          if [ -f "$src/migrations/003_attachments.sql" ]; then
+            /opt/go-ute/.venv/bin/python - "$src/migrations/003_attachments.sql" <<'PYATTACH'
+          import os,sys,psycopg
+          with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+              conn.execute(open(sys.argv[1],encoding="utf-8").read())
+              if not conn.execute("SELECT to_regclass('go_adjuntos') IS NOT NULL").fetchone()[0]:
+                  raise SystemExit("ERROR: tabla de adjuntos no disponible")
+          print("GO_ATTACHMENTS_SCHEMA=ready")
+          PYATTACH
+          fi
           # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
           # Solo se imprimen estados booleanos, nunca filas ni credenciales.
           PYTHONPATH="$src" /opt/go-ute/.venv/bin/python - <<'PYDBREADY'
@@ -265,3 +320,16 @@ jobs:
           public_session="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://go-ute.duckdns.org/api/session)"
           test "$public_session" = 401 || { echo 'ERROR: sesión pública sin autenticación no devuelve 401'; exit 1; }
           echo 'OK: HTTPS público y acceso no autenticado rechazado.'
+          # Nuevos adjuntos: comprobar rechazo de POST sin sesión WebAuthn.
+          # Cuerpos vacíos o ficticios; nunca usar códigos, cookies ni archivos reales.
+          attachment_status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Origin: https://go-ute.duckdns.org' -H 'X-GO-Filename: test.pdf' \
+            --data-binary '' https://go-ute.duckdns.org/api/attachments)"
+          decision_status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Origin: https://go-ute.duckdns.org' -H 'Content-Type: application/json' \
+            -d '{"attachment_id":"00000000-0000-4000-8000-000000000001","confirm":true}' \
+            https://go-ute.duckdns.org/api/attachments/decision)"
+          if [ "$attachment_status" != 401 ] || [ "$decision_status" != 401 ]; then
+            echo 'ERROR: adjuntos deben rechazar peticiones sin sesión'; exit 1
+          fi
+          echo 'GO_ATTACHMENTS_UNAUTHENTICATED=blocked'
