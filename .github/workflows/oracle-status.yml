@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/oracle-status.yml
+      - scripts/diagnostico_oracle.sh
 permissions:
   contents: read
 jobs:
