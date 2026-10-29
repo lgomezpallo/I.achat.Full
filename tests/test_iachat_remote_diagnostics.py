@@ -119,3 +119,14 @@ def test_checkout_commit_is_allowlisted_and_not_confused_with_loaded_code(monkey
     assert report["checkout_commit"] is None
     assert "SECRET-PRODUCTION" not in json.dumps(report)
     assert "not necessarily the code loaded" in report["interpretation"]
+
+
+def test_oracle_diagnostic_requires_explicit_manual_dispatch():
+    """No PR/push event may automatically open SSH with production secrets."""
+    workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "oracle-status.yml").read_text()
+    triggers = workflow.split("\\non:\\n", 1)[1].split("\\npermissions:", 1)[0]
+    assert "  workflow_dispatch:" in triggers
+    for event in ("push:", "pull_request:", "workflow_run:", "schedule:"):
+        assert event not in triggers
+    assert "environment: oracle-production" in workflow
+    assert "bash scripts/diagnostico_oracle.sh" in workflow
