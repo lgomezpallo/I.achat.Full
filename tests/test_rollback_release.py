@@ -232,3 +232,41 @@ false || rollback
         else:
             assert "Rollback health: OK" in result.stdout
             assert "CLEANUP_CALLED" in result.stdout
+
+
+def test_successful_deploy_retains_private_recovery_snapshot(tmp_path):
+    """A green deploy must not delete the only copy of the previous release.
+
+    Execute the actual EXIT handler in an isolated directory; no SSH or Oracle.
+    """
+    script = DEPLOY.read_text(encoding="utf-8")
+    assert "umask 077" in script
+    assert 'install -d -m 700 "$recovery_base"' in script
+    assert 'recovery_dir="$(mktemp -d "$recovery_base/\${run_id}.XXXXXX")"' in script
+    assert 'stage="$recovery_dir/stage"' in script
+    assert 'backup="$recovery_dir/backup"' in script
+    assert 'mkdir -m 700 "$stage" "$backup"' in script
+    handler = "rollback() {" + script.split("rollback() {", 1)[1].split("\n}", 1)[0] + "\n}"
+    recovery = tmp_path / "recovery"
+    (recovery / "stage").mkdir(parents=True)
+    (recovery / "backup").mkdir()
+    _write(recovery / "backup" / "iachat" / "app.py", "previous code")
+    archive = tmp_path / "release.tar.gz"
+    archive.write_bytes(b"release")
+    shell = (
+        'set -Eeuo pipefail\n'
+        'recovery_dir="$RECOVERY"\n'
+        'archive="$ARCHIVE"\n'
+        'deployed=0\n'
+        'cleanup() { echo "UNEXPECTED_CLEANUP"; }\n'
+        + handler + '\n'
+        + 'true\nrollback\n'
+    )
+    import os
+    env = {**os.environ, "RECOVERY": str(recovery), "ARCHIVE": str(archive)}
+    result = subprocess.run(["bash", "-c", shell], env=env,
+                            capture_output=True, text=True, check=True)
+    assert "Recovery snapshot retained" in result.stdout
+    assert "UNEXPECTED_CLEANUP" not in result.stdout
+    assert (recovery / "backup" / "iachat" / "app.py").read_text() == "previous code"
+    assert not archive.exists()
