@@ -174,5 +174,8 @@ code, _ = probe("/api/conversations")
 assert code == 401, "Private conversations API not protected"
 print("Postdeploy: integrated readiness and private API protection OK (inference not verified)")
 PY
+# The manual recovery job verifies the exact post-release systemd drop-in
+# before restoring it. This marker is private and never printed in logs.
+sudo -n sha256sum "$dropin" | awk '{print $1}' > "$stage/.dropin-deployed-sha256"
 deployed=0
 echo "IAchat deployed successfully (live inference not verified)"
