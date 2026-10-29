@@ -246,6 +246,22 @@ jobs:
           print("GO_ATTACHMENTS_SCHEMA=ready")
           PYATTACH
           fi
+          # Historial conversacional independiente de los hechos oficiales.
+          # Migración idempotente, sin imprimir mensajes, DSN ni contenido.
+          if [ -f "$src/migrations/004_chat_history.sql" ]; then
+            /opt/go-ute/.venv/bin/python - "$src/migrations/004_chat_history.sql" <<'PYCHAT'
+          import os,sys,psycopg
+          try:
+              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+                  with open(sys.argv[1],encoding="utf-8") as migration:
+                      conn.execute(migration.read())
+                  if not conn.execute("SELECT to_regclass('go_chat_turns') IS NOT NULL").fetchone()[0]:
+                      raise RuntimeError("missing_table")
+          except Exception:
+              raise SystemExit("ERROR: migración de historial no completada") from None
+          print("GO_CHAT_HISTORY_SCHEMA=ready")
+          PYCHAT
+          fi
           # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
           # Solo se imprimen estados booleanos, nunca filas ni credenciales.
           PYTHONPATH="$src" /opt/go-ute/.venv/bin/python - <<'PYDBREADY'
