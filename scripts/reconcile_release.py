@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 SAFE_SOURCE = re.compile(
-    r"(?:iachat|scripts)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(?:py|sh)\\Z"
+    r"(?:iachat|scripts)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(?:py|sh)\Z"
 )
 
 
@@ -40,7 +40,7 @@ def reconcile(app: Path, stage: Path) -> int:
         ["git", "-C", str(app), "status", "--porcelain=v1", "-z", "--untracked-files=no"],
         check=True, capture_output=True, timeout=15,
     )
-    entries = result.stdout.split(b"\\0")
+    entries = result.stdout.split(b"\0")
     if entries[-1] != b"":
         raise ValueError("incomplete_git_status")
     count = 0
