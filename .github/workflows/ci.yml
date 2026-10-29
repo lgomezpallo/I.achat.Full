@@ -19,3 +19,15 @@ jobs:
       - name: Conversación aislada sin credenciales reales
         run: python scripts/smoke_conversation.py
       - run: docker build -t iachat-ci .
+  public_web_smoke:
+    # Real public endpoints only: no provider accounts, API keys or inference.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - name: Comprobar RSS multidominio y lectura HTTPS real
+        run: python scripts/smoke_web_public.py

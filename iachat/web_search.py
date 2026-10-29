@@ -1,14 +1,18 @@
-"""Small, bounded public web lookup for time-sensitive IAchat questions.
+"""Bounded, no-key RSS search for IAchat.
 
-No model can claim browsing unless results were actually fetched. The search
-endpoint is untrusted: snippets are evidence to evaluate, never instructions.
+RSS entries are untrusted snippets, not verified page content. Only fixed
+public RSS endpoints are contacted; links returned in feeds are never fetched.
 """
 from __future__ import annotations
 
+import html
+import ipaddress
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlsplit
+
 import httpx
 
 CURRENT_QUERY = re.compile(
@@ -21,35 +25,147 @@ CURRENT_QUERY = re.compile(
 )
 
 
+# Sports questions often omit words like "hoy" or "último", but their
+# result/broadcast answer depends on recent schedules and scores.
+# Require BOTH a result/broadcast question and a sports subject to avoid
+# browsing unrelated questions such as "¿Cómo salió la torta?".
+SPORTS_RESULT_QUERY = re.compile(
+    r"\b(?:c[oó]mo\s+(?:sali[oó]|termin[oó]|qued[oó])|"
+    r"qui[eé]n\s+(?:gan[oó]|juega|transmite)|"
+    r"qu[eé]\s+canal\s+(?:pasa|transmite)|"
+    r"d[oó]nde\s+(?:pasan|transmiten)|"
+    r"qu[eé]\s+pas[oó])\b.{0,90}"
+    r"\b(?:f1|f[oó]rmula\s*1|gran\s+premio|gp|"
+    r"river|boca|racing|selecci[oó]n|f[uú]tbol|partido|carrera)\b",
+    re.IGNORECASE,
+)
+
+MAX_RESPONSE_BYTES = 400_000
+MAX_RESULTS = 5
+RSS_HEADERS = {
+    "User-Agent": "IAchat/1.0 (+search evidence fetch)",
+    "Accept": "application/rss+xml, application/xml",
+}
+# Fixed public endpoints only; never construct a request URL from RSS content.
+BING_RSS = "https://www.bing.com/search"
+GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
+
+
 def needs_current_information(text: str) -> bool:
-    return bool(CURRENT_QUERY.search(text))
+    return bool(CURRENT_QUERY.search(text) or SPORTS_RESULT_QUERY.search(text))
 
 
-def search_web(query: str, *, timeout: float = 8.0) -> list[dict[str, str]]:
-    """Use Bing's public RSS results; return [] on network/parser failure."""
+def _public_https_link(link: str) -> bool:
+    """Filter untrusted result links; this is NOT permission to fetch them."""
+    if not link or len(link) > 500 or re.search(r"[\s\\\x00-\x1f\x7f]", link):
+        return False
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-            response = client.get(
-                "https://www.bing.com/search",
-                params={"q": query[:300], "format": "rss"},
-                headers={"User-Agent": "IAchat/1.0 (+search evidence fetch)", "Accept": "application/rss+xml, application/xml"},
-            )
+        parsed = urlsplit(link)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if (
+            parsed.scheme != "https"
+            or not host
+            or "." not in host
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+            or host.endswith((".local", ".localhost", ".internal", ".test", ".invalid", ".onion"))
+        ):
+            return False
+        try:
+            return ipaddress.ip_address(host).is_global
+        except ValueError:
+            # Reject ambiguous numeric hostnames such as 127.1 or 2130706433.
+            if re.fullmatch(r"[0-9.]+", host):
+                return False
+            return True
+    except ValueError:
+        return False
+
+
+def _clean_snippet(value: str, limit: int) -> str:
+    value = html.unescape(value)
+    value = re.sub(r"<[^>]*>", " ", value)
+    value = re.sub(r"[\x00-\x1f\x7f]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()[:limit]
+
+
+def _rss_publication_date(value: str) -> str | None:
+    """Normalize an explicitly supplied RSS publication date, never infer one.
+
+    Missing timezone or malformed dates must not become apparent UTC facts.
+    """
+    if not value or len(value) > 120:
+        return None
+    try:
+        published = parsedate_to_datetime(value)
+        if published.tzinfo is None or published.utcoffset() is None:
+            return None
+        return published.astimezone(timezone.utc).isoformat(timespec="seconds")
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _fetch_feed(url: str, params: dict[str, str], timeout: float) -> list[dict[str, str]]:
+    # Stream instead of downloading an unbounded body before checking its size.
+    with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+        with client.stream("GET", url, params=params, headers=RSS_HEADERS) as response:
             response.raise_for_status()
-        if len(response.content) > 400_000:
-            return []
-        root = ET.fromstring(response.content)
-        results: list[dict[str, str]] = []
-        for item in root.findall(".//channel/item")[:6]:
-            title = (item.findtext("title") or "").strip()
-            link = (item.findtext("link") or "").strip()
-            summary = re.sub(r"<[^>]*>", " ", item.findtext("description") or "").strip()
-            parsed = urlparse(link)
-            if parsed.scheme != "https" or not parsed.netloc or not title:
-                continue
-            results.append({"title": title[:180], "url": link[:500], "snippet": summary[:450]})
-        return results[:5]
-    except (httpx.HTTPError, ET.ParseError, ValueError):
+            if int(response.headers.get("content-length", "0")) > MAX_RESPONSE_BYTES:
+                return []
+            payload = bytearray()
+            for chunk in response.iter_bytes():
+                payload.extend(chunk)
+                if len(payload) > MAX_RESPONSE_BYTES:
+                    return []
+    root = ET.fromstring(payload)
+    results: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in root.findall(".//channel/item")[:20]:
+        title = _clean_snippet(item.findtext("title") or "", 180)
+        link = (item.findtext("link") or "").strip()
+        snippet = _clean_snippet(item.findtext("description") or "", 450)
+        if not title or not _public_https_link(link) or link in seen:
+            continue
+        seen.add(link)
+        record = {"title": title, "url": link, "snippet": snippet}
+        published_at = _rss_publication_date(item.findtext("pubDate") or "")
+        if published_at:
+            record["published_at_utc"] = published_at
+        results.append(record)
+        if len(results) >= MAX_RESULTS:
+            break
+    return results
+
+
+def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False) -> list[dict[str, str]]:
+    """Try general RSS first; optionally use a news-only fallback.
+
+    The semantic planner can identify a current question whose rewritten
+    search query has no temporal words. It explicitly opts into this fallback.
+    At most two public requests, no paid APIs or invented search results.
+    """
+    query = query.strip()[:300]
+    if not query:
         return []
+    try:
+        bounded_timeout = min(max(float(timeout), 0.5), 10.0)
+    except (TypeError, ValueError):
+        bounded_timeout = 8.0
+    sources = [(BING_RSS, {"q": query, "format": "rss"})]
+    if needs_current_information(query) or news_fallback:
+        sources.append((
+            GOOGLE_NEWS_RSS,
+            {"q": query, "hl": "es-419", "gl": "AR", "ceid": "AR:es-419"},
+        ))
+    for url, params in sources:
+        try:
+            results = _fetch_feed(url, params, bounded_timeout)
+            if results:
+                return results
+        except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError):
+            continue
+    return []
 
 
 def web_evidence(query: str) -> str:
@@ -68,6 +184,7 @@ def web_evidence(query: str) -> str:
     for n, result in enumerate(results, 1):
         lines.append(f"{n}. {result['title']} | {result['url']} | {result['snippet']}")
     lines.append(
+        "Son fragmentos RSS, no páginas leídas ni hechos verificados. "
         "Los resultados pueden estar desactualizados o ser contradictorios. "
         "Contrastá fechas y fuentes; si no prueban el dato exacto, decí que no "
         "pudiste confirmarlo. No inventes. Citá enlaces de las fuentes cuando "

@@ -96,12 +96,35 @@ class ProviderBackend:
          ("meta/llama-3.3-70b-instruct",)),
     )
 
+    # Fail closed: an API key or an environment override does not prove that
+    # arbitrary provider models are free. NVIDIA endpoints are disabled until
+    # a no-credit/no-billing model can be independently verified.
+    FREE_MODEL_ALLOWLIST = {
+        "groq": frozenset(("openai/gpt-oss-20b", "llama-3.3-70b-versatile")),
+        "openrouter": frozenset(("openai/gpt-oss-20b:free",)),
+        "nvidia": frozenset(),
+    }
+
     def __init__(self, timeout_s: float = 45.0):
         self.timeout_s = timeout_s
 
     @classmethod
+    def _eligible_models(cls, name: str, defaults: tuple[str, ...], images: bool = False) -> tuple[str, ...]:
+        if images:
+            requested = os.getenv(name.upper() + "_VISION_MODEL", "").strip()
+            models = (requested,) if requested else ()
+        else:
+            configured = os.getenv(name.upper() + "_MODELS", "").strip()
+            models = tuple(m.strip() for m in configured.split(",") if m.strip()) if configured else defaults
+        allowed = cls.FREE_MODEL_ALLOWLIST[name]
+        return tuple(model for model in models if model in allowed)
+
+    @classmethod
     def configured(cls) -> bool:
-        return any(os.getenv(env, "").strip() for _, env, _, _ in cls.PROVIDERS)
+        return any(
+            os.getenv(env, "").strip() and cls._eligible_models(name, defaults)
+            for name, env, _, defaults in cls.PROVIDERS
+        )
 
     def answer(self, messages: list[dict[str, str]], images: list[str] | None = None) -> str:
         if not messages or messages[-1].get("role") != "user":
@@ -140,13 +163,12 @@ class ProviderBackend:
             key = os.getenv(env, "").strip()
             if not key:
                 continue
+            # Never send a request to an arbitrary model from *_MODELS or
+            # *_VISION_MODEL; paid models must not reach the network.
+            models = self._eligible_models(name, defaults, images=bool(images))
+            if not models:
+                continue
             attempted = True
-            configured = os.getenv(name.upper() + "_MODELS", "").strip()
-            models = tuple(m.strip() for m in configured.split(",") if m.strip()) if configured else defaults
-            # Vision requires a model explicitly selected as vision-capable.
-            if images:
-                vision = os.getenv(name.upper() + "_VISION_MODEL", "").strip()
-                models = (vision,) if vision else ()
             for model in models:
                 try:
                     response = httpx.post(
@@ -169,9 +191,8 @@ class ProviderBackend:
                 except (httpx.RequestError, ValueError, KeyError, IndexError, TypeError):
                     temporary_failure = True
                     continue
+        if images and not attempted and any(os.getenv(env, "").strip() for _, env, _, _ in self.PROVIDERS):
+            raise RuntimeError("vision_not_configured")
         if not attempted:
             raise RuntimeError("providers_not_configured")
-        if images and not any(os.getenv(n.upper() + "_VISION_MODEL", "").strip()
-                              for n, env, _, _ in self.PROVIDERS if os.getenv(env, "").strip()):
-            raise RuntimeError("vision_not_configured")
         raise RuntimeError("providers_unavailable" if temporary_failure else "providers_failed")

@@ -32,8 +32,8 @@ def test_fallback_after_rate_limit(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "fake")
     monkeypatch.setenv("OPENROUTER_API_KEY", "fake")
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
-    monkeypatch.setenv("GROQ_MODELS", "one")
-    monkeypatch.setenv("OPENROUTER_MODELS", "two")
+    monkeypatch.setenv("GROQ_MODELS", "openai/gpt-oss-20b")
+    monkeypatch.setenv("OPENROUTER_MODELS", "openai/gpt-oss-20b:free")
     seen = []
     class Response:
         def __init__(self, code):

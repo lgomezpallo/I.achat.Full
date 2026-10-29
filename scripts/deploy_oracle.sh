@@ -5,40 +5,102 @@ run_id="${1:?missing_run_id}"
 [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "invalid_run_id"; exit 1; }
 app="$HOME/Proyecto/Aplicaciones/IAchat"
 archive="/tmp/iachat-release-${run_id}.tar.gz"
-stage="$(mktemp -d)"
-backup="$(mktemp -d)"
+# Keep an operator-recoverable snapshot after a successful deployment.
+# Do not include SQLite, .env files, or the virtualenv in the code backup.
+# Every snapshot is private and tied to the immutable GitHub run ID.
+umask 077
+recovery_base="$HOME/.local/state/iachat-releases"
+install -d -m 700 "$recovery_base"
+recovery_dir="$(mktemp -d "$recovery_base/${run_id}.XXXXXX")"
+stage="$recovery_dir/stage"
+backup="$recovery_dir/backup"
+mkdir -m 700 "$stage" "$backup"
 deployed=0
-cleanup() { rm -rf "$stage" "$backup"; rm -f "$archive"; }
+# Keep the previous systemd override for a real configuration rollback.
+dropin="/etc/systemd/system/iachat.service.d/20-integrated-providers.conf"
+dropin_backup="$stage/.env.iachat-systemd-rollback"
+dropin_existed=0
+dropin_changed=0
+cleanup() { rm -rf -- "$recovery_dir"; rm -f "$archive"; }
 rollback() {
   status=$?
+  rollback_incomplete=0
+  if [[ "$status" -eq 0 ]]; then
+    # The previous code and systemd drop-in must remain available for an
+    # explicitly approved post-deployment rollback. Never print their contents.
+    rm -f "$archive"
+    echo "Recovery snapshot retained for authorized rollback: $recovery_dir"
+    return 0
+  fi
   if [[ "$status" -ne 0 && "$deployed" -eq 1 ]]; then
     echo "Deployment failed; reverting application code."
-    rsync -a --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' \
-      "$backup/" "$app/" || true
-    "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q || true
-sudo -n systemctl restart iachat || true
-    if sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then
+    # Only remove files introduced by this release; preserve runtime data.
+    rollback_ok=1
+    if ! python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app"; then
+      rollback_ok=0
+      echo "::error::New release file cleanup failed; manual inspection required."
+    fi
+    # --checksum avoids rsync skipping changed files with identical size/mtime.
+    if ! rsync -a --checksum --exclude='.venv/' --exclude='.git/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
+      "$backup/" "$app/"; then
+      rollback_ok=0
+      echo "::error::Previous application files could not be fully restored."
+    fi
+    if ! "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q; then
+      rollback_ok=0
+      echo "::error::Previous application dependencies could not be restored."
+    fi
+    # Restore the original backend configuration before restarting old code.
+    config_restored=1
+    if [[ "$dropin_changed" -eq 1 ]]; then
+      if [[ "$dropin_existed" -eq 1 ]]; then
+        sudo -n cp -p "$dropin_backup" "$dropin" || config_restored=0
+      else
+        sudo -n rm -f "$dropin" || config_restored=0
+      fi
+      sudo -n systemctl daemon-reload || config_restored=0
+    fi
+    if ! sudo -n systemctl restart iachat; then
+      rollback_ok=0
+      echo "::error::Previous IAchat service could not be restarted."
+    fi
+    # Health alone cannot prove rollback: all restore operations must succeed.
+    if [[ "$rollback_ok" -eq 1 && "$config_restored" -eq 1 ]] && sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then
       echo "Rollback health: OK (inference not verified)"
     else
+      rollback_incomplete=1
       echo "::error::Rollback health check failed; manual recovery required."
     fi
   fi
-  cleanup
+  if [[ "$rollback_incomplete" -eq 1 ]]; then
+    # Keep both the previous code and systemd drop-in backup for manual repair.
+    # mktemp directories are private; do not print their contents or secrets.
+    echo "::error::Rollback incomplete; preserving recovery files: backup=$backup stage=$stage"
+  else
+    cleanup
+  fi
   exit "$status"
 }
 trap rollback EXIT
 test -f "$archive"
 test -d "$app/.venv"
 test -d "$app/.git"
+# Clean code replacement, explicitly approved: production edits are not a release gate.
+# Back up the complete existing application code (including modified tracked
+# files) BEFORE replacing it. Runtime databases, credentials and venv remain
+# excluded from rsync and are never deleted by the deployment.
+# The Git checkout itself is not reset, rewritten or removed.
 command -v rsync >/dev/null
+command -v python3 >/dev/null
 tar -xzf "$archive" -C "$stage" --no-same-owner
 test -f "$stage/pyproject.toml"
 test -f "$stage/iachat/app.py"
-# Preserve local repository, SQLite data, secrets, and Python environment.
-rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' \
+# Require the existing rollback script to be present in the release.
+test -f "$stage/scripts/rollback_release.py"
+rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$app/" "$backup/"
 deployed=1
-rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' \
+rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$stage/" "$app/"
 "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q
 "$app/.venv/bin/python" -m compileall -q "$app/iachat"
@@ -56,7 +118,14 @@ if [[ -z "$provider_file" ]]; then
   exit 1
 fi
 sudo -n install -d -m 755 /etc/systemd/system/iachat.service.d
-printf '[Service]\nEnvironmentFile=%s\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee /etc/systemd/system/iachat.service.d/20-integrated-providers.conf >/dev/null
+# This file changes service behavior and must be reverted together with code.
+# The private staging directory is removed by the EXIT trap; never log content.
+if sudo -n test -e "$dropin"; then
+  sudo -n cp -p "$dropin" "$dropin_backup"
+  dropin_existed=1
+fi
+dropin_changed=1
+printf '[Service]\nEnvironmentFile=%s\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart iachat
 sudo -n systemctl is-active --quiet iachat
@@ -91,11 +160,18 @@ def probe(path):
             return response.status, json.load(response)
     except urllib.error.HTTPError as exc:
         return exc.code, None
-code, status = probe("/api/router/status")
-assert code == 200 and status.get("mode") == "integrated" and status.get("configured") is True, "Integrated providers unavailable"
+# /api/router/status is private by design. Use public /ready for
+# integrated-backend configuration; never bypass authentication for a smoke.
+code, status = probe("/ready")
+assert code == 200 and status.get("mode") == "integrated" and status.get("status") == "ready", "Integrated providers unavailable"
+code, _ = probe("/api/router/status")
+assert code == 401, "Private router status API not protected"
 code, _ = probe("/api/conversations")
 assert code == 401, "Private conversations API not protected"
-print("Postdeploy: minirouter configuration and authentication checks OK")
+print("Postdeploy: integrated readiness and private API protection OK (inference not verified)")
 PY
+# The manual recovery job verifies the exact post-release systemd drop-in
+# before restoring it. This marker is private and never printed in logs.
+sudo -n sha256sum "$dropin" | awk '{print $1}' > "$stage/.dropin-deployed-sha256"
 deployed=0
 echo "IAchat deployed successfully (live inference not verified)"
