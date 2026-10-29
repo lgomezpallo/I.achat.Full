@@ -40,17 +40,31 @@ actual_hash="$(sudo -n sha256sum "$dropin" | awk '{print $1}')"
 [[ "$actual_hash" == "$expected_hash" ]] || { echo 'systemd_configuration_has_drift'; exit 2; }
 # The previous release backup is private and excludes credentials, databases
 # and virtualenv. Do not delete recovery files: keep them for incident review.
-python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app"
-rsync -a --checksum "${exclude[@]}" "$backup/" "$app/"
-"$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q
+rollback_ok=1
+if ! python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app"; then
+  rollback_ok=0
+  echo '::error::Release-file cleanup failed; recovery snapshot retained.'
+fi
+if ! rsync -a --checksum "${exclude[@]}" "$backup/" "$app/"; then
+  rollback_ok=0
+  echo '::error::Previous code restore failed; recovery snapshot retained.'
+fi
+if ! "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q; then
+  rollback_ok=0
+  echo '::error::Previous dependencies restore failed; recovery snapshot retained.'
+fi
 previous_dropin="$stage/.env.iachat-systemd-rollback"
 if [[ -f "$previous_dropin" ]]; then
-  sudo -n cp -p "$previous_dropin" "$dropin"
+  if ! sudo -n cp -p "$previous_dropin" "$dropin"; then rollback_ok=0; fi
 else
-  sudo -n rm -f "$dropin"
+  if ! sudo -n rm -f "$dropin"; then rollback_ok=0; fi
 fi
-sudo -n systemctl daemon-reload
-sudo -n systemctl restart iachat
-sudo -n systemctl is-active --quiet iachat
-curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null
+if ! sudo -n systemctl daemon-reload; then rollback_ok=0; fi
+if ! sudo -n systemctl restart iachat; then rollback_ok=0; fi
+if ! sudo -n systemctl is-active --quiet iachat; then rollback_ok=0; fi
+if ! curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then rollback_ok=0; fi
+if [[ "$rollback_ok" -ne 1 ]]; then
+  echo '::error::Manual rollback incomplete; private recovery snapshot retained.'
+  exit 1
+fi
 printf 'Authorized rollback complete: release_run_id=%s; health=ok; live_inference=not_verified\n' "$run_id"
