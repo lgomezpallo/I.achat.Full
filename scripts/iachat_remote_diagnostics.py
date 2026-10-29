@@ -83,7 +83,7 @@ def tracked_change_summary() -> dict:
     if not ok:
         return {"count": None, "source_paths": []}
     entries = raw.splitlines()
-    allowed = re.compile(r"(?:iachat/[a-zA-Z0-9_./-]+\.py|scripts/[a-zA-Z0-9_./-]+\.(?:py|sh))\Z")
+    allowed = re.compile(r"(?:iachat|scripts)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(?:py|sh)\Z")
     paths = sorted({line[3:] for line in entries if len(line) > 3 and allowed.fullmatch(line[3:])})
     return {"count": len(entries), "source_paths": paths}
 
