@@ -177,23 +177,6 @@ jobs:
           print("GO_DATABASE_WRITE_ROLLBACK=passed")
           PYDBROLLBACK
           DBROLLBACK
-          # Prueba integrada de parser -> propuesta -> confirmación -> historial
-          # en una única transacción PostgreSQL revertida; nunca usa Router.
-          # El script solo informa passed/failed y la etapa, sin DSN ni filas.
-          if [ -f "$root/scripts/check_postgres_flow.py" ]; then
-            sudo -n bash -s -- "$root" <<'GOFLOW'
-          set -euo pipefail
-          source_root="$1"
-          set -a
-          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
-            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
-            exit 1
-          fi
-          set +a
-          cd "$source_root"
-          PYTHONPATH="$source_root" /opt/go-ute/.venv/bin/python "$source_root/scripts/check_postgres_flow.py"
-          GOFLOW
-          fi
           # Probar historial incluso cuando no hay revisión nueva que desplegar.
           # Si aún falta la migración, el instalador la aplicará más abajo.
           if [ -f "$root/migrations/004_chat_history.sql" ]; then
@@ -322,6 +305,25 @@ jobs:
               raise SystemExit("ERROR: migración de historial no completada") from None
           print("GO_CHAT_HISTORY_SCHEMA=ready")
           PYCHAT
+          fi
+          # Prueba transaccional de adjuntos y chat DESPUÉS de migraciones 003/004.
+          # El script revierte todos los datos y nunca muestra credenciales.
+          # Prueba integrada de parser -> propuesta -> confirmación -> historial
+          # en una única transacción PostgreSQL revertida; nunca usa Router.
+          # El script solo informa passed/failed y la etapa, sin DSN ni filas.
+          if [ -f "$root/scripts/check_postgres_flow.py" ]; then
+            sudo -n bash -s -- "$root" <<'GOFLOW'
+          set -euo pipefail
+          source_root="$1"
+          set -a
+          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
+            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
+            exit 1
+          fi
+          set +a
+          cd "$source_root"
+          PYTHONPATH="$source_root" /opt/go-ute/.venv/bin/python "$source_root/scripts/check_postgres_flow.py"
+          GOFLOW
           fi
           # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
           # Solo se imprimen estados booleanos, nunca filas ni credenciales.
