@@ -311,8 +311,8 @@ jobs:
           # Prueba integrada de parser -> propuesta -> confirmación -> historial
           # en una única transacción PostgreSQL revertida; nunca usa Router.
           # El script solo informa passed/failed y la etapa, sin DSN ni filas.
-          if [ -f "$root/scripts/check_postgres_flow.py" ]; then
-            sudo -n bash -s -- "$root" <<'GOFLOW'
+          if [ -f "$src/scripts/check_postgres_flow.py" ]; then
+            bash -s -- "$src" <<'GOFLOW'
           set -euo pipefail
           source_root="$1"
           set -a
