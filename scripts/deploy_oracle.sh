@@ -85,6 +85,16 @@ trap rollback EXIT
 test -f "$archive"
 test -d "$app/.venv"
 test -d "$app/.git"
+# Oracle currently has tracked local modifications. Never overwrite them silently.
+# This gate runs before the first rsync; it does not inspect or print file content.
+if ! tracked_changes="$(git -C "$app" status --porcelain --untracked-files=no)"; then
+  echo "::error::Cannot verify tracked production changes; deployment aborted."
+  exit 1
+fi
+if [[ -n "$tracked_changes" ]]; then
+  echo "::error::Tracked production files differ from checkout; reconcile before release."
+  exit 1
+fi
 command -v rsync >/dev/null
 command -v python3 >/dev/null
 tar -xzf "$archive" -C "$stage" --no-same-owner
