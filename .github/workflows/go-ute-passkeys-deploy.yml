@@ -287,11 +287,24 @@ jobs:
           if [ -f "$src/migrations/003_attachments.sql" ]; then
             /opt/go-ute/.venv/bin/python - "$src/migrations/003_attachments.sql" <<'PYATTACH'
           import os,sys,psycopg
-          with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
-              conn.execute(open(sys.argv[1],encoding="utf-8").read())
-              if not conn.execute("SELECT to_regclass('go_adjuntos') IS NOT NULL").fetchone()[0]:
-                  raise SystemExit("ERROR: tabla de adjuntos no disponible")
+          try:
+              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+                  with open(sys.argv[1],encoding="utf-8") as migration:
+                      conn.execute(migration.read())
+                  if not conn.execute("SELECT to_regclass('go_adjuntos') IS NOT NULL").fetchone()[0]:
+                      raise RuntimeError("missing_attachments")
+                  column = conn.execute(
+                      "SELECT data_type FROM information_schema.columns "
+                      "WHERE table_schema=current_schema() AND table_name='go_adjuntos' "
+                      "AND column_name='analisis'"
+                  ).fetchone()
+                  if column != ("jsonb",):
+                      raise RuntimeError("missing_document_analysis")
+          except Exception:
+              # Nunca emitir SQL, DSN, documento, hash ni datos de la cuenta.
+              raise SystemExit("ERROR: esquema privado de adjuntos no verificado") from None
           print("GO_ATTACHMENTS_SCHEMA=ready")
+          print("GO_DOCUMENT_ANALYSIS_SCHEMA=ready")
           PYATTACH
           fi
           # Historial conversacional independiente de los hechos oficiales.
