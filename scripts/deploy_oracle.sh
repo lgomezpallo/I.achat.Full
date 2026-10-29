@@ -139,11 +139,15 @@ def probe(path):
             return response.status, json.load(response)
     except urllib.error.HTTPError as exc:
         return exc.code, None
-code, status = probe("/api/router/status")
-assert code == 200 and status.get("mode") == "integrated" and status.get("configured") is True, "Integrated providers unavailable"
+# /api/router/status is private by design. Use public /ready for
+# integrated-backend configuration; never bypass authentication for a smoke.
+code, status = probe("/ready")
+assert code == 200 and status.get("mode") == "integrated" and status.get("status") == "ready", "Integrated providers unavailable"
+code, _ = probe("/api/router/status")
+assert code == 401, "Private router status API not protected"
 code, _ = probe("/api/conversations")
 assert code == 401, "Private conversations API not protected"
-print("Postdeploy: minirouter configuration and authentication checks OK")
+print("Postdeploy: integrated readiness and private API protection OK (inference not verified)")
 PY
 deployed=0
 echo "IAchat deployed successfully (live inference not verified)"
