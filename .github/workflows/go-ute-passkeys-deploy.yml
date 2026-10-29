@@ -227,6 +227,8 @@ jobs:
           import os,sys,psycopg
           with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
               conn.execute(open(sys.argv[1],encoding="utf-8").read())
+              if not conn.execute("SELECT to_regclass('go_adjuntos') IS NOT NULL").fetchone()[0]:
+                  raise SystemExit("ERROR: tabla de adjuntos no disponible")
           print("GO_ATTACHMENTS_SCHEMA=ready")
           PYATTACH
           fi
