@@ -12,4 +12,6 @@ chmod 600 "$keyfile"
 ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
 actual="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
 test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
-ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'set -e; printf "iachat_service: "; systemctl is-active iachat; printf "router_service: "; systemctl is-active router; printf "iachat_health: "; curl -fsS --max-time 5 http://127.0.0.1:8000/health; printf "\nrouter_health: "; curl -fsS --max-time 5 http://127.0.0.1:8010/health; printf "\n"'
+# Run the diagnostic code over SSH stdin; no script, keys, or logs are written to Oracle.
+# The remote script prints only allowlisted status fields and aggregated log signals.
+ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'python3 -' < scripts/iachat_remote_diagnostics.py
