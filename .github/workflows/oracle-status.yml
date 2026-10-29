@@ -1,6 +1,9 @@
 name: Estado de Oracle
 on:
   workflow_dispatch:
+  # Scheduled runs use the default branch, authorized for protected read-only diagnostics.
+  schedule:
+    - cron: '17 */4 * * *'
   push:
     branches: [main]
     paths:
