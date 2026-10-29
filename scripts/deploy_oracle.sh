@@ -5,18 +5,33 @@ run_id="${1:?missing_run_id}"
 [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "invalid_run_id"; exit 1; }
 app="$HOME/Proyecto/Aplicaciones/IAchat"
 archive="/tmp/iachat-release-${run_id}.tar.gz"
-stage="$(mktemp -d)"
-backup="$(mktemp -d)"
+# Keep an operator-recoverable snapshot after a successful deployment.
+# Do not include SQLite, .env files, or the virtualenv in the code backup.
+# Every snapshot is private and tied to the immutable GitHub run ID.
+umask 077
+recovery_base="$HOME/.local/state/iachat-releases"
+install -d -m 700 "$recovery_base"
+recovery_dir="$(mktemp -d "$recovery_base/${run_id}.XXXXXX")"
+stage="$recovery_dir/stage"
+backup="$recovery_dir/backup"
+mkdir -m 700 "$stage" "$backup"
 deployed=0
 # Keep the previous systemd override for a real configuration rollback.
 dropin="/etc/systemd/system/iachat.service.d/20-integrated-providers.conf"
 dropin_backup="$stage/.env.iachat-systemd-rollback"
 dropin_existed=0
 dropin_changed=0
-cleanup() { rm -rf "$stage" "$backup"; rm -f "$archive"; }
+cleanup() { rm -rf -- "$recovery_dir"; rm -f "$archive"; }
 rollback() {
   status=$?
   rollback_incomplete=0
+  if [[ "$status" -eq 0 ]]; then
+    # The previous code and systemd drop-in must remain available for an
+    # explicitly approved post-deployment rollback. Never print their contents.
+    rm -f "$archive"
+    echo "Recovery snapshot retained for authorized rollback: $recovery_dir"
+    return 0
+  fi
   if [[ "$status" -ne 0 && "$deployed" -eq 1 ]]; then
     echo "Deployment failed; reverting application code."
     # Only remove files introduced by this release; preserve runtime data.
