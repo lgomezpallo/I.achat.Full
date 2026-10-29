@@ -1,0 +1,51 @@
+name: Revertir IAchat en Oracle (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: 'GitHub Actions run ID del despliegue que se va a revertir'
+        required: true
+        type: string
+      confirmation:
+        description: 'Escribir ROLLBACK para confirmar la reversión'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: iachat-oracle-deploy
+  cancel-in-progress: false
+jobs:
+  rollback:
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'ROLLBACK'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: oracle-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verificar identidad SSH y ejecutar reversión autorizada
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]{5,17}$ ]]
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          keyfile="$(mktemp "$HOME/.ssh/iachat-rollback-key.XXXXXX")"
+          knownfile="$(mktemp "$HOME/.ssh/iachat-rollback-host.XXXXXX")"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          actual="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" \
+            -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" \
+            "bash -s -- $RELEASE_RUN_ID" < scripts/rollback_oracle.sh
