@@ -272,14 +272,12 @@ def test_successful_deploy_retains_private_recovery_snapshot(tmp_path):
     assert not archive.exists()
 
 
-def test_deploy_refuses_dirty_tracked_oracle_checkout_before_install():
-    """Do not overwrite the five tracked modifications observed in production."""
+def test_deploy_requires_safe_reconciliation_before_install():
+    """A dirty Oracle checkout may pass only if staged source is byte-identical."""
     script = DEPLOY.read_text(encoding="utf-8")
-    gate = 'git -C "$app" status --porcelain --untracked-files=no'
+    gate = 'python3 "$stage/scripts/reconcile_release.py" "$app" "$stage"'
     assert gate in script
-    assert 'Tracked production files differ from checkout' in script
-    assert 'Cannot verify tracked production changes' in script
-    assert script.index(gate) < script.index('deployed=1')
-    assert script.index(gate) < script.index('rsync -a --exclude')
-    # No filename, diff, key or environment value is printed by the guard.
-    assert 'echo "$tracked_changes"' not in script
+    assert "Tracked production files differ from release" in script
+    assert script.index(gate) < script.index("deployed=1")
+    assert script.index(gate) < script.index("rsync -a --exclude=")
+    assert "git reset" not in script
