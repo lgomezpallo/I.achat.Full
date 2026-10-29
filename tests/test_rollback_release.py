@@ -270,3 +270,16 @@ def test_successful_deploy_retains_private_recovery_snapshot(tmp_path):
     assert "UNEXPECTED_CLEANUP" not in result.stdout
     assert (recovery / "backup" / "iachat" / "app.py").read_text() == "previous code"
     assert not archive.exists()
+
+
+def test_deploy_refuses_dirty_tracked_oracle_checkout_before_install():
+    """Do not overwrite the five tracked modifications observed in production."""
+    script = DEPLOY.read_text(encoding="utf-8")
+    gate = 'git -C "$app" status --porcelain --untracked-files=no'
+    assert gate in script
+    assert 'Tracked production files differ from checkout' in script
+    assert 'Cannot verify tracked production changes' in script
+    assert script.index(gate) < script.index('deployed=1')
+    assert script.index(gate) < script.index('rsync -a --exclude')
+    # No filename, diff, key or environment value is printed by the guard.
+    assert 'echo "$tracked_changes"' not in script
