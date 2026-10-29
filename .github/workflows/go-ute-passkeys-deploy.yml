@@ -137,7 +137,10 @@ jobs:
           sudo -n bash -se <<'DBROLLBACK'
           set -euo pipefail
           set -a
-          . /etc/go-ute/app.env
+          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
+            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
+            exit 1
+          fi
           set +a
           /opt/go-ute/.venv/bin/python - <<'PYDBROLLBACK'
           import os
@@ -182,11 +185,53 @@ jobs:
           set -euo pipefail
           source_root="$1"
           set -a
-          . /etc/go-ute/app.env
+          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
+            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
+            exit 1
+          fi
           set +a
           cd "$source_root"
           PYTHONPATH="$source_root" /opt/go-ute/.venv/bin/python "$source_root/scripts/check_postgres_flow.py"
           GOFLOW
+          fi
+          # Probar historial incluso cuando no hay revisión nueva que desplegar.
+          # Si aún falta la migración, el instalador la aplicará más abajo.
+          if [ -f "$root/migrations/004_chat_history.sql" ]; then
+            sudo -n bash -se <<'HISTORYROLLBACK'
+          set -euo pipefail
+          set -a
+          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
+            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
+            exit 1
+          fi
+          set +a
+          /opt/go-ute/.venv/bin/python - <<'PYHISTORY'
+          import os,uuid,psycopg
+          try:
+              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+                  exists = conn.execute("SELECT to_regclass('go_chat_turns') IS NOT NULL").fetchone()[0]
+                  if not exists:
+                      print("GO_CHAT_HISTORY_CHECK=pending_migration")
+                  else:
+                      probe = uuid.uuid4()
+                      try:
+                          conn.execute(
+                              "INSERT INTO go_chat_turns(id,message,reply,phase) VALUES (%s,%s,%s,%s)",
+                              (probe,"test-transaccional","sin-datos-reales","probe"),
+                          )
+                          assert conn.execute(
+                              "SELECT EXISTS (SELECT 1 FROM go_chat_turns WHERE id=%s)",(probe,)
+                          ).fetchone()[0]
+                      finally:
+                          conn.rollback()
+                      assert not conn.execute(
+                          "SELECT EXISTS (SELECT 1 FROM go_chat_turns WHERE id=%s)",(probe,)
+                      ).fetchone()[0]
+                      print("GO_CHAT_HISTORY_WRITE_ROLLBACK=passed")
+          except Exception:
+              raise SystemExit("ERROR: prueba transaccional de historial falló") from None
+          PYHISTORY
+          HISTORYROLLBACK
           fi
           if [ "$revision" = "$deployed" ]; then
             echo "G.O. sin cambios: no reinstalar ni reiniciar."
@@ -204,7 +249,10 @@ jobs:
           sed -i '/GO_PUBLIC_ORIGIN=/d' /etc/go-ute/app.env
           printf '%s\n' 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
           set -a
-          . /etc/go-ute/app.env
+          if ! . /etc/go-ute/app.env >/dev/null 2>&1; then
+            echo 'ERROR: configuración privada no cargable; detalles omitidos por seguridad'
+            exit 1
+          fi
           set +a
           if ! grep -q '^GO_PUBLIC_ORIGIN=' /etc/go-ute/app.env; then
             printf '\n%s\n' 'GO_PUBLIC_ORIGIN=https://go-ute.duckdns.org' >> /etc/go-ute/app.env
@@ -245,6 +293,22 @@ jobs:
                   raise SystemExit("ERROR: tabla de adjuntos no disponible")
           print("GO_ATTACHMENTS_SCHEMA=ready")
           PYATTACH
+          fi
+          # Historial conversacional independiente de los hechos oficiales.
+          # Migración idempotente, sin imprimir mensajes, DSN ni contenido.
+          if [ -f "$src/migrations/004_chat_history.sql" ]; then
+            /opt/go-ute/.venv/bin/python - "$src/migrations/004_chat_history.sql" <<'PYCHAT'
+          import os,sys,psycopg
+          try:
+              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+                  with open(sys.argv[1],encoding="utf-8") as migration:
+                      conn.execute(migration.read())
+                  if not conn.execute("SELECT to_regclass('go_chat_turns') IS NOT NULL").fetchone()[0]:
+                      raise RuntimeError("missing_table")
+          except Exception:
+              raise SystemExit("ERROR: migración de historial no completada") from None
+          print("GO_CHAT_HISTORY_SCHEMA=ready")
+          PYCHAT
           fi
           # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
           # Solo se imprimen estados booleanos, nunca filas ni credenciales.
@@ -334,6 +398,9 @@ jobs:
           public_session="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://go-ute.duckdns.org/api/session)"
           test "$public_session" = 401 || { echo 'ERROR: sesión pública sin autenticación no devuelve 401'; exit 1; }
           echo 'OK: HTTPS público y acceso no autenticado rechazado.'
+          history_status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://go-ute.duckdns.org/api/chat/history)"
+          test "$history_status" = 401 || { echo 'ERROR: historial debe rechazar acceso sin sesión'; exit 1; }
+          echo 'GO_CHAT_HISTORY_UNAUTHENTICATED=blocked'
           # Nuevos adjuntos: comprobar rechazo de POST sin sesión WebAuthn.
           # Cuerpos vacíos o ficticios; nunca usar códigos, cookies ni archivos reales.
           attachment_status="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
