@@ -131,6 +131,49 @@ jobs:
           except Exception:
               print("GO_ROUTER_CATALOG status=unavailable")
           PYCATALOG
+          # Verificar permisos reales de escritura PostgreSQL sin persistir datos.
+          # Una transacción explícita revierte ambas inserciones de prueba.
+          # No imprimir DSN, filas, UUID, códigos de activación ni secretos.
+          sudo -n bash -se <<'DBROLLBACK'
+          set -euo pipefail
+          set -a
+          . /etc/go-ute/app.env
+          set +a
+          /opt/go-ute/.venv/bin/python - <<'PYDBROLLBACK'
+          import os
+          import uuid
+          import psycopg
+
+          ref = uuid.uuid4()
+          budget = "GO-ROLLBACK-" + uuid.uuid4().hex
+          with psycopg.connect(os.environ["GO_DATABASE_URL"], connect_timeout=5) as conn:
+              try:
+                  conn.execute(
+                      "INSERT INTO propuestas(id,presupuesto,tipo,estado,fecha,descripcion) "
+                      "VALUES (%s,%s,%s,%s,CURRENT_DATE,%s)",
+                      (ref, budget, "alta_obra", "pendiente", "prueba transaccional no persistente"),
+                  )
+                  conn.execute(
+                      "INSERT INTO obras(presupuesto,direccion) VALUES (%s,%s)",
+                      (budget, "prueba transaccional no persistente"),
+                  )
+                  assert conn.execute(
+                      "SELECT EXISTS (SELECT 1 FROM propuestas WHERE id=%s)", (ref,)
+                  ).fetchone()[0]
+                  assert conn.execute(
+                      "SELECT EXISTS (SELECT 1 FROM obras WHERE presupuesto=%s)", (budget,)
+                  ).fetchone()[0]
+              finally:
+                  conn.rollback()
+              assert not conn.execute(
+                  "SELECT EXISTS (SELECT 1 FROM propuestas WHERE id=%s)", (ref,)
+              ).fetchone()[0]
+              assert not conn.execute(
+                  "SELECT EXISTS (SELECT 1 FROM obras WHERE presupuesto=%s)", (budget,)
+              ).fetchone()[0]
+          print("GO_DATABASE_WRITE_ROLLBACK=passed")
+          PYDBROLLBACK
+          DBROLLBACK
           if [ "$revision" = "$deployed" ]; then
             echo "G.O. sin cambios: no reinstalar ni reiniciar."
             echo "GO_DEPLOY_REVISION=$revision (sin cambios)"
