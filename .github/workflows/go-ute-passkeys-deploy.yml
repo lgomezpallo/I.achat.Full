@@ -188,6 +188,42 @@ jobs:
           PYTHONPATH="$source_root" /opt/go-ute/.venv/bin/python "$source_root/scripts/check_postgres_flow.py"
           GOFLOW
           fi
+          # Probar historial incluso cuando no hay revisión nueva que desplegar.
+          # Si aún falta la migración, el instalador la aplicará más abajo.
+          if [ -f "$root/migrations/004_chat_history.sql" ]; then
+            sudo -n bash -se <<'HISTORYROLLBACK'
+          set -euo pipefail
+          set -a
+          . /etc/go-ute/app.env
+          set +a
+          /opt/go-ute/.venv/bin/python - <<'PYHISTORY'
+          import os,uuid,psycopg
+          try:
+              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
+                  exists = conn.execute("SELECT to_regclass('go_chat_turns') IS NOT NULL").fetchone()[0]
+                  if not exists:
+                      print("GO_CHAT_HISTORY_CHECK=pending_migration")
+                  else:
+                      probe = uuid.uuid4()
+                      try:
+                          conn.execute(
+                              "INSERT INTO go_chat_turns(id,message,reply,phase) VALUES (%s,%s,%s,%s)",
+                              (probe,"test-transaccional","sin-datos-reales","probe"),
+                          )
+                          assert conn.execute(
+                              "SELECT EXISTS (SELECT 1 FROM go_chat_turns WHERE id=%s)",(probe,)
+                          ).fetchone()[0]
+                      finally:
+                          conn.rollback()
+                      assert not conn.execute(
+                          "SELECT EXISTS (SELECT 1 FROM go_chat_turns WHERE id=%s)",(probe,)
+                      ).fetchone()[0]
+                      print("GO_CHAT_HISTORY_WRITE_ROLLBACK=passed")
+          except Exception:
+              raise SystemExit("ERROR: prueba transaccional de historial falló") from None
+          PYHISTORY
+          HISTORYROLLBACK
+          fi
           if [ "$revision" = "$deployed" ]; then
             echo "G.O. sin cambios: no reinstalar ni reiniciar."
             echo "GO_DEPLOY_REVISION=$revision (sin cambios)"
@@ -260,27 +296,6 @@ jobs:
           except Exception:
               raise SystemExit("ERROR: migración de historial no completada") from None
           print("GO_CHAT_HISTORY_SCHEMA=ready")
-          # Verificación PostgreSQL real con rollback, sin filas ni UUID en logs.
-          import uuid
-          probe = uuid.uuid4()
-          try:
-              with psycopg.connect(os.environ["GO_DATABASE_URL"],connect_timeout=5) as conn:
-                  try:
-                      conn.execute(
-                          "INSERT INTO go_chat_turns(id,message,reply,phase) VALUES (%s,%s,%s,%s)",
-                          (probe, "test-transaccional", "sin-datos-reales", "probe"),
-                      )
-                      assert conn.execute(
-                          "SELECT EXISTS (SELECT 1 FROM go_chat_turns WHERE id=%s)", (probe,)
-                      ).fetchone()[0]
-                  finally:
-                      conn.rollback()
-                  assert not conn.execute(
-                      "SELECT EXISTS (SELECT 1 FROM go_chat_turns WHERE id=%s)", (probe,)
-                  ).fetchone()[0]
-          except Exception:
-              raise SystemExit("ERROR: prueba transaccional de historial falló") from None
-          print("GO_CHAT_HISTORY_WRITE_ROLLBACK=passed")
           PYCHAT
           fi
           # Comprobar esquema real de gestión y WebAuthn antes de tocar el servicio.
