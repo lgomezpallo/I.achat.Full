@@ -97,3 +97,25 @@ def test_report_includes_web_pipeline_hashes_without_reading_secrets(monkeypatch
         "app.py", "backend.py", "web_search.py", "web_planner.py", "web_research.py"
     }
     assert "not necessarily the code loaded" in report["interpretation"]
+
+
+def test_checkout_commit_is_allowlisted_and_not_confused_with_loaded_code(monkeypatch):
+    """Only a 40-character git revision may appear; checkout is not process proof."""
+    def make_command(revision):
+        def fake_command(*args):
+            if args[:2] == ("git", "-C"):
+                return True, revision
+            if args[:2] == ("systemctl", "is-active"):
+                return True, "active"
+            return True, ""
+        return fake_command
+    monkeypatch.setattr(diag, "probe", lambda path: {"http": 200})
+    monkeypatch.setattr(diag, "runtime_hash", lambda name: None)
+    valid = "a" * 40
+    monkeypatch.setattr(diag, "command", make_command(valid))
+    assert diag.build_report()["checkout_commit"] == valid
+    monkeypatch.setattr(diag, "command", make_command("token=SECRET-PRODUCTION"))
+    report = diag.build_report()
+    assert report["checkout_commit"] is None
+    assert "SECRET-PRODUCTION" not in json.dumps(report)
+    assert "not necessarily the code loaded" in report["interpretation"]
