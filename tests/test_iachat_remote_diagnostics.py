@@ -166,3 +166,11 @@ def test_tracked_change_summary_hides_secret_paths_and_never_prints_diff(monkeyp
     assert "secret" not in json.dumps(summary)
     monkeypatch.setattr(diag, "command", lambda *args: (False, ""))
     assert diag.tracked_change_summary() == {"count": None, "source_paths": []}
+
+
+def test_command_preserves_leading_git_porcelain_status_space(monkeypatch):
+    class Completed:
+        returncode = 0
+        stdout = " M iachat/app.py\n"
+    monkeypatch.setattr(diag.subprocess, "run", lambda *args, **kwargs: Completed())
+    assert diag.command("git", "status") == (True, " M iachat/app.py")
