@@ -69,3 +69,26 @@ def test_non_current_question_stays_offline(monkeypatch):
     response = client.post("/api/chat", json={"text": "Explicá el ciclo del agua"})
     assert response.status_code == 200
     assert searches == []
+
+
+def test_short_clarification_triggers_real_chat_web_path(monkeypatch):
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+
+    class ClarifyingBackend:
+        def answer(self, prompt):
+            messages.append(prompt)
+            return ("¿A qué entidad te referís?" if len(messages) == 1
+                    else "Respuesta de prueba")
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: ClarifyingBackend())
+    first = client.post("/api/chat", json={"text": "¿Cuándo juega River?"})
+    assert first.status_code == 200
+    second = client.post("/api/chat", json={
+        "text": "River Plate.", "conversation_id": first.json()["conversation_id"],
+    })
+    assert second.status_code == 200
+    assert len(searches) == 2
+    assert "River Plate." in searches[1]
+    assert "¿Cuándo juega River?" in searches[1]
+    assert any("EVIDENCIA_WEB" in m["content"] for m in messages[-1])
