@@ -28,7 +28,7 @@ HTTP_CODES = ("401", "403", "429")
 def command(*args: str) -> tuple[bool, str]:
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=15, check=False)
-        return result.returncode == 0, result.stdout.strip()
+        return result.returncode == 0, result.stdout.rstrip("\n")
     except (OSError, subprocess.TimeoutExpired):
         return False, ""
 
