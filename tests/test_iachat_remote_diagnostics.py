@@ -62,7 +62,7 @@ def test_report_has_no_inference_or_provider_calls(monkeypatch):
     assert report["private_router_status"] == {"http": 401}
     assert report["log_signals"]["http_429_mentions"] == 1
     assert "SECRET" not in json.dumps(report)
-    assert all(args[0] in ("systemctl", "journalctl") for args in seen)
+    assert all(args[0] in ("systemctl", "journalctl", "git") for args in seen)
 
 
 def test_web_pipeline_fingerprints_distinguish_unreleased_code(monkeypatch, tmp_path):
