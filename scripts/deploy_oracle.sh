@@ -85,22 +85,20 @@ trap rollback EXIT
 test -f "$archive"
 test -d "$app/.venv"
 test -d "$app/.git"
-# Oracle currently has tracked local modifications. Never overwrite them silently.
-# This gate runs before the first rsync; it does not inspect or print file content.
-if ! tracked_changes="$(git -C "$app" status --porcelain --untracked-files=no)"; then
-  echo "::error::Cannot verify tracked production changes; deployment aborted."
-  exit 1
-fi
-if [[ -n "$tracked_changes" ]]; then
-  echo "::error::Tracked production files differ from checkout; reconcile before release."
-  exit 1
-fi
+# Validate the incoming archive before comparing any production files.
+# Dirty tracked files are allowed only when their bytes already match the
+# staged source exactly. Different edits, secrets, renames and symlinks abort.
+# The check runs before backup/rsync and never resets git or prints paths.
 command -v rsync >/dev/null
 command -v python3 >/dev/null
 tar -xzf "$archive" -C "$stage" --no-same-owner
 test -f "$stage/pyproject.toml"
 test -f "$stage/iachat/app.py"
-# Preserve local repository, SQLite data, secrets, and Python environment.
+test -f "$stage/scripts/reconcile_release.py"
+if ! python3 "$stage/scripts/reconcile_release.py" "$app" "$stage"; then
+  echo "::error::Tracked production files differ from release; reconcile before deployment."
+  exit 1
+fi
 rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$app/" "$backup/"
 deployed=1
