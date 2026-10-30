@@ -299,6 +299,7 @@ def child() -> None:
             # Critical acceptance: create and download a real file from an
             # ordinary authenticated chat message, without entering Files mode.
             # This is a LIVE model decision and LIVE model-generated content.
+            natural_file_id = None
             try:
                 natural = client.post("/api/chat", json={
                     "text": "Creá un archivo TXT descargable llamado natural-e2e.txt con el contenido exacto: Prueba IAchat natural OK."
@@ -319,12 +320,51 @@ def child() -> None:
                             fetched.status_code == 200
                             and b"Prueba IAchat natural OK" in fetched.content
                         )
+                        if natural_ok:
+                            natural_file_id = file_info["id"]
                 print("NATURAL_CHAT_FILE_DOWNLOAD:", "OK" if natural_ok else f"HTTP_{natural.status_code}", flush=True)
                 if not natural_ok:
                     failures.append("natural_chat_file_failed")
             except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
                 print("NATURAL_CHAT_FILE_ERROR:", type(exc).__name__, flush=True)
                 failures.append("natural_chat_file_error")
+            # Editing is a separate LIVE tool-selection and model-generation
+            # round trip. It must update the same private file, not create a
+            # second file or merely claim to have edited it in chat.
+            if natural_file_id:
+                try:
+                    edited = client.post("/api/chat", json={
+                        "text": (
+                            "Editá el archivo natural-e2e.txt que acabás de crear. "
+                            "Conservá el contenido anterior y agregá al final una "
+                            "segunda línea que diga exactamente EDICION-E2E-742. "
+                            "No crees otro archivo."
+                        )
+                    })
+                    edit_ok = edited.status_code == 200
+                    if edit_ok:
+                        edited_info = edited.json().get("generated_file")
+                        edit_ok = (
+                            isinstance(edited_info, dict)
+                            and edited_info.get("id") == natural_file_id
+                        )
+                        if edit_ok:
+                            downloaded_edit = client.get(
+                                f"/api/files/{natural_file_id}/download"
+                            )
+                            edit_ok = (
+                                downloaded_edit.status_code == 200
+                                and b"Prueba IAchat natural OK" in downloaded_edit.content
+                                and b"EDICION-E2E-742" in downloaded_edit.content
+                            )
+                    print("NATURAL_CHAT_FILE_EDIT:", "OK" if edit_ok else f"HTTP_{edited.status_code}", flush=True)
+                    if not edit_ok:
+                        failures.append("natural_chat_file_edit_failed")
+                except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+                    print("NATURAL_CHAT_FILE_EDIT_ERROR:", type(exc).__name__, flush=True)
+                    failures.append("natural_chat_file_edit_error")
+            else:
+                print("NATURAL_CHAT_FILE_EDIT: SKIPPED_CREATE_FAILED", flush=True)
             if failures:
                 raise AssertionError("E2E_FAILED:" + ",".join(failures))
             print("E2E_AUTH_WEB_CHAT_FILES: PASS", flush=True)
