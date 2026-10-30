@@ -281,7 +281,7 @@ def test_irrelevant_direct_fallback_keeps_news_instead_of_padding_sources(monkey
 
     install_http(monkeypatch, handler)
     results = web_search.search_web("cotización dólar oficial Argentina hoy")
-    assert calls == ["news.google.com", "www.bing.com"]
+    assert calls == ["news.google.com", "www.bing.com", "www.bing.com"]
     assert len(results) == 2
     assert all(item["url"].startswith("https://news.google.com/") for item in results)
 
@@ -313,7 +313,7 @@ def test_opaque_news_fallback_failure_preserves_news_snippets(monkeypatch):
 
     install_http(monkeypatch, handler)
     results = web_search.search_web("cotización hoy")
-    assert calls == ["news.google.com", "www.bing.com"]
+    assert calls == ["news.google.com", "www.bing.com", "www.bing.com"]
     assert len(results) == 1
     assert results[0]["title"] == "News"
 
