@@ -125,3 +125,57 @@ def test_arbitrary_numeric_field_exports_as_number_and_formula(tmp_path):
     assert sheet["B2"].value==21345 and sheet["B2"].data_type=="n"
     assert sheet["B3"].value=="=SUM(B2:B2)" and sheet["B3"].data_type=="f"
     assert files.get("bob",saved["id"]) is None
+
+
+def test_semantic_sum_matches_related_category_without_hardcoded_vocabulary(tmp_path):
+    """A stored concept may be semantically related to a broader query category."""
+    from iachat.structured_data import handle
+    db = str(tmp_path / "semantic.db")
+    data = StructuredStore(db)
+    files = FileWorkspace(db)
+    collection = data.create("alice", "gastos", [
+        {"name": "Concepto", "type": "text"},
+        {"name": "Categoría", "type": "text"},
+        {"name": "Importe", "type": "number"},
+    ])
+    data.add("alice", collection["id"], {
+        "Concepto": "nafta", "Categoría": "Combustible", "Importe": 40000
+    })
+
+    class SemanticPlanner:
+        def answer(self, messages):
+            payload = json.loads(messages[-1]["content"])
+            if "records" in payload:
+                return json.dumps({"record_ids": [payload["records"][0]["id"]]})
+            return json.dumps({
+                "action": "query", "collection_id": collection["id"],
+                "filters": {"Categoría": "transporte"},
+                "aggregate": "sum", "field": "Importe",
+            })
+
+    answer = handle("¿cuánto gasté en transporte?", "alice", SemanticPlanner(), data, files)
+    assert "40000" in answer["answer"]
+    assert len(data.records("alice", collection["id"])) == 1
+
+
+def test_semantic_query_rejects_invented_record_ids(tmp_path):
+    from iachat.structured_data import handle
+    db = str(tmp_path / "semantic-safe.db")
+    data = StructuredStore(db)
+    files = FileWorkspace(db)
+    collection = data.create("alice", "flota", [
+        {"name": "Unidad", "type": "text"},
+        {"name": "Kilómetros", "type": "number"},
+    ])
+    data.add("alice", collection["id"], {"Unidad": "Fiorino", "Kilómetros": 120})
+
+    class InventedIds:
+        def answer(self, messages):
+            return json.dumps({
+                "action": "query", "collection_id": collection["id"],
+                "record_ids": ["invented-id"], "aggregate": "sum",
+                "field": "Kilómetros",
+            })
+
+    answer = handle("sumá kilómetros", "alice", InventedIds(), data, files)
+    assert "No se modificaron datos" in answer["answer"]
