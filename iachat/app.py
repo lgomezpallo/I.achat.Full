@@ -281,7 +281,6 @@ def router_status():
     return {"configured": True, "reachable": True, "routing_verified": False,
             "reason": "health_only_not_end_to_end"}
 
-@app.post("/api/chat", response_model=MessageOutput)
 def _save_chat_history(conversation_id: str, history: list[dict], owner: str, project: str) -> None:
     try:
         store.put(conversation_id, history, owner, project)
@@ -291,6 +290,7 @@ def _save_chat_history(conversation_id: str, history: list[dict], owner: str, pr
         raise
 
 
+@app.post("/api/chat", response_model=MessageOutput)
 def chat(message: MessageInput, request: Request, background_tasks: BackgroundTasks):
     owner = _user(request)
     chat_started = time.monotonic()
