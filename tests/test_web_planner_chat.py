@@ -165,3 +165,19 @@ def test_banal_probe_has_no_sources_even_after_reload(monkeypatch):
     assert restored.status_code == 200
     assert restored.json()["history"][-1]["web_sources"] == []
     assert searches == []
+
+
+def test_two_independent_questions_keep_evidence_separate(monkeypatch):
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    question = "¿Cuándo juega River y cuándo corre la Fórmula 1?"
+    response = client.post("/api/chat", json={"text": question})
+    assert response.status_code == 200
+    assert searches == ["Cuándo juega River?", "cuándo corre la Fórmula 1?"]
+    tool_message = next(
+        m["content"] for call in messages for m in call
+        if "DATOS DE HERRAMIENTA WEB" in m["content"]
+    )
+    assert "[EVIDENCIA PARA PREGUNTA 1: Cuándo juega River?]" in tool_message
+    assert "[EVIDENCIA PARA PREGUNTA 2: cuándo corre la Fórmula 1?]" in tool_message
+    assert tool_message.count("EVIDENCIA_WEB") == 2
