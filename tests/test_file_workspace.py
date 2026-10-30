@@ -20,7 +20,7 @@ def test_workspace_owner_isolation_and_update(tmp_path):
     assert files.delete("alice", saved["id"])
 
 
-@pytest.mark.parametrize("name", ["../secreto.txt", ".env", "a.pdf", "x.txt/../y.txt", "bad\nname.md", "x.js"])
+@pytest.mark.parametrize("name", ["../secreto.txt", ".env", "a.exe", "x.txt/../y.txt", "bad\nname.md", "x.js"])
 def test_reject_unsafe_names(tmp_path, name):
     files = FileWorkspace(str(tmp_path / "files.db"))
     with pytest.raises(WorkspaceError, match="invalid_filename"):
