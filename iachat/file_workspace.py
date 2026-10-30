@@ -8,7 +8,7 @@ import threading
 import time
 from uuid import uuid4
 
-ALLOWED_EXTENSIONS = frozenset((".txt", ".md", ".csv", ".json", ".html"))
+ALLOWED_EXTENSIONS = frozenset((".txt", ".md", ".csv", ".json", ".html", ".pdf", ".docx", ".xlsx"))
 MAX_CONTENT_BYTES = 200_000
 MAX_FILES_PER_USER = 50
 

@@ -213,6 +213,38 @@ def child() -> None:
                 print("FILE_DOWNLOAD:", "OK" if match else "FAILED", flush=True)
                 if not match:
                     failures.append("file_download_mismatch")
+            # Verify actual binary office files over authenticated HTTP, not
+            # just a health check or the Python renderer in isolation.
+            from io import BytesIO
+            from docx import Document
+            from openpyxl import load_workbook
+            from pypdf import PdfReader
+            office_cases = [
+                ("e2e-documento.pdf", "# Informe E2E\\nTexto de prueba"),
+                ("e2e-documento.docx", "# Informe E2E\\nTexto de prueba"),
+                ("e2e-datos.xlsx", "nombre,valor\\nprueba,123\\nformula,=1+1"),
+            ]
+            for filename, raw_content in office_cases:
+                raw_content = raw_content.replace("\\n", "\n")
+                response = client.post("/api/files", json={"name": filename, "content": raw_content})
+                ok = response.status_code == 201
+                if ok:
+                    download = client.get(f"/api/files/{response.json()['id']}/download")
+                    ok = download.status_code == 200
+                    if ok:
+                        try:
+                            if filename.endswith(".pdf"):
+                                ok = download.content.startswith(b"%PDF-") and "Informe E2E" in PdfReader(BytesIO(download.content)).pages[0].extract_text()
+                            elif filename.endswith(".docx"):
+                                ok = any("Informe E2E" in p.text for p in Document(BytesIO(download.content)).paragraphs)
+                            else:
+                                sheet = load_workbook(BytesIO(download.content)).active
+                                ok = sheet["B2"].value == "123" and sheet["B3"].value == "=1+1" and sheet["B3"].data_type == "s"
+                        except Exception:
+                            ok = False
+                print("OFFICE_DOWNLOAD:", filename.rsplit(".", 1)[-1], "OK" if ok else "FAILED", flush=True)
+                if not ok:
+                    failures.append("office_" + filename.rsplit(".", 1)[-1] + "_failed")
             # Model-generated file: real authenticated provider inference.
             try:
                 generated = client.post("/api/files/generate", json={

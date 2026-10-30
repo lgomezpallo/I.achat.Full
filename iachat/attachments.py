@@ -19,7 +19,7 @@ def extract(attachments):
     for item in attachments:
         name = PurePath(item.name.replace("\\", "/")).name[:180]
         ext = name.lower().rsplit(".", 1)[-1]
-        if ext not in ("txt", "md", "pdf"):
+        if ext not in ("txt", "md", "pdf", "docx", "xlsx"):
             raise AttachmentError("unsupported_attachment_type")
         if len(item.content_base64) > 3_000_000:
             raise AttachmentError("attachment_too_large")
@@ -29,7 +29,45 @@ def extract(attachments):
             raise AttachmentError("invalid_attachment_encoding")
         if len(raw) > MAX_FILE_BYTES:
             raise AttachmentError("attachment_too_large")
-        if ext == "pdf":
+        if ext in ("docx", "xlsx"):
+            # Office files are ZIP containers. Limit decompressed size before
+            # asking the document libraries to parse attacker-controlled XML.
+            try:
+                from zipfile import ZipFile
+                with ZipFile(io.BytesIO(raw)) as archive:
+                    members = archive.infolist()
+                    if len(members) > 1000 or sum(m.file_size for m in members) > 15_000_000:
+                        raise AttachmentError("office_document_too_large")
+                    if any(m.flag_bits & 1 for m in members):
+                        raise AttachmentError("encrypted_office_document")
+                if ext == "docx":
+                    from docx import Document
+                    doc = Document(io.BytesIO(raw))
+                    paragraphs = [p.text for p in doc.paragraphs[:400] if p.text.strip()]
+                    for table in doc.tables[:20]:
+                        for row in table.rows[:100]:
+                            paragraphs.append(" | ".join(cell.text for cell in row.cells[:30]))
+                    content = "\\n".join(paragraphs)
+                else:
+                    from openpyxl import load_workbook
+                    book = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+                    try:
+                        lines = []
+                        for sheet in book.worksheets[:5]:
+                            lines.append("[HOJA: " + sheet.title + "]")
+                            for row in sheet.iter_rows(min_row=1, max_row=200, max_col=30, values_only=True):
+                                if any(value is not None for value in row):
+                                    lines.append(" | ".join("" if value is None else str(value)[:500] for value in row))
+                                if sum(len(line) for line in lines) > MAX_TOTAL_CHARS:
+                                    break
+                        content = "\\n".join(lines)
+                    finally:
+                        book.close()
+            except AttachmentError:
+                raise
+            except Exception as exc:
+                raise AttachmentError("office_document_unreadable") from exc
+        elif ext == "pdf":
             try:
                 from pypdf import PdfReader
                 pdf = PdfReader(io.BytesIO(raw), strict=False)
