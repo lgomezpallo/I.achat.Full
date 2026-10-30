@@ -18,7 +18,7 @@ def _client(monkeypatch, captured, searches):
     monkeypatch.setattr(app_module, "get_backend", lambda: Backend())
     monkeypatch.setattr(
         web_research, "web_evidence_with_pages",
-        lambda query: searches.append(query) or "EVIDENCIA_WEB",
+        lambda query, **kwargs: searches.append(query) or "EVIDENCIA_WEB",
     )
     return TestClient(app_module.app, base_url="https://testserver")
 
