@@ -126,13 +126,15 @@ def explicit_spreadsheet_columns(instruction: str) -> list[str] | None:
     sample = instruction[match.end():].split(".", 1)[0].split("\n", 1)[0]
     # A summary instruction is not a column name. This is grammatical
     # extraction, not a special case for expenses or a specific prompt.
+    # Remove "con suma automática" before the broader total/sum suffix,
+    # otherwise the word "con" would be mistaken for a fifth column.
     sample = re.split(
-        r"(?i)(?:,\s*|\s+(?:y|e)\s+)?(?:un\s+|una\s+|el\s+|la\s+)?"
-        r"(?:total|suma)\s+autom[aá]tic[oa]",
+        r"(?i),?\s+con\s+(?:un\s+|una\s+)?(?:total|suma|f[oó]rmula)\b",
         sample, maxsplit=1,
     )[0]
     sample = re.split(
-        r"(?i),?\s+con\s+(?:un\s+|una\s+)?(?:total|suma|f[oó]rmula)\b",
+        r"(?i)(?:,\s*|\s+(?:y|e)\s+)?(?:un\s+|una\s+|el\s+|la\s+)?"
+        r"(?:total|suma)\s+autom[aá]tic[oa]",
         sample, maxsplit=1,
     )[0]
     sample = re.sub(r"(?i)\s+(?:y|e)\s+", ",", sample)
