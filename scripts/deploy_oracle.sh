@@ -170,6 +170,12 @@ code, _ = probe("/api/conversations")
 assert code == 401, "Private conversations API not protected"
 print("Postdeploy: integrated readiness and private API protection OK (inference not verified)")
 PY
+# Real end-to-end gate: actual HTTP login/cookie, web search evidence, free
+# provider inference, and generated/downloadable files. An E2E failure triggers
+# the existing private code/config rollback; no secrets or user data are logged.
+expected_app_sha256="$(sha256sum "$stage/iachat/app.py" | cut -d ' ' -f 1)"
+sudo -n env IACHAT_E2E_EXPECTED_APP_SHA256="$expected_app_sha256" \
+  /usr/bin/python3 "$app/scripts/iachat_production_e2e.py" --launch
 # The manual recovery job verifies the exact post-release systemd drop-in
 # before restoring it. This marker is private and never printed in logs.
 sudo -n sha256sum "$dropin" | awk '{print $1}' > "$stage/.dropin-deployed-sha256"
