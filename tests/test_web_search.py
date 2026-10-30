@@ -50,7 +50,7 @@ def test_current_news_preferred_over_unrelated_bing_results(monkeypatch):
         calls.append(request.url.host)
         assert request.url.host == "news.google.com"
         return httpx.Response(200, content=rss(
-            ("Partido", "https://news.google.com/rss/articles/123", "Horario por confirmar")
+            ("Partido", "https://example.com/partido", "Horario por confirmar")
         ))
 
     install_http(monkeypatch, handler)
