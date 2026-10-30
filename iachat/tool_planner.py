@@ -37,9 +37,9 @@ _POLICY = (
 )
 
 
-# A cheap grammatical prefilter avoids an extra model call for every normal
-# conversation. These signals ONLY decide whether to ask the model; they
-# never decide whether to create/edit a file. The model remains the planner.
+# A cheap grammatical prefilter avoids an extra model call for normal
+# conversation. Unambiguous requests to CREATE a downloadable file bypass the
+# fallible LLM action selector; the model still generates document contents.
 _FILE_REQUEST_VERB = re.compile(
     r"(?i)\b(?:crea|creá|crear|genera|generá|generar|armá|arma|armar|"
     r"prepará|prepara|preparar|hacé|hace|hacer|editá|edita|editar|"
@@ -53,10 +53,28 @@ _FILE_REQUEST_OBJECT = re.compile(
 )
 
 
+# Match only a direct imperative/request to CREATE a concrete file. Do not
+# trigger on questions about HOW to create one or on negative instructions.
+_EXPLICIT_CREATE_START = re.compile(
+    r"(?ix)^\\s*[¿¡]?\\s*"
+    r"(?:(?:por\\s+favor[,\\s]*)|(?:me\\s+)?(?:pod[eé]s|podr[ií]as)\\s+|"
+    r"(?:quiero|necesito)\\s+que\\s+(?:me\\s+)?)*"
+    r"(?:cre[aá](?:me)?|cr[eé]ame|crees|gener[aá](?:me)?|generes|"
+    r"arm[aá](?:me)?|armes|hac[eé](?:me)?|hazme|hagas|"
+    r"prepar[aá](?:me)?|prepares|crear|generar|armar|hacer|preparar)\\b"
+)
+
+
+def explicit_file_create_request(message: str) -> bool:
+    """Unambiguous creation of a downloadable artifact, not advice about it."""
+    sample = message.strip()[:1500]
+    return bool(_EXPLICIT_CREATE_START.search(sample) and _FILE_REQUEST_OBJECT.search(sample))
+
+
 def is_file_action_candidate(message: str) -> bool:
     """Gate only the extra classifier call, never the action decision."""
     sample = message[:1000]
-    return bool(_FILE_REQUEST_VERB.search(sample) and _FILE_REQUEST_OBJECT.search(sample))
+    return explicit_file_create_request(sample) or bool(_FILE_REQUEST_VERB.search(sample) and _FILE_REQUEST_OBJECT.search(sample))
 
 
 def select_file_action(
@@ -67,6 +85,8 @@ def select_file_action(
     """Classify one user message; only user-owned listed IDs may be edited."""
     if not message.strip():
         return FileAction()
+    if explicit_file_create_request(message):
+        return FileAction("create")
     allowed = {
         row["id"] for row in files
         if isinstance(row.get("id"), str) and isinstance(row.get("name"), str)
