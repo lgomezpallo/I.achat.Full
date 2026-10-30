@@ -1,8 +1,15 @@
 """The production E2E smoke must leave no orphaned private memory rows."""
 import sqlite3
+import runpy
+from pathlib import Path
 
 from iachat.store import ConversationStore
-from scripts.iachat_production_e2e import cleanup_account
+
+# The production launcher is an executable script, not an installed package.
+# Load its real cleanup function without requiring scripts/ on PYTHONPATH.
+cleanup_account = runpy.run_path(
+    str(Path(__file__).resolve().parents[1] / "scripts" / "iachat_production_e2e.py")
+)["cleanup_account"]
 
 
 def test_temporary_e2e_account_cleanup_includes_summary_versions(tmp_path):
