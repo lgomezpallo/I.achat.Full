@@ -462,6 +462,19 @@ def child() -> None:
                             print("CHAT_5_BOTH_TOPICS:", both_topics, flush=True)
                             if not both_topics and not suppressed:
                                 failures.append("chat_5_missing_one_topic")
+                            # Topic coverage in returned source titles is a
+                            # necessary sanity check, NOT factual corroboration.
+                            source_titles = " ".join(str(item.get("title", "")) for item in ordered_sources)
+                            river_source = bool(re.search(r"(?i)\briver\b", source_titles))
+                            racing_source = bool(re.search(
+                                r"(?i)f[oó]rmula\s*1|\bf1\b|gran premio|\bgp\b|carrera",
+                                source_titles,
+                            ))
+                            print("CHAT_5_SOURCE_TOPIC_COVERAGE:",
+                                  "river=" + str(river_source),
+                                  "racing=" + str(racing_source), flush=True)
+                            if not (river_source and racing_source):
+                                failures.append("chat_5_sources_do_not_cover_both_topics")
                     direct_hosts = {
                         urlsplit(item["url"]).hostname for item in ordered_sources
                         if urlsplit(item["url"]).hostname != "news.google.com"
