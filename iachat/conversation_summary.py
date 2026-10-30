@@ -50,7 +50,9 @@ def build_summary(history: list[dict], previous: dict | None = None) -> dict:
     """Incremental on append; rebuild on historical edits, preserving version audit."""
     start = 0
     items: list[dict] = []
-    if previous:
+    # Older snapshots only kept the last 120 events. Rebuild once from the
+    # authoritative transcript so their original anchors can be restored.
+    if previous and previous.get("format_version") == 2:
         processed = previous["processed_count"]
         if processed <= len(history) and previous["prefix_hash"] == _digest(history[:processed]):
             start = processed
@@ -73,6 +75,7 @@ def build_summary(history: list[dict], previous: dict | None = None) -> dict:
             key=lambda item: item["source_index"],
         )
     return {
+        "format_version": 2,
         "processed_count": len(history),
         "prefix_hash": _digest(history),
         "items": items,
