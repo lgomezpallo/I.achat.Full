@@ -93,9 +93,9 @@ class ProviderBackend:
     """Minimal integrated failover, with no call to the separate Router service."""
     PROVIDERS = (
         ("groq", "GROQ_API_KEY", "https://api.groq.com/openai/v1",
-         ("openai/gpt-oss-20b", "llama-3.3-70b-versatile")),
+         ("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")),
         ("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1",
-         ("dots-studio/dots-3-note-preview:free", "openai/gpt-oss-20b:free")),
+         ("openrouter/free",)),
         ("nvidia", "NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1",
          ("meta/llama-3.3-70b-instruct",)),
     )
@@ -104,8 +104,8 @@ class ProviderBackend:
     # arbitrary provider models are free. NVIDIA endpoints are disabled until
     # a no-credit/no-billing model can be independently verified.
     FREE_MODEL_ALLOWLIST = {
-        "groq": frozenset(("openai/gpt-oss-20b", "llama-3.3-70b-versatile")),
-        "openrouter": frozenset(("openai/gpt-oss-20b:free", "dots-studio/dots-3-note-preview:free")),
+        "groq": frozenset(("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")),
+        "openrouter": frozenset(("openrouter/free",)),
         "nvidia": frozenset(),
     }
 
@@ -121,7 +121,13 @@ class ProviderBackend:
             configured = os.getenv(name.upper() + "_MODELS", "").strip()
             models = tuple(m.strip() for m in configured.split(",") if m.strip()) if configured else defaults
         allowed = cls.FREE_MODEL_ALLOWLIST[name]
-        return tuple(model for model in models if model in allowed)
+        eligible = tuple(model for model in models if model in allowed)
+        # Oracle can retain old *_MODELS values from retired free endpoints.
+        # Preserve valid explicit choices, but replace retired/disallowed IDs
+        # with current, strictly allowlisted free fallbacks. Never call paid IDs.
+        if not images and len(eligible) != len(models):
+            eligible += tuple(m for m in defaults if m in allowed and m not in eligible)
+        return eligible
 
     @classmethod
     def configured(cls) -> bool:
