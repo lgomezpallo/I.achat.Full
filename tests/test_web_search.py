@@ -286,6 +286,30 @@ def test_four_direct_publishers_can_be_attempted_before_opaque_proxies(monkeypat
     assert sum("news.google.com" in item["url"] for item in results) == 1
 
 
+def test_news_fallback_keeps_entity_match_without_temporal_words(monkeypatch):
+    """News publisher titles need not repeat generic query words like semana."""
+    paths = []
+    def handler(request):
+        paths.append(request.url.path)
+        if request.url.host == "news.google.com":
+            return httpx.Response(200, content=rss(*[
+                (f"Google {i}", f"https://news.google.com/rss/articles/{i}", "Resumen")
+                for i in range(5)
+            ]))
+        assert request.url.path == "/news/search"
+        return httpx.Response(200, content=rss(
+            ("ANSES informó nuevas fechas de pago", "https://publisher.example.com/anses",
+             "Los beneficiarios de ANSES reciben novedades"),
+            ("Cartelera de cine", "https://cinema.example.com/film", "Estrenos y reseñas"),
+        ))
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("ANSES novedades esta semana", news_fallback=True)
+    assert paths == ["/rss/search", "/news/search"]
+    assert any(item["url"] == "https://publisher.example.com/anses" for item in results)
+    assert all("cinema.example.com" not in item["url"] for item in results)
+
+
 def test_irrelevant_direct_fallback_keeps_news_instead_of_padding_sources(monkeypatch):
     calls = []
 

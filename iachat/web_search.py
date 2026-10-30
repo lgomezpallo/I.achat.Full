@@ -198,7 +198,7 @@ def _search_terms(text: str) -> set[str]:
     }
 
 
-def _relevant_direct_fallback(item: dict[str, str], query: str) -> bool:
+def _relevant_direct_fallback(item: dict[str, str], query: str, *, minimum_overlap: int | None = None) -> bool:
     """Reject unrelated generic RSS hits before mixing them with news evidence.
 
     Token overlap is only a retrieval sanity check; it never certifies a
@@ -208,7 +208,7 @@ def _relevant_direct_fallback(item: dict[str, str], query: str) -> bool:
     if not query_terms:
         return False
     result_terms = _search_terms(item.get("title", "") + " " + item.get("snippet", ""))
-    required = 3 if len(query_terms) >= 5 else 2 if len(query_terms) >= 2 else 1
+    required = minimum_overlap if minimum_overlap is not None else (3 if len(query_terms) >= 5 else 2 if len(query_terms) >= 2 else 1)
     return len(query_terms & result_terms) >= required
 
 
@@ -260,7 +260,10 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
                         direct = [
                             item for item in _fetch_feed(secondary_url, secondary_params, bounded_timeout)
                             if urlsplit(item["url"]).hostname != "news.google.com"
-                            and _relevant_direct_fallback(item, query)
+                            and _relevant_direct_fallback(
+                                item, query,
+                                minimum_overlap=1 if secondary_url == bing_news[0] else None,
+                            )
                         ]
                     except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError):
                         direct = []
