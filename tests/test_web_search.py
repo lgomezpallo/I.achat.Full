@@ -375,3 +375,19 @@ def test_bing_news_wrapper_rejects_multiple_or_non_https_destinations():
     assert not web_search._public_https_link(
         web_search._bing_news_publisher_url(base + "url=http%3A%2F%2F127.0.0.1%2F")
     )
+
+
+def test_legacy_http_bing_click_wrapper_is_never_fetched_and_safe_target_is_https():
+    from urllib.parse import quote
+    direct = "https://publisher.example.com/nota?fecha=2026-10-30"
+    wrapper = "http://www.bing.com/news/apiclick.aspx?ref=feed&url=" + quote(direct, safe="")
+    assert web_search._bing_news_publisher_url(wrapper) == direct
+    old_article = "http://publisher.example.com/nota"
+    wrapper = "http://www.bing.com/news/apiclick.aspx?url=" + quote(old_article, safe="")
+    assert web_search._bing_news_publisher_url(wrapper) == "https://publisher.example.com/nota"
+    unsafe = "http://127.0.0.1/private"
+    wrapper = "http://www.bing.com/news/apiclick.aspx?url=" + quote(unsafe, safe="")
+    assert web_search._bing_news_publisher_url(wrapper) == ""
+    unsafe_port = "http://publisher.example.com:8080/private"
+    wrapper = "http://www.bing.com/news/apiclick.aspx?url=" + quote(unsafe_port, safe="")
+    assert web_search._bing_news_publisher_url(wrapper) == ""
