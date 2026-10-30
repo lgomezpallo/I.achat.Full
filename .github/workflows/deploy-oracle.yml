@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: iachat-oracle-deploy
@@ -67,3 +68,20 @@ jobs:
       - name: Limpiar clave temporal
         if: always()
         run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts /tmp/iachat-release.tar.gz
+      - name: Publicar resultado y enlace de despliegue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -eu
+          case "$JOB_STATUS" in success) state=success;; *) state=failure;; esac
+          # Status is metadata only; no secrets, user messages or inference output.
+          curl -fsS --max-time 12 -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "{\"state\":\"$state\",\"context\":\"iachat/oracle-e2e\",\"description\":\"Oracle deployment and authenticated E2E: $JOB_STATUS\",\"target_url\":\"https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$RELEASE_SHA" >/dev/null \
+            || echo "::warning::Could not publish deployment status"
