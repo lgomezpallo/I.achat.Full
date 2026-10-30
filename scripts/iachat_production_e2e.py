@@ -79,6 +79,60 @@ def cleanup_account(db_path: str, username: str) -> None:
         connection.execute("DELETE FROM users WHERE username=?", (username,))
 
 
+def diagnose_news_feed(query: str) -> None:
+    """Production-only public RSS diagnostics; print metadata, never article text.
+
+    No credentials, model calls, user conversations, or arbitrary URLs.
+    """
+    import httpx
+    import xml.etree.ElementTree as ET
+    from iachat.web_search import (
+        BING_NEWS_RSS, BING_RSS, RSS_HEADERS,
+        _bing_news_publisher_url, _public_https_link,
+        _relevant_direct_fallback, _clean_snippet,
+    )
+    feeds = (
+        ("bing_news", BING_NEWS_RSS, {"q": query, "format": "rss", "setmkt": "es-AR"}),
+        ("bing_general", BING_RSS, {"q": query, "format": "rss"}),
+    )
+    for label, endpoint, params in feeds:
+        try:
+            with httpx.Client(timeout=6.0, follow_redirects=False) as client:
+                with client.stream("GET", endpoint, params=params, headers=RSS_HEADERS) as response:
+                    status = response.status_code
+                    body = bytearray()
+                    for chunk in response.iter_bytes():
+                        body.extend(chunk)
+                        if len(body) > 400_000:
+                            raise ValueError("oversized_feed")
+            if status != 200:
+                print("RSS_DIAG:", label, "http", status, flush=True)
+                continue
+            root = ET.fromstring(body)
+            items = root.findall(".//channel/item")[:20]
+            safe = 0
+            relevant = 0
+            wrappers = 0
+            for item in items:
+                raw = (item.findtext("link") or "").strip()
+                if "/news/apiclick.aspx?" in raw:
+                    wrappers += 1
+                direct = _bing_news_publisher_url(raw) if label == "bing_news" else raw
+                if _public_https_link(direct):
+                    safe += 1
+                    candidate = {
+                        "title": _clean_snippet(item.findtext("title") or "", 180),
+                        "snippet": _clean_snippet(item.findtext("description") or "", 450),
+                    }
+                    if _relevant_direct_fallback(candidate, query):
+                        relevant += 1
+            print("RSS_DIAG:", label, "http", status, "items", len(items),
+                  "wrapped", wrappers, "safe_https", safe,
+                  "relevant", relevant, flush=True)
+        except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError) as exc:
+            print("RSS_DIAG:", label, "error", type(exc).__name__, flush=True)
+
+
 def stage_evidence(question: str) -> tuple[int, set[str]]:
     from iachat.web_planner import plan_web_lookup_semantic
     from iachat.web_research import web_evidence_with_pages
@@ -106,6 +160,8 @@ def stage_evidence(question: str) -> tuple[int, set[str]]:
           "direct_publishers", direct_publishers, "pages_read", pages_read,
           "bytes", len(evidence.encode("utf-8")), flush=True)
     print("WEB_SOURCE_HOSTS:", ",".join(sorted({urlsplit(u).hostname or "" for u in sources})[:5]), flush=True)
+    if not pages_read:
+        diagnose_news_feed(plan.query)
     return len(sources), sources
 
 
