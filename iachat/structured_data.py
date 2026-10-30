@@ -284,7 +284,7 @@ def handle(text, owner, backend, data, workspace):
     explicit = bool(re.search(
         r"\b(crea|creame|crear|arma|armame|genera|generame|anota|anotame|registra|"
         r"registrame|agrega|agregame|carga|cargame|corrige|corregi|modifica|"
-        r"actualiza|borra|elimina|descarga|exporta)\b", norm(text)
+        r"actualiza|borra|elimina|descarga|exporta|cuanto|cuantos|cuantas|total|suma)\b", norm(text)
     ))
     plan = None
     for attempt in range(2):
