@@ -247,7 +247,8 @@ def _plausibly_relevant(item: dict[str, str], query: str) -> bool:
         return False
     terms = _search_terms(query)
     if len(terms) >= 4:
-        return len(terms & _search_terms(text)) >= 2
+        required = 2 if len(terms) >= 5 else 1
+        return len(terms & _search_terms(text)) >= required
     return True
 
 
