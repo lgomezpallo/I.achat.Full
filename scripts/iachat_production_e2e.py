@@ -23,6 +23,7 @@ BASE = "http://127.0.0.1:8000"
 QUESTIONS = (
     "¿Cuándo es el próximo partido de River Plate? Indicá fecha, horario y URL de una fuente comprobable.",
     "¿Cuál es la cotización del dólar oficial en Argentina hoy? Indicá el valor y URL de la fuente consultada.",
+    "¿Cuáles son las novedades de ANSES de esta semana? Indicá una noticia reciente y URL de la fuente consultada.",
 )
 GENERIC = re.compile(
     r"(?i)(no (?:dispongo|tengo|cuento) (?:con |de )?(?:datos|informaci[oó]n) actualizad|"
@@ -141,6 +142,65 @@ def diagnose_news_feed(query: str) -> None:
             print("RSS_DIAG:", label, "error", type(exc).__name__, flush=True)
 
 
+def diagnose_page_failures(evidence_text: str) -> None:
+    """Diagnose failed public HTTPS pages without article text, paths or secrets.
+
+    This is run only when the normal page reader obtained zero pages. It uses
+    the same validated/pinned HTTPS reader, never a bypass or a raw curl.
+    """
+    from iachat.web_page_reader import read_page, PageReadError
+    from iachat.web_fetch import PageFetchError
+    try:
+        start = evidence_text.index("[")
+        records, _ = json.JSONDecoder().raw_decode(evidence_text[start:])
+    except (ValueError, TypeError):
+        return
+    if not isinstance(records, list):
+        return
+    attempted = 0
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str):
+            continue
+        try:
+            host = urlsplit(url).hostname or ""
+        except ValueError:
+            continue
+        if host == "news.google.com" or not re.fullmatch(r"[a-zA-Z0-9.-]{1,253}", host):
+            continue
+        if attempted >= 4:
+            break
+        attempted += 1
+        try:
+            read_page(url, timeout=3.0)
+        except PageFetchError as exc:
+            message = str(exc)
+            status = re.search(r"HTTP_([1-5][0-9]{2})", message)
+            if status:
+                reason = "http_" + status.group(1)
+            elif "byte limit" in message or "content length" in message:
+                reason = "oversized"
+            elif "compressed" in message:
+                reason = "compressed"
+            elif "content type" in message:
+                reason = "unsupported_media"
+            elif "DNS" in message:
+                reason = "dns_rejected"
+            elif "request failed" in message:
+                reason = "transport_failure"
+            else:
+                reason = "safety_or_http_rejected"
+        except PageReadError:
+            reason = "no_readable_text"
+        except ValueError:
+            reason = "extraction_rejected"
+        else:
+            reason = "readable_on_retry"
+        print("PAGE_DIAG:", "host=" + host, "reason=" + reason, flush=True)
+
+
 def stage_evidence(question: str) -> tuple[int, set[str]]:
     from iachat.web_planner import plan_web_lookup_semantic
     from iachat.web_research import web_evidence_with_pages
@@ -169,6 +229,7 @@ def stage_evidence(question: str) -> tuple[int, set[str]]:
           "bytes", len(evidence.encode("utf-8")), flush=True)
     print("WEB_SOURCE_HOSTS:", ",".join(sorted({urlsplit(u).hostname or "" for u in sources})[:5]), flush=True)
     if not pages_read:
+        diagnose_page_failures(evidence)
         diagnose_news_feed(plan.query)
     return len(sources), sources
 
@@ -275,6 +336,7 @@ def child() -> None:
                     if direct_count and not first_three_direct:
                         failures.append(f"chat_{idx}_publisher_links_hidden")
                     matched = any(u.rstrip(".,;") in source_urls for u in urls)
+                    invalid_citations = [u for u in urls if u.rstrip(".,;") not in source_urls]
                     generic = bool(GENERIC.search(answer))
                     cited_hosts = sorted({
                         urlsplit(u).hostname or "" for u in urls
@@ -288,6 +350,14 @@ def child() -> None:
                     # Do not require the model to reproduce their long RSS URLs.
                     if response.status_code != 200 or generic or len(answer.strip()) < 35 or not source_urls:
                         failures.append(f"chat_{idx}_missing_grounded_answer")
+                    if invalid_citations:
+                        failures.append(f"chat_{idx}_cites_unconsulted_url")
+                    direct_hosts = {
+                        urlsplit(item["url"]).hostname for item in ordered_sources
+                        if urlsplit(item["url"]).hostname != "news.google.com"
+                    }
+                    if pages_read == 0 and len(direct_hosts) < 2:
+                        failures.append(f"chat_{idx}_insufficient_independent_rss_hosts")
                 except (httpx.HTTPError, ValueError, TypeError) as exc:
                     print(f"CHAT_{idx}: error={type(exc).__name__}", flush=True)
                     failures.append(f"chat_{idx}_http_error")

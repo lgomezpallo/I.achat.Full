@@ -67,7 +67,7 @@ def _prefer_readable_sources(results: list[dict[str, str]]) -> list[dict[str, st
 
 
 def web_evidence_with_pages(query: str, *, news_fallback: bool = False) -> str:
-    """Search once and read at most two public HTTPS pages (three attempts).
+    """Search once and read at most two public HTTPS pages (four attempts).
 
     No paid API, credentials, redirects or arbitrary model-selected URLs.
     Failures degrade to clearly labelled RSS snippets or a no-results notice.
@@ -89,7 +89,7 @@ def web_evidence_with_pages(query: str, *, news_fallback: bool = False) -> str:
     urls = _prioritize_distinct_hosts([
         str(item.get("url", "")) for item in results if isinstance(item, dict)
     ])
-    pages = read_pages(urls, max_pages=2, max_attempts=3, timeout=PAGE_TIMEOUT)
+    pages = read_pages(urls, max_pages=2, max_attempts=4, timeout=PAGE_TIMEOUT)
     by_url = {page.url: page for page in pages}
     evidence = []
     for item in results:

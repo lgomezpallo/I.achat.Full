@@ -33,7 +33,7 @@ def test_prefers_distinct_hosts_within_three_page_attempts(monkeypatch):
 
     def fake_read(urls, **kwargs):
         captured.extend(urls)
-        assert kwargs == {"max_pages": 2, "max_attempts": 3, "timeout": 3.0}
+        assert kwargs == {"max_pages": 2, "max_attempts": 4, "timeout": 3.0}
         return (
             ReadPage("https://a.example.com/1", "Página A"),
             ReadPage("https://b.example.org/3", "Página B"),
@@ -121,7 +121,7 @@ def test_reads_pages_and_labels_all_evidence_unverified(monkeypatch):
     assert "Una página leída NO" in evidence
     assert calls == [(
         ["https://example.com/0", "https://example.com/1"],
-        {"max_pages": 2, "max_attempts": 3, "timeout": 3.0},
+        {"max_pages": 2, "max_attempts": 4, "timeout": 3.0},
     )]
 
 
