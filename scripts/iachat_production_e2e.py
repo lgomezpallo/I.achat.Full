@@ -25,6 +25,8 @@ QUESTIONS = (
     "¿Cuándo es el próximo partido de River Plate? Indicá fecha, horario y URL de una fuente comprobable.",
     "¿Cuál es la cotización del dólar oficial en Argentina hoy? Indicá el valor y URL de la fuente consultada.",
     "¿Cuáles son las novedades de ANSES de esta semana? Indicá una noticia reciente y URL de la fuente consultada.",
+    "¿Cuándo es la próxima carrera de Fórmula 1? Indicá fecha y URL de una fuente comprobable; si no se confirma, decilo.",
+    "¿Cuándo juega River Plate y cuándo es la próxima carrera de Fórmula 1? Respondé ambas con fuentes específicas.",
 )
 GENERIC = re.compile(
     r"(?i)(no (?:dispongo|tengo|cuento) (?:con |de )?(?:datos|informaci[oó]n) actualizad|"
@@ -370,10 +372,14 @@ def child() -> None:
             except (httpx.HTTPError, ValueError, TypeError) as exc:
                 print("NORMAL_CHAT_ERROR:", type(exc).__name__, flush=True)
                 failures.append("normal_chat_http_error")
+            from iachat.web_planner import split_independent_search_questions
             for idx, question in enumerate(QUESTIONS, 1):
-                count, sources = stage_evidence(question)
-                if not count:
-                    failures.append(f"web_{idx}_no_sources")
+                # A compound question must search each topic independently.
+                # This is read-only public evidence; no user data or secrets.
+                for part_no, subquestion in enumerate(split_independent_search_questions(question), 1):
+                    count, _ = stage_evidence(subquestion)
+                    if not count:
+                        failures.append(f"web_{idx}_{part_no}_no_sources")
                 try:
                     response = paced_model_post(client, "/api/chat", json={"text": question})
                     data = response.json() if response.status_code == 200 else {}
@@ -440,6 +446,22 @@ def child() -> None:
                         failures.append(f"chat_{idx}_missing_grounded_answer")
                     if invalid_citations:
                         failures.append(f"chat_{idx}_cites_unconsulted_url")
+                    if idx in (4, 5) and response.status_code == 200:
+                        from iachat.fresh_event_guard import reject_stale_next_event_answer
+                        if reject_stale_next_event_answer(question, answer) != answer:
+                            failures.append(f"chat_{idx}_stale_upcoming_date")
+                        # A suppressed date is safer than misinformation, but
+                        # it is not proof that the next event was verified.
+                        suppressed = "La información obtenida contiene una fecha que ya pasó" in answer
+                        print(f"CHAT_{idx}_UPCOMING_DATE_SUPPRESSED: {suppressed}", flush=True)
+                        if idx == 5:
+                            both_topics = (
+                                bool(re.search(r"(?i)\briver\b", answer))
+                                and bool(re.search(r"(?i)f[oó]rmula\s*1|\bf1\b|carrera|gran premio", answer))
+                            )
+                            print("CHAT_5_BOTH_TOPICS:", both_topics, flush=True)
+                            if not both_topics and not suppressed:
+                                failures.append("chat_5_missing_one_topic")
                     direct_hosts = {
                         urlsplit(item["url"]).hostname for item in ordered_sources
                         if urlsplit(item["url"]).hostname != "news.google.com"
