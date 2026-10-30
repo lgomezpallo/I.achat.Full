@@ -10,12 +10,15 @@ from fastapi import FastAPI, HTTPException, Request, Response, Query, Background
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response as RawResponse
 from pydantic import BaseModel, Field
 from .store import ConversationStore
+from .google_auth import GoogleOIDC, OIDCError
+from fastapi.responses import RedirectResponse
 import re
 from .web import HTML, MANIFEST, SERVICE_WORKER
 
 app = FastAPI(title="IAchat", version="0.3.0")
 
 store = ConversationStore(os.getenv("IACHAT_DB", "iachat.db"))
+google_oidc = GoogleOIDC()
 from .file_workspace import FileWorkspace, WorkspaceError, parse_generated_file
 file_workspace = FileWorkspace(os.getenv("IACHAT_DB", "iachat.db"))
 from .structured_data import StructuredStore, handle as handle_structured_chat
@@ -79,11 +82,44 @@ def login(payload: LoginInput, response: Response):
     response.set_cookie("iachat_session", username + "." + expiry + "." + signature, httponly=True, secure=True, samesite="lax", max_age=2592000)
     return {"ok": True, "username": username}
 
+@app.get("/auth/google/start")
+def google_start():
+    try:
+        url, flow = google_oidc.begin()
+    except OIDCError:
+        raise HTTPException(503, "google_login_not_configured")
+    response = RedirectResponse(url, status_code=302)
+    response.set_cookie("iachat_google_flow", flow, httponly=True, secure=True,
+                        samesite="lax", max_age=600, path="/auth/google")
+    return response
+
+
+@app.get("/auth/google/callback")
+def google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    if error:
+        raise HTTPException(401, "google_authorization_denied")
+    try:
+        subject = google_oidc.complete(code, state, request.cookies.get("iachat_google_flow", ""))
+        username = store.get_or_create_oidc_user("google", subject)
+    except OIDCError:
+        raise HTTPException(401, "google_authentication_failed")
+    except ValueError:
+        raise HTTPException(403, "google_account_disabled")
+    secret = os.getenv("IACHAT_AUTH_SECRET", "")
+    expiry = str(int(time.time()) + 2592000)
+    signature = hmac.new(secret.encode(), (username + "." + expiry).encode(), hashlib.sha256).hexdigest()
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie("iachat_session", username + "." + expiry + "." + signature,
+                        httponly=True, secure=True, samesite="lax", max_age=2592000)
+    response.delete_cookie("iachat_google_flow", path="/auth/google")
+    return response
+
+
 @app.get("/auth/status")
 def auth_status(request: Request):
     username = _signed_user(request.cookies.get("iachat_session", ""))
     account = store.get_user(username) if username else None
-    return {"authenticated": bool(username), "username": username, "admin": bool(account and account["admin"])}
+    return {"authenticated": bool(username), "username": username, "admin": bool(account and account["admin"]), "google_enabled": google_oidc.configured()}
 
 @app.post("/auth/logout")
 def logout(response: Response):

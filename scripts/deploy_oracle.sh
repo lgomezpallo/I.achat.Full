@@ -137,7 +137,7 @@ if sudo -n test -e "$dropin"; then
   dropin_existed=1
 fi
 dropin_changed=1
-printf '[Service]\nEnvironmentFile=%s\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
+printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=-/etc/iachat/google-oidc.env\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart iachat
 sudo -n systemctl is-active --quiet iachat
@@ -182,6 +182,33 @@ code, _ = probe("/api/conversations")
 assert code == 401, "Private conversations API not protected"
 print("Postdeploy: integrated readiness and private API protection OK (inference not verified)")
 PY
+# Report Google configuration without printing any credentials or claiming consent completed.
+"$app/.venv/bin/python" - <<'PY'
+import json
+import urllib.error
+import urllib.request
+from urllib.parse import urlsplit
+base = "http://127.0.0.1:8000"
+with urllib.request.urlopen(base + "/auth/status", timeout=5) as response:
+    status = json.load(response)
+assert status["authenticated"] is False
+if status.get("google_enabled"):
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        opener.open(base + "/auth/google/start", timeout=5)
+        raise AssertionError("google_start_did_not_redirect")
+    except urllib.error.HTTPError as exc:
+        assert exc.code == 302
+        assert urlsplit(exc.headers["Location"]).hostname == "accounts.google.com"
+        assert "iachat_google_flow=" in exc.headers.get("Set-Cookie", "")
+    print("GOOGLE_OIDC: configured, redirect and state cookie verified; real Google consent not verified")
+else:
+    print("GOOGLE_OIDC: not configured; Google Client ID/Secret and public origin required")
+PY
+
 # Real end-to-end gate: actual HTTP login/cookie, web search evidence, free
 # provider inference, and generated/downloadable files. An E2E failure triggers
 # the existing private code/config rollback; no secrets or user data are logged.
