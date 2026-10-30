@@ -175,7 +175,7 @@ def test_two_independent_questions_keep_evidence_separate(monkeypatch):
     assert response.status_code == 200
     assert searches == ["Cuándo juega River?", "cuándo corre la Fórmula 1?"]
     tool_message = next(
-        m["content"] for m in messages[0]
+        m["content"] for call in messages for m in call
         if "DATOS DE HERRAMIENTA WEB" in m["content"]
     )
     assert "[EVIDENCIA PARA PREGUNTA 1: Cuándo juega River?]" in tool_message
