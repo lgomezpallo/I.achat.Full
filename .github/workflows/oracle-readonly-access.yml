@@ -1,7 +1,7 @@
 name: Oracle read-only SSH diagnostic
 on:
   push:
-    branches: ["ops/oracle-access-check-20261030"]
+    branches: ["main"]
     paths: [".github/workflows/oracle-readonly-access.yml"]
   workflow_dispatch:
 permissions:
