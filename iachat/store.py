@@ -5,6 +5,7 @@ import time
 import hashlib
 import secrets
 from threading import Lock
+from .conversation_summary import build_summary
 
 class ConversationStore:
     def __init__(self, path: str = "iachat.db") -> None:
@@ -38,6 +39,12 @@ class ConversationStore:
             self._db.execute("ALTER TABLE automatic_memory_log ADD COLUMN previous_content TEXT")
         self._db.execute("CREATE TABLE IF NOT EXISTS image_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, owner TEXT NOT NULL, message_index INTEGER NOT NULL, filename TEXT NOT NULL, data_url TEXT NOT NULL)")
         self._db.execute("CREATE INDEX IF NOT EXISTS image_attachments_lookup ON image_attachments(conversation_id, owner, message_index)")
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS conversation_summary_versions ("
+            "owner TEXT NOT NULL, conversation_id TEXT NOT NULL, version INTEGER NOT NULL, "
+            "summary_json TEXT NOT NULL, created_at INTEGER NOT NULL, "
+            "PRIMARY KEY(owner,conversation_id,version))"
+        )
         self._db.commit()
         self._lock = Lock()
 
@@ -172,8 +179,37 @@ class ConversationStore:
         return [{"id": r[0], "title": r[1], "updated_at": r[2], "project": r[3]} for r in rows if project is None or r[3] == project]
 
     def put(self, conversation_id: str, history: list[dict[str, str]], owner: str = "admin", project: str = "") -> None:
-        payload = json.dumps(history, ensure_ascii=False)
-        with self._lock:
+        """Append-only message text, plus atomic versioned extractive summary.
+
+        Reject stale concurrent writers rather than silently losing conversation
+        turns. Existing metadata is retained when older clients omit it.
+        """
+        with self._lock, self._db:
+            existing = self._db.execute(
+                "SELECT history,owner FROM conversations WHERE id=?", (conversation_id,)
+            ).fetchone()
+            history = [dict(item) for item in history]
+            if existing:
+                if existing[1] != owner:
+                    raise ValueError("conversation_owner_mismatch")
+                old = json.loads(existing[0])
+                if len(history) < len(old) or any(
+                    item.get("role") != old_item.get("role")
+                    or item.get("content") != old_item.get("content")
+                    for item, old_item in zip(history, old)
+                ):
+                    raise ValueError("conversation_history_conflict")
+                for index, old_item in enumerate(old):
+                    for key, value in old_item.items():
+                        history[index].setdefault(key, value)
+            row = self._db.execute(
+                "SELECT version,summary_json FROM conversation_summary_versions "
+                "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
+                (owner, conversation_id),
+            ).fetchone()
+            previous = json.loads(row[1]) if row else None
+            summary = build_summary(history, previous)
+            payload = json.dumps(history, ensure_ascii=False)
             self._db.execute(
                 "INSERT INTO conversations(id, history, owner) VALUES(?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET history=excluded.history WHERE conversations.owner=excluded.owner",
@@ -185,7 +221,23 @@ class ConversationStore:
                 "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at WHERE conversation_index.owner=excluded.owner",
                 (conversation_id, title, int(time.time()), owner, project),
             )
-            self._db.commit()
+            if row is None or summary != previous:
+                self._db.execute(
+                    "INSERT INTO conversation_summary_versions(owner,conversation_id,version,summary_json,created_at) "
+                    "VALUES(?,?,?,?,?)",
+                    (owner, conversation_id, (row[0] + 1) if row else 1,
+                     json.dumps(summary, ensure_ascii=False), int(time.time())),
+                )
+
+    def get_summary(self, conversation_id: str, owner: str = "admin") -> dict | None:
+        """Latest owner-scoped summary; older versions remain auditable."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT version,summary_json FROM conversation_summary_versions "
+                "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
+                (owner, conversation_id),
+            ).fetchone()
+        return {"version": row[0], **json.loads(row[1])} if row else None
 
     def conversation_project(self, conversation_id: str, owner: str = "admin") -> str | None:
         row = self._db.execute(
@@ -208,6 +260,7 @@ class ConversationStore:
             cursor = self._db.execute("DELETE FROM conversations WHERE id=? AND owner=?", (conversation_id, owner))
             self._db.execute("DELETE FROM conversation_index WHERE id=? AND owner=?", (conversation_id, owner))
             self._db.execute("DELETE FROM image_attachments WHERE conversation_id=? AND owner=?", (conversation_id, owner))
+            self._db.execute("DELETE FROM conversation_summary_versions WHERE conversation_id=? AND owner=?", (conversation_id, owner))
             self._db.commit()
         return cursor.rowcount > 0
 
