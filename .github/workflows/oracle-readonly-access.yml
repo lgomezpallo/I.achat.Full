@@ -42,6 +42,10 @@ jobs:
             systemctl is-active router
             printf "Prisma="
             systemctl is-active prisma
+            printf "IAchat_APP_SHA256="
+            sha256sum /home/ubuntu/Proyecto/Aplicaciones/IAchat/iachat/app.py | cut -d " " -f1
+            printf "IAchat_GIT_HEAD="
+            git -C /home/ubuntu/Proyecto/Aplicaciones/IAchat rev-parse --short HEAD
             printf "IAchat_HTTP="
             curl -s -o /dev/null -w "%{http_code}\n" --max-time 3 http://127.0.0.1:8000/health
           '
