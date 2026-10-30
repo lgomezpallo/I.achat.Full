@@ -55,3 +55,46 @@ def test_vision_requires_explicit_model(monkeypatch):
     monkeypatch.delenv("GROQ_VISION_MODEL", raising=False)
     with pytest.raises(RuntimeError, match="vision_not_configured"):
         ProviderBackend().answer([{"role": "user", "content": "¿Qué ves?"}], images=["data:image/png;base64,AA=="])
+
+
+def test_retired_or_unavailable_models_use_free_fallbacks(monkeypatch):
+    # Matches stale Oracle settings; no retired or paid model may be attempted.
+    monkeypatch.setenv("GROQ_MODELS", "openai/gpt-oss-20b,llama-3.3-70b-versatile")
+    monkeypatch.setenv("OPENROUTER_MODELS", "dots-studio/dots-3-note-preview:free,openai/gpt-oss-20b:free")
+    groq = ProviderBackend._eligible_models(
+        "groq", ProviderBackend.PROVIDERS[0][3])
+    router = ProviderBackend._eligible_models(
+        "openrouter", ProviderBackend.PROVIDERS[1][3])
+    assert groq == ("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")
+    assert router == ("openrouter/free",)
+    assert "llama-3.3-70b-versatile" not in groq
+
+
+def test_stale_free_models_fall_back_without_paid_calls(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "fake")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake")
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_MODELS", "openai/gpt-oss-20b,llama-3.3-70b-versatile")
+    monkeypatch.setenv("OPENROUTER_MODELS", "openai/gpt-oss-20b:free")
+    attempted = []
+    class Response:
+        def __init__(self, status):
+            self.status_code = status
+        def json(self):
+            return {"choices": [{"message": {"content": "Respuesta gratuita"}}]}
+    def fake_post(url, **kwargs):
+        model = kwargs["json"]["model"]
+        attempted.append(model)
+        return Response(200 if model == "openai/gpt-oss-120b" else 429)
+    monkeypatch.setattr(backend.httpx, "post", fake_post)
+    answer = ProviderBackend().answer([{"role": "user", "content": "Hola"}])
+    assert answer == "Respuesta gratuita"
+    assert attempted == ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+    assert all(m in ProviderBackend.FREE_MODEL_ALLOWLIST["groq"] for m in attempted)
+
+
+def test_openrouter_only_zero_cost_router(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_MODELS", "openai/gpt-oss-20b:free,openai/gpt-oss-20b")
+    models = ProviderBackend._eligible_models(
+        "openrouter", ProviderBackend.PROVIDERS[1][3])
+    assert models == ("openrouter/free",)
