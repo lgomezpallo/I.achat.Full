@@ -296,6 +296,35 @@ def child() -> None:
             except (httpx.HTTPError, ValueError, TypeError) as exc:
                 print("MODEL_FILE_GENERATION_ERROR:", type(exc).__name__, flush=True)
                 failures.append("model_file_generation_error")
+            # Critical acceptance: create and download a real file from an
+            # ordinary authenticated chat message, without entering Files mode.
+            # This is a LIVE model decision and LIVE model-generated content.
+            try:
+                natural = client.post("/api/chat", json={
+                    "text": "Creá un archivo TXT descargable llamado natural-e2e.txt con el contenido exacto: Prueba IAchat natural OK."
+                })
+                natural_ok = natural.status_code == 200
+                if natural_ok:
+                    data = natural.json()
+                    file_info = data.get("generated_file")
+                    natural_ok = bool(
+                        isinstance(file_info, dict)
+                        and file_info.get("id")
+                        and file_info.get("name", "").endswith(".txt")
+                        and "/api/files/" in data.get("answer", "")
+                    )
+                    if natural_ok:
+                        fetched = client.get(f"/api/files/{file_info['id']}/download")
+                        natural_ok = (
+                            fetched.status_code == 200
+                            and b"Prueba IAchat natural OK" in fetched.content
+                        )
+                print("NATURAL_CHAT_FILE_DOWNLOAD:", "OK" if natural_ok else f"HTTP_{natural.status_code}", flush=True)
+                if not natural_ok:
+                    failures.append("natural_chat_file_failed")
+            except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+                print("NATURAL_CHAT_FILE_ERROR:", type(exc).__name__, flush=True)
+                failures.append("natural_chat_file_error")
             if failures:
                 raise AssertionError("E2E_FAILED:" + ",".join(failures))
             print("E2E_AUTH_WEB_CHAT_FILES: PASS", flush=True)
