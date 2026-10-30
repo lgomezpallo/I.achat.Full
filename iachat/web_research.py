@@ -106,6 +106,9 @@ def web_evidence_with_pages(query: str, *, news_fallback: bool = False) -> str:
         published_at = item.get("published_at_utc")
         if isinstance(published_at, str) and len(published_at) <= 40:
             record["rss_published_at_utc"] = published_at
+        publisher = item.get("rss_publisher")
+        if isinstance(publisher, str) and publisher.strip():
+            record["rss_publisher_unverified"] = publisher[:80]
         if url in by_url:
             record["page_excerpt_unverified"] = by_url[url].text[:MAX_EXCERPT_CHARS]
         # Keep the JSON complete even when hostile source text expands on
@@ -166,10 +169,14 @@ def extracted_source_links(evidence_text: str) -> list[dict[str, str]]:
                 or len(url) > 500 or url in seen):
             continue
         seen.add(url)
-        sources.append({"title": title[:180], "url": url, "evidence_type": (
+        source = {"title": title[:180], "url": url, "evidence_type": (
             "page_read" if isinstance(item.get("page_excerpt_unverified"), str)
             else "rss_snippet"
-        )})
+        )}
+        publisher = item.get("rss_publisher_unverified")
+        if isinstance(publisher, str) and publisher.strip():
+            source["rss_publisher_unverified"] = publisher[:80]
+        sources.append(source)
     return sources
 
 
