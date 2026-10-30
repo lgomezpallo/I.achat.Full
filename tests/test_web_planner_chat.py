@@ -181,3 +181,36 @@ def test_two_independent_questions_keep_evidence_separate(monkeypatch):
     assert "[EVIDENCIA PARA PREGUNTA 1: Cuándo juega River?]" in tool_message
     assert "[EVIDENCIA PARA PREGUNTA 2: cuándo corre la Fórmula 1?]" in tool_message
     assert tool_message.count("EVIDENCIA_WEB") == 2
+
+
+def test_two_topics_show_both_sources_and_keep_all_ten_on_reload(monkeypatch):
+    import json
+
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+
+    def fake_evidence(query, **kwargs):
+        topic = "river" if "River" in query else "f1"
+        return "Fecha de consulta: ahora. Datos EXTERNOS NO CONFIABLES en JSON:\n" + json.dumps([
+            {
+                "title": f"{topic} noticia {n}",
+                "url": f"https://example.com/{topic}/{n}",
+                "rss_snippet_unverified": "Noticia de prueba, no verificada",
+            }
+            for n in range(5)
+        ])
+
+    monkeypatch.setattr(web_research, "web_evidence_with_pages", fake_evidence)
+    response = client.post("/api/chat", json={
+        "text": "¿Cuándo juega River y cuándo corre la Fórmula 1?",
+    })
+    assert response.status_code == 200
+    data = response.json()
+    urls = [source["url"] for source in data["web_sources"]]
+    assert len(urls) == 10
+    # The UI shows the first three links; both questions must be represented.
+    assert "/river/" in urls[0] and "/f1/" in urls[1]
+    assert "/river/" in urls[2]
+    restored = client.get("/api/conversations/" + data["conversation_id"])
+    assert restored.status_code == 200
+    assert restored.json()["history"][-1]["web_sources"] == data["web_sources"]
