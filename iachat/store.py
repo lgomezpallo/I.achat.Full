@@ -185,6 +185,8 @@ class ConversationStore:
         turns. Existing metadata is retained when older clients omit it.
         """
         with self._lock, self._db:
+            # Serialize competing writers across SQLite connections/processes.
+            self._db.execute("BEGIN IMMEDIATE")
             existing = self._db.execute(
                 "SELECT history,owner FROM conversations WHERE id=?", (conversation_id,)
             ).fetchone()
