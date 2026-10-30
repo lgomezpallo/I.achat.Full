@@ -108,6 +108,9 @@ test -f "$stage/iachat/app.py"
 test -f "$stage/scripts/rollback_release.py"
 rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$app/" "$backup/"
+# Online SQLite snapshot before additive schema changes. Private and checked.
+sudo -n env IACHAT_DB_BACKUP_TARGET="$recovery_dir/database-before.sqlite3" \
+  /usr/bin/python3 "$stage/scripts/backup_iachat_db.py"
 deployed=1
 rsync -a --checksum --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$stage/" "$app/"
