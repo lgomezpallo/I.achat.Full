@@ -112,7 +112,9 @@ def test_long_conversation_recalls_start_middle_end_without_assistant_fabricatio
             {"role": "assistant", "content": "Respuesta de prueba, no es memoria."},
         ])
     module.store.put("long", history, "alice", "Atlas")
-    # Simulates a fresh process opening the same durable database weeks later.
+    # Simulate 21 days of inactivity, then a fresh process opening the same DB.
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE conversation_index SET updated_at=updated_at-21*86400 WHERE id=?", ("long",))
     module.store = ConversationStore(path)
     captured = []
 
