@@ -282,9 +282,9 @@ def handle(text, owner, backend, data, workspace):
     # An explicit data operation must not silently turn into a generic chat
     # answer because a free model returned invalid JSON or "none" once.
     explicit = bool(re.search(
-        r"\\b(crea|creame|crear|arma|armame|genera|generame|anota|anotame|registra|"
+        r"\b(crea|creame|crear|arma|armame|genera|generame|anota|anotame|registra|"
         r"registrame|agrega|agregame|carga|cargame|corrige|corregi|modifica|"
-        r"actualiza|borra|elimina|descarga|exporta)\\b", norm(text)
+        r"actualiza|borra|elimina|descarga|exporta)\b", norm(text)
     ))
     plan = None
     for attempt in range(2):
