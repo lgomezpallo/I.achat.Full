@@ -319,6 +319,20 @@ def test_research_labels_rss_publication_as_metadata_not_event_date(monkeypatch)
     assert "page_excerpt_unverified" not in data[0]
 
 
+def test_rss_publisher_is_exposed_but_not_marked_page_read(monkeypatch):
+    monkeypatch.setattr(research, "search_web", lambda query: [{
+        "title": "Agenda", "url": "https://news.google.com/rss/articles/abc",
+        "snippet": "Por verificar", "rss_publisher": "Diario Uno",
+    }])
+    monkeypatch.setattr(research, "read_pages", lambda urls, **kwargs: ())
+    evidence = research.web_evidence_with_pages("últimas novedades")
+    data = _payload(evidence)
+    assert data[0]["rss_publisher_unverified"] == "Diario Uno"
+    source = research.extracted_source_links(evidence)[0]
+    assert source["rss_publisher_unverified"] == "Diario Uno"
+    assert source["evidence_type"] == "rss_snippet"
+
+
 def test_research_does_not_invent_missing_publication_date(monkeypatch):
     monkeypatch.setattr(research, "search_web", lambda query: _results(1))
     monkeypatch.setattr(research, "read_pages", lambda urls, **kwargs: ())
