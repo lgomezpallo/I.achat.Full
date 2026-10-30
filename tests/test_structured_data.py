@@ -101,7 +101,7 @@ def test_ambiguous_edit_and_cross_owner_fail_closed(tmp_path):
     files=FileWorkspace(str(tmp_path/"data.db"))
     result=handle("corregí kilómetros a 300","alice",Ambiguous(),data,files)
     assert "No modifiqué" in result["answer"]
-    assert [r["values"]["Kilómetros"] for r in data.records("alice",cid)]==[120,240]
+    assert sorted(r["values"]["Kilómetros"] for r in data.records("alice",cid))==[120,240]
     assert data.collections("bob")==[]
     try:
         data.records("bob",cid)
