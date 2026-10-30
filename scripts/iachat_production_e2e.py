@@ -73,7 +73,8 @@ def launcher() -> None:
 def cleanup_account(db_path: str, username: str) -> None:
     with sqlite3.connect(db_path, timeout=20) as connection:
         for table in ("structured_records", "structured_collections", "workspace_files", "automatic_memory_log", "memories",
-                      "conversation_index", "conversations", "image_attachments"):
+                      "conversation_index", "conversations", "image_attachments",
+                      "conversation_summary_versions"):
             if connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
             ).fetchone():
