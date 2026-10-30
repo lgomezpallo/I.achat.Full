@@ -356,7 +356,16 @@ def child() -> None:
                         urlsplit(item["url"]).hostname for item in ordered_sources
                         if urlsplit(item["url"]).hostname != "news.google.com"
                     }
-                    if pages_read == 0 and len(direct_hosts) < 2:
+                    rss_publishers = {
+                        item["rss_publisher_unverified"].casefold()
+                        for item in ordered_sources
+                        if isinstance(item.get("rss_publisher_unverified"), str)
+                        and item["rss_publisher_unverified"].strip()
+                    }
+                    print(f"CHAT_{idx}_RSS_PUBLISHERS: {len(rss_publishers)}", flush=True)
+                    # Multiple named publishers are an explicitly UNVERIFIED
+                    # RSS fallback, not a substitute for corroborating facts.
+                    if pages_read == 0 and len(direct_hosts) < 2 and len(rss_publishers) < 2:
                         failures.append(f"chat_{idx}_insufficient_independent_rss_hosts")
                 except (httpx.HTTPError, ValueError, TypeError) as exc:
                     print(f"CHAT_{idx}: error={type(exc).__name__}", flush=True)

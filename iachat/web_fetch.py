@@ -158,13 +158,14 @@ def fetch_page(
         length = response.getheader("Content-Length")
         if length is not None:
             try:
-                if int(length) < 0 or int(length) > max_bytes:
-                    raise PageFetchError("page exceeds byte limit")
+                if int(length) < 0:
+                    raise PageFetchError("invalid content length")
             except ValueError as exc:
                 raise PageFetchError("invalid content length") from exc
-        payload = response.read(max_bytes + 1)
-        if len(payload) > max_bytes:
-            raise PageFetchError("page exceeds byte limit")
+        # Large editorial HTML documents commonly exceed the bounded budget.
+        # Extract only a safe prefix; never buffer the entire response or claim
+        # the excerpt represents a complete page.
+        payload = response.read(max_bytes + 1)[:max_bytes]
         return FetchedPage(url=url, content_type=response.getheader("Content-Type", ""), payload=payload)
     except (OSError, http.client.HTTPException) as exc:
         raise PageFetchError("page request failed") from exc

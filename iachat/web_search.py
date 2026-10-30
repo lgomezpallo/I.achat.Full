@@ -166,6 +166,11 @@ def _fetch_feed(url: str, params: dict[str, str], timeout: float) -> list[dict[s
             continue
         seen.add(link)
         record = {"title": title, "url": link, "snippet": snippet}
+        # Google News exposes the editorial publisher in RSS <source> even
+        # when the article URL is an opaque news.google.com proxy.
+        publisher = _clean_snippet(item.findtext("source") or "", 80)
+        if publisher:
+            record["rss_publisher"] = publisher
         published_at = _rss_publication_date(item.findtext("pubDate") or "")
         if published_at:
             record["published_at_utc"] = published_at
