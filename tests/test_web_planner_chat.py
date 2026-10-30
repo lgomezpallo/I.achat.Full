@@ -116,3 +116,17 @@ def test_chat_exposes_only_actual_https_web_sources(monkeypatch):
         {"title": "Nota consultada", "url": "https://example.com/noticia", "evidence_type": "rss_snippet"}
     ]
     assert response.json()["answer"] == "Respuesta de prueba"
+
+
+def test_google_account_conversational_probe_uses_one_answer_without_web(monkeypatch):
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    response = client.post("/api/chat", json={
+        "text": "Probando si anda IAchat con mi cuenta de mail",
+    })
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Respuesta de prueba"
+    assert response.json()["web_sources"] == []
+    assert searches == []
+    assert len(messages) == 1  # no extra LLM classifier call
+    assert not any("DATOS DE HERRAMIENTA WEB" in m["content"] for m in messages[0])

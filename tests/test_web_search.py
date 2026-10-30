@@ -328,7 +328,7 @@ def test_news_fallback_keeps_entity_match_without_temporal_words(monkeypatch):
     assert all("cinema.example.com" not in item["url"] for item in results)
 
 
-def test_irrelevant_direct_fallback_keeps_news_instead_of_padding_sources(monkeypatch):
+def test_irrelevant_news_and_direct_fallback_are_not_presented_as_sources(monkeypatch):
     calls = []
 
     def handler(request):
@@ -346,8 +346,7 @@ def test_irrelevant_direct_fallback_keeps_news_instead_of_padding_sources(monkey
     install_http(monkeypatch, handler)
     results = web_search.search_web("cotización dólar oficial Argentina hoy")
     assert calls == ["news.google.com", "www.bing.com", "www.bing.com"]
-    assert len(results) == 2
-    assert all(item["url"].startswith("https://news.google.com/") for item in results)
+    assert results == []  # neither news nor direct RSS matched the requested facts
 
 
 def test_direct_fallback_relevance_is_general_and_accent_insensitive():
@@ -455,3 +454,36 @@ def test_legacy_http_bing_click_wrapper_is_never_fetched_and_safe_target_is_http
     unsafe_port = "http://publisher.example.com:8080/private"
     wrapper = "http://www.bing.com/news/apiclick.aspx?url=" + quote(unsafe_port, safe="")
     assert web_search._bing_news_publisher_url(wrapper) == ""
+
+
+def test_primary_rss_rejects_irrelevant_chinese_results(monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.host)
+        return httpx.Response(200, content=rss(
+            ("WhatsApp 更新的中文消息", "https://zhihu.com/p/abc", "最新的中文内容和讨论"),
+            ("Actualización de requisitos ANSES octubre 2026",
+             "https://example.com/anses", "ANSES requisitos y calendario octubre 2026"),
+        ))
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("requisitos ANSES calendario octubre 2026", news_fallback=True)
+    assert calls == ["news.google.com"]
+    assert [item["url"] for item in results] == ["https://example.com/anses"]
+
+
+def test_primary_rss_rejects_long_query_without_content_overlap():
+    assert not web_search._plausibly_relevant(
+        {"title": "Noticias sobre WhatsApp", "snippet": "Actualización de aplicaciones"},
+        "requisitos ANSES calendario octubre 2026",
+    )
+    assert web_search._plausibly_relevant(
+        {"title": "ANSES calendario octubre 2026", "snippet": "Pagos y requisitos"},
+        "requisitos ANSES calendario octubre 2026",
+    )
+    # Explicit requests for another language may use that script.
+    assert web_search._plausibly_relevant(
+        {"title": "中文新闻资讯", "snippet": "中文网站和内容"},
+        "noticias en chino",
+    )

@@ -313,6 +313,37 @@ def child() -> None:
             print("AUTH_COOKIE_AND_FILE_ROUTES: OK", flush=True)
 
             failures = []
+            # The actual user-observed regression: a conversational Google
+            # account probe must never invoke web evidence or show RSS sources.
+            # One authenticated HTTP call uses a real allowlisted free model.
+            try:
+                probe_started = time.monotonic()
+                probe = paced_model_post(client, "/api/chat", json={
+                    "text": "Probando si anda IAchat con mi cuenta de mail",
+                })
+                probe_data = probe.json() if probe.status_code == 200 else {}
+                probe_answer = probe_data.get("answer", "")
+                probe_sources = probe_data.get("web_sources", [])
+                probe_ok = (
+                    probe.status_code == 200
+                    and isinstance(probe_answer, str) and bool(probe_answer.strip())
+                    and not GENERIC.search(probe_answer)
+                    and probe_sources == []
+                    and "Fuentes recuperadas" not in probe_answer
+                    and "https://" not in probe_answer
+                )
+                print(
+                    "GOOGLE_BANAL_CHAT_NO_WEB:",
+                    "OK" if probe_ok else f"HTTP_{probe.status_code}",
+                    "sources=" + str(len(probe_sources) if isinstance(probe_sources, list) else -1),
+                    "elapsed_ms=" + str(int((time.monotonic() - probe_started) * 1000)),
+                    flush=True,
+                )
+                if not probe_ok:
+                    failures.append("google_banal_chat_web_or_answer_regression")
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                print("GOOGLE_BANAL_CHAT_ERROR:", type(exc).__name__, flush=True)
+                failures.append("google_banal_chat_http_error")
             # Ordinary inference must work independently of web search.
             try:
                 normal = paced_model_post(client, "/api/chat", json={"text": "¿Cuánto es 7 por 8? Respondé con el resultado."})

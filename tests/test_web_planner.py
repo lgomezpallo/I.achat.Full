@@ -276,7 +276,8 @@ def test_indirect_request_classification_can_decline_browsing():
     assert plan_web_lookup_semantic(
         "Traducí cómo se dice buen día en italiano", (), classifier
     ).action == "answer"
-    assert classifier.calls == 1
+    # Translation is self-contained; no need to spend a model call classifying it.
+    assert classifier.calls == 0
 
 
 def test_semantic_accepts_only_strict_json_fences_from_free_models():
@@ -363,3 +364,25 @@ def test_short_clarification_does_not_turn_any_chat_into_web_search():
         user("¿Cuándo juega River?"), assistant("¿A cuál te referís?"),
         user("Otro tema"), assistant("¿Cuál?"),
     ]).action == "answer"
+
+
+def test_conversational_checks_do_not_spend_classifier_or_search():
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class NoModel:
+        def answer(self, messages):
+            raise AssertionError("a conversational check must use only the answer model")
+
+    for message in (
+        "Probando si anda IAchat con mi cuenta de mail",
+        "Estoy probando si me contestás",
+        "Testeando si funciona la aplicación",
+        "Hola",
+        "¿Podés responderme?",
+    ):
+        assert plan_web_lookup_semantic(message, (), NoModel()).action == "answer", message
+
+    # A genuinely changing fact is still searchable even with test-like phrasing.
+    assert plan_web_lookup(
+        "Probando si la cotización del dólar cambió hoy"
+    ).action == "search"

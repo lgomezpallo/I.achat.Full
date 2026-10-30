@@ -53,8 +53,21 @@ INFORMATIONAL_REQUEST = re.compile(
 # "Revisá cómo ...". This is a grammatical signal to ASK the semantic
 # classifier, never a domain keyword that directly authorizes browsing.
 INDIRECT_INFORMATION_REQUEST = re.compile(
-    r"^\s*\S+\s+(?:si|qu[eé]|cu[aá]nt[oa]s?|cu[aá]ndo|"
+    r"^\s*(?:averigu[aá]|confirm[aá](?:me)?|revis[aá]|verific[aá](?:me)?|"
+    r"comprob[aá](?:me)?|cheque[aá](?:me)?|consult[aá](?:me)?|"
+    r"decime|dime|indic[aá](?:me)?|f[ií]jate)\s+"
+    r"(?:si|qu[eé]|cu[aá]nt[oa]s?|cu[aá]ndo|"
     r"d[oó]nde|c[oó]mo|qui[eé]n)\b",
+    re.IGNORECASE,
+)
+
+# A message checking that the assistant responds is a conversation, not a
+# request for external facts. Do not spend a classifier/model call on it.
+# Current-information or explicit-search requests still take precedence.
+CONVERSATIONAL_CHECK = re.compile(
+    r"^\s*[¿¡]?\s*(?:(?:estoy\s+)?(?:probando|testeando|comprobando)\s+"
+    r"(?:si|que)\b|(?:hola|buenas)\s*[!.]*\s*$|"
+    r"(?:pod[eé]s|puedes)\s+(?:responder|contestar)(?:me)?\s*[?!.]*\s*$)",
     re.IGNORECASE,
 )
 
@@ -128,6 +141,10 @@ def plan_web_lookup(
         return WebLookupPlan("answer", reason="empty_or_attachment")
     if SELF_CONTAINED_TRANSFORMATION.match(question):
         return WebLookupPlan("answer", reason="self_contained_text")
+    if CONVERSATIONAL_CHECK.match(question) and not (
+        needs_current_information(question) or EXPLICIT_SEARCH.search(question)
+    ):
+        return WebLookupPlan("answer", reason="conversational_check")
     if needs_current_information(question):
         return WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "current_question")
     if EXPLICIT_SEARCH.search(question):
@@ -203,7 +220,7 @@ def plan_web_lookup_semantic(
     """
     fallback = plan_web_lookup(message, history, has_attachments=has_attachments)
     if (has_attachments or not message.strip()
-            or fallback.reason in ("self_contained_text", "explicit_search")):
+            or fallback.reason in ("self_contained_text", "explicit_search", "conversational_check")):
         return fallback
     # Only informational questions need an additional model call. Preserve
     # direct chat/imperatives and personal-history recall as one-call tasks.
