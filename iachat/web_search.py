@@ -8,6 +8,7 @@ from __future__ import annotations
 import html
 import ipaddress
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -138,6 +139,43 @@ def _fetch_feed(url: str, params: dict[str, str], timeout: float) -> list[dict[s
     return results
 
 
+
+# Only for the *secondary* general RSS fallback, which sometimes returns
+# unrelated pages even though the primary news RSS matched the query.
+# This is a conservative information-retrieval guard, not a topic classifier
+# or evidence verification. It never filters the primary news results.
+_SEARCH_FILLER = frozenset({
+    "como", "cuando", "donde", "cual", "cuales", "para", "sobre",
+    "esta", "este", "estos", "estas", "with", "from", "what",
+    "when", "where", "about", "the", "that", "today",
+})
+
+
+def _search_terms(text: str) -> set[str]:
+    plain = "".join(
+        char for char in unicodedata.normalize("NFKD", text.casefold())
+        if not unicodedata.combining(char)
+    )
+    return {
+        term for term in re.findall(r"[^\\W_]+", plain)
+        if len(term) >= 4 and term not in _SEARCH_FILLER
+    }
+
+
+def _relevant_direct_fallback(item: dict[str, str], query: str) -> bool:
+    """Reject unrelated generic RSS hits before mixing them with news evidence.
+
+    Token overlap is only a retrieval sanity check; it never certifies a
+    claim, a date, a publisher, or whether a page was actually readable.
+    """
+    query_terms = _search_terms(query)
+    if not query_terms:
+        return False
+    result_terms = _search_terms(item.get("title", "") + " " + item.get("snippet", ""))
+    required = 3 if len(query_terms) >= 5 else 2 if len(query_terms) >= 2 else 1
+    return len(query_terms & result_terms) >= required
+
+
 def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False) -> list[dict[str, str]]:
     """Try general RSS first; optionally use a news-only fallback.
 
@@ -181,6 +219,7 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
                     direct = [
                         item for item in _fetch_feed(bing[0], bing[1], bounded_timeout)
                         if urlsplit(item["url"]).hostname != "news.google.com"
+                        and _relevant_direct_fallback(item, query)
                     ]
                 except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError):
                     direct = []
