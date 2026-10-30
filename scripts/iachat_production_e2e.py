@@ -245,6 +245,41 @@ def child() -> None:
                 print("OFFICE_DOWNLOAD:", filename.rsplit(".", 1)[-1], "OK" if ok else "FAILED", flush=True)
                 if not ok:
                     failures.append("office_" + filename.rsplit(".", 1)[-1] + "_failed")
+            # Real HTTP document analysis: one inference with DOCX and XLSX.
+            # The markers are synthetic and never disclose production data.
+            try:
+                import base64
+                from io import BytesIO
+                from docx import Document
+                from openpyxl import Workbook
+                doc = Document()
+                doc.add_paragraph("Código del documento: LUCERO-482")
+                doc_buffer = BytesIO()
+                doc.save(doc_buffer)
+                book = Workbook()
+                book.active.append(["concepto", "codigo"])
+                book.active.append(["referencia", "MATE-731"])
+                xlsx_buffer = BytesIO()
+                book.save(xlsx_buffer)
+                attachment_response = client.post("/api/chat", json={
+                    "text": "Leé los dos documentos adjuntos y decime los dos códigos que aparecen, sin inventar otros.",
+                    "attachments": [
+                        {"name": "prueba.docx", "content_base64": base64.b64encode(doc_buffer.getvalue()).decode()},
+                        {"name": "prueba.xlsx", "content_base64": base64.b64encode(xlsx_buffer.getvalue()).decode()},
+                    ],
+                })
+                attachment_answer = attachment_response.json().get("answer", "") if attachment_response.status_code == 200 else ""
+                attachment_ok = (
+                    attachment_response.status_code == 200
+                    and "LUCERO-482" in attachment_answer.upper()
+                    and "MATE-731" in attachment_answer.upper()
+                )
+                print("DOCX_XLSX_CHAT_ANALYSIS:", "OK" if attachment_ok else f"HTTP_{attachment_response.status_code}", flush=True)
+                if not attachment_ok:
+                    failures.append("docx_xlsx_chat_analysis_failed")
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                print("DOCX_XLSX_CHAT_ANALYSIS_ERROR:", type(exc).__name__, flush=True)
+                failures.append("docx_xlsx_chat_analysis_error")
             # Model-generated file: real authenticated provider inference.
             try:
                 generated = client.post("/api/files/generate", json={
