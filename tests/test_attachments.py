@@ -17,6 +17,31 @@ class AttachmentsTest(unittest.TestCase):
         text, _ = extract([file("doc.md", b"# Titulo")])
         self.assertIn("# Titulo", text)
 
+    def test_docx_and_xlsx_extract(self):
+        import io
+        from docx import Document
+        from openpyxl import Workbook
+        document = Document()
+        document.add_heading("Informe", 1)
+        document.add_paragraph("Reparación de sumidero")
+        docx_data = io.BytesIO()
+        document.save(docx_data)
+        text, names = extract([file("informe.docx", docx_data.getvalue())])
+        self.assertIn("Reparación de sumidero", text)
+        self.assertEqual(names, ["informe.docx"])
+        book = Workbook()
+        book.active.append(["obra", "estado"])
+        book.active.append(["123", "pendiente"])
+        xlsx_data = io.BytesIO()
+        book.save(xlsx_data)
+        text, names = extract([file("planilla.xlsx", xlsx_data.getvalue())])
+        self.assertIn("123 | pendiente", text)
+        self.assertEqual(names, ["planilla.xlsx"])
+
+    def test_reject_corrupt_office_file(self):
+        with self.assertRaises(AttachmentError):
+            extract([file("falso.docx", b"not-a-zip")])
+
     def test_unsupported(self):
         with self.assertRaises(AttachmentError):
             extract([file("private.exe", b"abc")])
