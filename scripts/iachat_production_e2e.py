@@ -13,6 +13,7 @@ from pathlib import Path
 import pwd
 import re
 import secrets
+import time
 import sqlite3
 import subprocess
 import sys
@@ -234,6 +235,25 @@ def stage_evidence(question: str) -> tuple[int, set[str]]:
     return len(sources), sources
 
 
+# Live free-provider checks should not consume a minute's shared quota in
+# a burst. Pace actual authenticated HTTP calls; keep all assertions and
+# never retry a mutation that may have committed before an error response.
+_last_model_response_at = 0.0
+
+
+def paced_model_post(session, path, **kwargs):
+    global _last_model_response_at
+    if _last_model_response_at:
+        delay = max(0.0, 20.0 - (time.monotonic() - _last_model_response_at))
+        if delay:
+            print("E2E_FREE_PROVIDER_PACING: waiting", round(delay, 1), "s", flush=True)
+            time.sleep(delay)
+    try:
+        return session.post(path, **kwargs)
+    finally:
+        _last_model_response_at = time.monotonic()
+
+
 def child() -> None:
     import httpx
     from iachat.store import ConversationStore
@@ -295,7 +315,7 @@ def child() -> None:
             failures = []
             # Ordinary inference must work independently of web search.
             try:
-                normal = client.post("/api/chat", json={"text": "¿Cuánto es 7 por 8? Respondé con el resultado."})
+                normal = paced_model_post(client, "/api/chat", json={"text": "¿Cuánto es 7 por 8? Respondé con el resultado."})
                 normal_answer = normal.json().get("answer", "") if normal.status_code == 200 else ""
                 normal_ok = normal.status_code == 200 and "56" in normal_answer
                 print("NORMAL_CHAT:", "OK" if normal_ok else f"HTTP_{normal.status_code}", flush=True)
@@ -309,7 +329,7 @@ def child() -> None:
                 if not count:
                     failures.append(f"web_{idx}_no_sources")
                 try:
-                    response = client.post("/api/chat", json={"text": question})
+                    response = paced_model_post(client, "/api/chat", json={"text": question})
                     data = response.json() if response.status_code == 200 else {}
                     answer = data.get("answer", "")
                     # The actual chat response carries the exact consulted links;
@@ -438,7 +458,7 @@ def child() -> None:
                 book.active.append(["referencia", "MATE-731"])
                 xlsx_buffer = BytesIO()
                 book.save(xlsx_buffer)
-                attachment_response = client.post("/api/chat", json={
+                attachment_response = paced_model_post(client, "/api/chat", json={
                     "text": "Leé los dos documentos adjuntos y decime los dos códigos que aparecen, sin inventar otros.",
                     "attachments": [
                         {"name": "prueba.docx", "content_base64": base64.b64encode(doc_buffer.getvalue()).decode()},
@@ -459,7 +479,7 @@ def child() -> None:
                 failures.append("docx_xlsx_chat_analysis_error")
             # Model-generated file: real authenticated provider inference.
             try:
-                generated = client.post("/api/files/generate", json={
+                generated = paced_model_post(client, "/api/files/generate", json={
                     "instruction": "Creá un archivo llamado resumen-e2e.txt cuyo contenido sea exactamente: Prueba IAchat OK."
                 })
                 generated_ok = generated.status_code == 201
@@ -485,7 +505,7 @@ def child() -> None:
                 ok = False
                 status_code = 0
                 try:
-                    response = client.post("/api/chat", json={"text": instruction})
+                    response = paced_model_post(client, "/api/chat", json={"text": instruction})
                     status_code = response.status_code
                     if response.status_code == 200:
                         payload = response.json()
@@ -518,7 +538,7 @@ def child() -> None:
             # user and a non-financial collection. Only synthetic test accounts.
             try:
                 def data_chat(session, prompt):
-                    response = session.post("/api/chat", json={"text": prompt})
+                    response = paced_model_post(session, "/api/chat", json={"text": prompt})
                     if response.status_code != 200:
                         raise AssertionError("structured_chat_http_" + str(response.status_code))
                     return response.json()
@@ -605,7 +625,7 @@ def child() -> None:
             # This is a LIVE model decision and LIVE model-generated content.
             natural_file_id = None
             try:
-                natural = client.post("/api/chat", json={
+                natural = paced_model_post(client, "/api/chat", json={
                     "text": "Creá un archivo TXT descargable llamado natural-e2e.txt con el contenido exacto: Prueba IAchat natural OK."
                 })
                 natural_ok = natural.status_code == 200
@@ -637,7 +657,7 @@ def child() -> None:
             # second file or merely claim to have edited it in chat.
             if natural_file_id:
                 try:
-                    edited = client.post("/api/chat", json={
+                    edited = paced_model_post(client, "/api/chat", json={
                         "text": (
                             "Editá el archivo natural-e2e.txt que acabás de crear. "
                             "Conservá el contenido anterior y agregá al final una "
