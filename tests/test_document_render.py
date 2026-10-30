@@ -53,3 +53,31 @@ def test_authenticated_downloads_and_cross_user_isolation(monkeypatch, tmp_path)
             assert client.get(f"/api/files/{file_id}/download").status_code == 404
             client.post("/auth/logout")
             client.post("/auth/login", json={"username": "alice", "password": "password123"})
+
+
+def test_excel_safe_formula_allowlist_and_numeric_cells():
+    from iachat.document_render import ensure_spreadsheet_auto_total
+    content = ensure_spreadsheet_auto_total(
+        "Fecha,Concepto,Categoría,Importe\n"
+        "2026-10-30,Comida,Alimentos,125.50\n"
+    )
+    excel, _ = render_download("gastos.xlsx", content)
+    sheet = load_workbook(BytesIO(excel)).active
+    assert sheet["D2"].value == 125.5 and sheet["D2"].data_type == "n"
+    assert sheet["D102"].value == "=SUM(D2:D101)" and sheet["D102"].data_type == "f"
+    assert sheet["A102"].value == "TOTAL"
+    assert sheet.parent.calculation.calcMode == "auto"
+
+    injected = (
+        "concepto,importe\n"
+        "Seguro,12\n"
+        'Inyección,"=HYPERLINK(""https://example.org"",""x"")"\n'
+        "Agregado,=SUMA(B2:B3)\n"
+        "Inseguro,=1+1\n"
+    )
+    data, _ = render_download("safe.xlsx", injected)
+    other = load_workbook(BytesIO(data)).active
+    assert other["B2"].value == 12 and other["B2"].data_type == "n"
+    assert other["B3"].data_type == "s"
+    assert other["B4"].value == "=SUM(B2:B3)" and other["B4"].data_type == "f"
+    assert other["B5"].value == "=1+1" and other["B5"].data_type == "s"
