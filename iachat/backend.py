@@ -1,6 +1,10 @@
 from __future__ import annotations
 import os
+import logging
 import httpx
+
+logger = logging.getLogger("iachat.free_providers")
+
 
 class RouterFirstBackend:
     """Strict Router transport. Never claim Router success from a direct-provider fallback."""
@@ -177,6 +181,11 @@ class ProviderBackend:
                         json={"model": model, "messages": prepared, "stream": False},
                         timeout=self.timeout_s,
                     )
+                    if response.status_code != 200:
+                        # Status-only diagnostics; never log keys, headers, prompts or responses.
+                        # Model identifiers are restricted by FREE_MODEL_ALLOWLIST.
+                        logger.warning("IACHAT_PROVIDER_DIAG provider=%s model=%s status=%s",
+                                       name, model, response.status_code)
                     if response.status_code in (401, 403):
                         break
                     if response.status_code in (408, 429, 500, 502, 503, 504):
@@ -188,7 +197,13 @@ class ProviderBackend:
                     answer = result["choices"][0]["message"]["content"]
                     if isinstance(answer, str) and answer.strip():
                         return answer.strip()
-                except (httpx.RequestError, ValueError, KeyError, IndexError, TypeError):
+                    logger.warning("IACHAT_PROVIDER_DIAG provider=%s model=%s status=empty_answer",
+                                   name, model)
+                except (httpx.RequestError, ValueError, KeyError, IndexError, TypeError) as exc:
+                    # Class name only, no exception message: URLs or response data
+                    # could otherwise disclose credentials or private prompts.
+                    logger.warning("IACHAT_PROVIDER_DIAG provider=%s model=%s status=exception_%s",
+                                   name, model, type(exc).__name__)
                     temporary_failure = True
                     continue
         if images and not attempted and any(os.getenv(env, "").strip() for _, env, _, _ in self.PROVIDERS):
