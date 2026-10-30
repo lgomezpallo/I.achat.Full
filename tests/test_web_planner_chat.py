@@ -214,3 +214,32 @@ def test_two_topics_show_both_sources_and_keep_all_ten_on_reload(monkeypatch):
     restored = client.get("/api/conversations/" + data["conversation_id"])
     assert restored.status_code == 200
     assert restored.json()["history"][-1]["web_sources"] == data["web_sources"]
+
+
+def test_semantic_web_rewrite_with_zero_sources_retries_original(monkeypatch):
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+
+    class Rewriter:
+        def answer(self, prompt):
+            if prompt[0]["role"] == "system" and "clasificador" in prompt[0]["content"].lower():
+                return '{"action":"search","query":"novedades institucionales ambiguas"}'
+            messages.append(prompt)
+            return "Respuesta de prueba con fuente"
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: Rewriter())
+
+    def evidence(query, **kwargs):
+        searches.append(query)
+        if query == "novedades institucionales ambiguas":
+            return "No hubo resultados disponibles."
+        return ('Datos EXTERNOS NO CONFIABLES en JSON:\n'
+                '[{"title":"Noticia","url":"https://example.com/anses",'
+                '"rss_snippet_unverified":"Nota de prueba"}]')
+
+    monkeypatch.setattr(web_research, "web_evidence_with_pages", evidence)
+    question = "¿Cuáles son las novedades de ANSES de esta semana?"
+    response = client.post("/api/chat", json={"text": question})
+    assert response.status_code == 200
+    assert searches == ["novedades institucionales ambiguas", question]
+    assert response.json()["web_sources"][0]["url"] == "https://example.com/anses"
