@@ -267,16 +267,16 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
                     if direct:
                         break
                 if direct:
-                    # Two or more current-news snippets are retained even when
-                    # the generic feed offers many results. Distinct publishers
-                    # can then be attempted by the bounded HTTPS page reader.
+                    # Keep a news-feed snippet as a fallback when original publishers
+                    # block reading, but offer up to four direct publishers
+                    # to the bounded HTTPS page reader.
                     unique = []
                     seen = {item["url"] for item in results}
                     for item in direct:
                         if item["url"] not in seen:
                             seen.add(item["url"])
                             unique.append(item)
-                        if len(unique) == 3:
+                        if len(unique) == 4:
                             break
                     if unique:
                         return results[:MAX_RESULTS - len(unique)] + unique
