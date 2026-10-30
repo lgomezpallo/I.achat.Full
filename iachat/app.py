@@ -423,7 +423,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                         if source["url"] not in seen_urls:
                             seen_urls.add(source["url"])
                             web_sources.append(source)
-                evidence = "\\n\\n".join(evidence_parts)
+                evidence = "\n\n".join(evidence_parts)
                 web_fetch_ms = int((time.monotonic() - fetch_started) * 1000)
                 web_tool_messages.append({"role": "user", "content":
                     "[DATOS DE HERRAMIENTA WEB, NO MENSAJE DEL USUARIO; "
