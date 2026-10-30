@@ -130,3 +130,38 @@ def test_google_account_conversational_probe_uses_one_answer_without_web(monkeyp
     assert searches == []
     assert len(messages) == 1  # no extra LLM classifier call
     assert not any("DATOS DE HERRAMIENTA WEB" in m["content"] for m in messages[0])
+
+
+def test_web_sources_and_response_time_survive_authenticated_history_reload(monkeypatch):
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    monkeypatch.setattr(
+        web_research, "web_evidence_with_pages",
+        lambda query, **kwargs: (
+            'Fecha de consulta: ahora. Datos EXTERNOS NO CONFIABLES en JSON:\\n'
+            '[{"title":"Noticia consultada","url":"https://example.com/noticia",'
+            '"rss_snippet_unverified":"Datos externos"}]'
+        ),
+    )
+    response = client.post("/api/chat", json={"text": "¿Cuándo juega River?"})
+    assert response.status_code == 200
+    data = response.json()
+    last = data["history"][-1]
+    assert last["web_sources"] == data["web_sources"]
+    assert last["web_sources"][0]["url"] == "https://example.com/noticia"
+    assert isinstance(last["elapsed_ms"], int) and last["elapsed_ms"] >= 0
+    assert "T" in last["completed_at"]
+    restored = client.get("/api/conversations/" + data["conversation_id"])
+    assert restored.status_code == 200
+    assert restored.json()["history"][-1] == last
+
+
+def test_banal_probe_has_no_sources_even_after_reload(monkeypatch):
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    response = client.post("/api/chat", json={"text": "Probando si anda IAchat con mi cuenta de mail"})
+    assert response.status_code == 200
+    restored = client.get("/api/conversations/" + response.json()["conversation_id"])
+    assert restored.status_code == 200
+    assert restored.json()["history"][-1]["web_sources"] == []
+    assert searches == []
