@@ -108,3 +108,37 @@ def web_evidence_with_pages(query: str, *, news_fallback: bool = False) -> str:
         "Citá solamente las URLs presentes cuando sustenten la respuesta."
     )
     return (prefix + body + suffix)
+
+
+def extracted_source_links(evidence_text: str) -> list[dict[str, str]]:
+    """Expose only the URLs actually returned by this request's bounded search.
+
+    This is source metadata, not a claim that a source corroborates the answer.
+    Invalid, missing and non-HTTPS links are never presented as references.
+    """
+    try:
+        start = evidence_text.index("[")
+        records, _ = json.JSONDecoder().raw_decode(evidence_text[start:])
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(records, list):
+        return []
+    sources: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in records[:MAX_RESULTS]:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        title = item.get("title")
+        if not isinstance(url, str) or not isinstance(title, str):
+            continue
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            continue
+        if (parsed.scheme != "https" or not parsed.hostname
+                or len(url) > 500 or url in seen):
+            continue
+        seen.add(url)
+        sources.append({"title": title[:180], "url": url})
+    return sources
