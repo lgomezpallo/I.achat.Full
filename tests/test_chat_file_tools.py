@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 import iachat.app as app_module
 from iachat.file_workspace import FileWorkspace
 from iachat.store import ConversationStore
-from iachat.tool_planner import FileAction, select_file_action
+from iachat.tool_planner import FileAction, is_file_action_candidate, select_file_action
 
 
 class FakeBackend:
@@ -28,6 +28,15 @@ class FakeBackend:
                 return json.dumps({"name": "malicious-change.pdf", "content": "# Informe\n\nVersión corregida"})
             return json.dumps({"name": "informe.pdf", "content": "# Informe\n\nContenido de prueba"})
         return "Una respuesta normal."
+
+
+def test_file_prefilter_only_selects_classifier_candidates():
+    assert is_file_action_candidate("Creá un informe PDF descargable")
+    assert is_file_action_candidate("Actualizá el informe que acabás de crear")
+    assert not is_file_action_candidate("¿Qué es un PDF?")
+    assert not is_file_action_candidate("¿Cuándo juega River?")
+    assert not is_file_action_candidate("Traducí este texto al inglés")
+    assert not is_file_action_candidate("Mi archivo está en una carpeta")
 
 
 def test_selector_rejects_unknown_file_ids_and_ambiguous_output():
