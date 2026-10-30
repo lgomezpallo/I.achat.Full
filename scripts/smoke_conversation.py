@@ -62,14 +62,16 @@ def run(live: bool = False):
             assert Path(module.__file__).resolve().is_relative_to(source_root), "live smoke imported deployed IAchat rather than the development tree"
         previous_store = module.store
         previous_backend = module.get_backend
-        previous_signed_user = module._signed_user
+        old_secret = os.environ.get("IACHAT_AUTH_SECRET")
+        os.environ["IACHAT_AUTH_SECRET"] = "isolated-smoke-only-secret"
         module.store = ConversationStore(str(database))
         module.store.create_user("smoke", "temporary-only-password")
-        module._signed_user = lambda cookie: "smoke"
         if not live:
             module.get_backend = lambda: FakeBackend()
         try:
-            with TestClient(module.app) as client:
+            with TestClient(module.app, base_url="https://testserver") as client:
+                login = client.post("/auth/login", json={"username": "smoke", "password": "temporary-only-password"})
+                assert login.status_code == 200, "isolated authenticated smoke login failed"
                 first = client.post("/api/chat", json={
                     "text": "Tengo una bicicleta azul. La guardo en el balcón."
                 })
@@ -195,7 +197,10 @@ def run(live: bool = False):
         finally:
             module.store = previous_store
             module.get_backend = previous_backend
-            module._signed_user = previous_signed_user
+            if old_secret is None:
+                os.environ.pop("IACHAT_AUTH_SECRET", None)
+            else:
+                os.environ["IACHAT_AUTH_SECRET"] = old_secret
             if old_db_setting is None:
                 os.environ.pop("IACHAT_DB", None)
             else:
