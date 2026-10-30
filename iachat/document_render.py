@@ -203,6 +203,8 @@ def _render_xlsx(content: str) -> bytes:
     sheet.freeze_panes = "A2"
     widths: list[int] = []
     numeric_columns: set[int] = set()
+    formula_columns = {i for row in csv.reader(StringIO(content, newline=""), strict=True)
+                       for i, value in enumerate(row, 1) if _safe_formula(value)}
     try:
         reader = csv.reader(StringIO(content, newline=""), strict=True)
         for row_number, row in enumerate(reader, 1):
@@ -212,7 +214,7 @@ def _render_xlsx(content: str) -> bytes:
                 numeric_columns = {
                     i for i, header in enumerate(row, 1)
                     if _NUMERIC_HEADER.search(header)
-                }
+                } | formula_columns
             for column_number, value in enumerate(row, 1):
                 if len(value) > 32767:
                     raise WorkspaceError("spreadsheet_cell_too_large")
