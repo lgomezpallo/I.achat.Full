@@ -253,7 +253,7 @@ def test_opaque_google_news_links_use_bounded_bing_direct_publisher_fallback(mon
     install_http(monkeypatch, handler)
     results = web_search.search_web("¿Cuándo juega River?")
     assert calls == ["news.google.com", "www.bing.com"]
-    assert len(results) == 4
+    assert len(results) == 5
     assert [x["url"] for x in results][-2:] == [
         "https://publisher.example/story", "https://other.example/story"
     ]
