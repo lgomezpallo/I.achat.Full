@@ -264,6 +264,28 @@ def test_opaque_google_news_links_use_only_relevant_direct_publisher_fallback(mo
     assert results[0]["title"] == "News 0"
 
 
+def test_four_direct_publishers_can_be_attempted_before_opaque_proxies(monkeypatch):
+    """One blocked publisher must not exhaust all page candidates."""
+    def handler(request):
+        if request.url.host == "news.google.com":
+            return httpx.Response(200, content=rss(*[
+                (f"Google {i}", f"https://news.google.com/rss/articles/{i}", "River Plate próximo partido fecha horario")
+                for i in range(5)
+            ]))
+        return httpx.Response(200, content=rss(*[
+            (f"River Plate próximo partido fecha horario {i}",
+             f"https://publisher{i}.example.com/river",
+             "River Plate próximo partido fecha horario confirmado por fuente")
+            for i in range(5)
+        ]))
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("River Plate próximo partido fecha horario", news_fallback=True)
+    assert len(results) == 5
+    assert sum("publisher" in item["url"] for item in results) == 4
+    assert sum("news.google.com" in item["url"] for item in results) == 1
+
+
 def test_irrelevant_direct_fallback_keeps_news_instead_of_padding_sources(monkeypatch):
     calls = []
 
