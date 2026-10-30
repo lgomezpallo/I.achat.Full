@@ -276,7 +276,8 @@ def test_indirect_request_classification_can_decline_browsing():
     assert plan_web_lookup_semantic(
         "Traducí cómo se dice buen día en italiano", (), classifier
     ).action == "answer"
-    assert classifier.calls == 1
+    # Translation is self-contained; no need to spend a model call classifying it.
+    assert classifier.calls == 0
 
 
 def test_semantic_accepts_only_strict_json_fences_from_free_models():
