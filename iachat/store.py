@@ -120,12 +120,38 @@ class ConversationStore:
         row = self._db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()
         return row is not None
 
-    def get(self, conversation_id: str, owner: str = "admin") -> list[dict[str, str]] | None:
+    def get(self, conversation_id: str, owner: str = "admin") -> list[dict[str, object]] | None:
         row = self._db.execute("SELECT history FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()
         if not row:
             return None
         data = json.loads(row[0])
-        return [{"role": str(item["role"]), "content": str(item["content"])} for item in data]
+        history: list[dict[str, object]] = []
+        for item in data:
+            record: dict[str, object] = {
+                "role": str(item["role"]), "content": str(item["content"]),
+            }
+            if record["role"] == "assistant":
+                sources = item.get("web_sources")
+                if isinstance(sources, list):
+                    # These URLs were obtained by the server-side web tool;
+                    # never reconstruct references from the model's prose.
+                    record["web_sources"] = [
+                        {key: source[key] for key in (
+                            "title", "url", "evidence_type", "rss_publisher_unverified"
+                        ) if isinstance(source.get(key), str)}
+                        for source in sources[:5]
+                        if isinstance(source, dict)
+                        and isinstance(source.get("url"), str)
+                        and source["url"].startswith("https://")
+                    ]
+                duration = item.get("elapsed_ms")
+                if isinstance(duration, int) and not isinstance(duration, bool) and 0 <= duration <= 900000:
+                    record["elapsed_ms"] = duration
+                completed = item.get("completed_at")
+                if isinstance(completed, str) and len(completed) <= 40 and "T" in completed:
+                    record["completed_at"] = completed
+            history.append(record)
+        return history
 
     def images_for_conversation(self, conversation_id: str, owner: str = "admin") -> list[dict]:
         rows = self._db.execute("SELECT message_index, filename, data_url FROM image_attachments WHERE conversation_id=? AND owner=? ORDER BY message_index,id", (conversation_id, owner)).fetchall()
