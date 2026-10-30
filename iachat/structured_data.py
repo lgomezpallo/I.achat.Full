@@ -50,8 +50,24 @@ def clean_values(fields, raw):
             raise DataError("invalid_value")
         if field["type"] == "number":
             try:
-                number = float(str(value).replace(" ", "").replace(",", "."))
-            except ValueError as exc:
+                if isinstance(value, (int, float)):
+                    number = float(value)
+                else:
+                    # Locale-safe numeric text from free models. Treat valid
+                    # thousands groups as grouping, not decimal fractions;
+                    # reject malformed groups instead of guessing.
+                    numeric = str(value).strip().replace(" ", "").replace("\u00a0", "")
+                    numeric = numeric.removeprefix("$")
+                    if re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:\.\d{3})+(?:,\d+)?", numeric):
+                        numeric = numeric.replace(".", "").replace(",", ".")
+                    elif re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:,\d{3})+(?:\.\d+)?", numeric):
+                        numeric = numeric.replace(",", "")
+                    elif not re.fullmatch(r"[+-]?\d+(?:[.,]\d+)?", numeric):
+                        raise ValueError("invalid_number")
+                    else:
+                        numeric = numeric.replace(",", ".")
+                    number = float(numeric)
+            except (ValueError, OverflowError) as exc:
                 raise DataError("invalid_number") from exc
             if not -1e12 <= number <= 1e12:
                 raise DataError("number_out_of_range")
@@ -197,6 +213,7 @@ POLICY = (
     'Exportar: {"action":"export","collection_id":"id real"}. '
     'Nada: {"action":"none"}. '
     "IDs SOLO de la lista. No inventes IDs, SQL, fechas, montos. "
+    "En campos numéricos devolvé números JSON sin separadores de miles: 40000, no 40.000. "
     "Usá la fecha argentina provista para hoy. Categorías evidentes pueden inferirse "
     "semánticamente, pero nunca inventes importes. Para corrección sin ID no elijas "
     "arbitrariamente entre varios registros: la herramienta desambigua. "
