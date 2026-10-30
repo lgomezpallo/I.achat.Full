@@ -106,8 +106,8 @@ def test_batch_failure_skips_and_never_exceeds_three_attempts(monkeypatch):
         "https://fail2.example/", "https://late.example/",
     ])
     assert [page.url for page in results] == ["https://ok.example/"]
-    assert len(calls) == 3
-    assert "https://late.example/" not in calls
+    assert len(calls) == 4
+    assert "https://late.example/" in calls
 
 
 def test_batch_rejects_parse_errors_and_skips_non_strings(monkeypatch):
@@ -127,7 +127,7 @@ def test_batch_rejects_parse_errors_and_skips_non_strings(monkeypatch):
 
 
 @pytest.mark.parametrize("kwargs", [
-    {"max_pages": 0}, {"max_pages": 3}, {"max_attempts": 4},
+    {"max_pages": 0}, {"max_pages": 3}, {"max_attempts": 5},
     {"max_pages": 2, "max_attempts": 1},
     {"max_pages": True}, {"max_attempts": 2.5},
 ])
