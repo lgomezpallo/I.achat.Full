@@ -64,12 +64,21 @@ rollback() {
       rollback_ok=0
       echo "::error::Previous IAchat service could not be restarted."
     fi
-    # Health alone cannot prove rollback: all restore operations must succeed.
-    if [[ "$rollback_ok" -eq 1 && "$config_restored" -eq 1 ]] && sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 10 http://127.0.0.1:8000/health >/dev/null; then
+    # systemctl restart can return before Uvicorn binds its socket. Wait for
+    # actual readiness instead of declaring rollback broken on the first curl.
+    rollback_ready=0
+    for attempt in $(seq 1 25); do
+      if sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 3 http://127.0.0.1:8000/health >/dev/null 2>&1; then
+        rollback_ready=1
+        break
+      fi
+      sleep 1
+    done
+    if [[ "$rollback_ok" -eq 1 && "$config_restored" -eq 1 && "$rollback_ready" -eq 1 ]]; then
       echo "Rollback health: OK (inference not verified)"
     else
       rollback_incomplete=1
-      echo "::error::Rollback health check failed; manual recovery required."
+      echo "::error::Rollback health check failed after 25 attempts; manual recovery required."
     fi
   fi
   if [[ "$rollback_incomplete" -eq 1 ]]; then
