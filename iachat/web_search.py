@@ -164,8 +164,41 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
     for url, params in sources:
         try:
             results = _fetch_feed(url, params, bounded_timeout)
-            if results:
-                return results
+            if not results:
+                continue
+            # Google News currently exposes opaque /rss/articles/ links that
+            # usually redirect. The SSRF-safe page reader deliberately does
+            # not follow redirects, so five such links yield zero page text.
+            # Try the already-approved general RSS endpoint once for direct
+            # publisher URLs, keeping news snippets as primary evidence.
+            # Never follow or decode a Google redirect, or trust its target.
+            if url == GOOGLE_NEWS_RSS and all(
+                urlsplit(item["url"]).hostname == "news.google.com"
+                and urlsplit(item["url"]).path.startswith(("/rss/articles/", "/articles/"))
+                for item in results
+            ):
+                try:
+                    direct = [
+                        item for item in _fetch_feed(bing[0], bing[1], bounded_timeout)
+                        if urlsplit(item["url"]).hostname != "news.google.com"
+                    ]
+                except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError):
+                    direct = []
+                if direct:
+                    # Two or more current-news snippets are retained even when
+                    # the generic feed offers many results. Distinct publishers
+                    # can then be attempted by the bounded HTTPS page reader.
+                    unique = []
+                    seen = {item["url"] for item in results}
+                    for item in direct:
+                        if item["url"] not in seen:
+                            seen.add(item["url"])
+                            unique.append(item)
+                        if len(unique) == 3:
+                            break
+                    if unique:
+                        return results[:MAX_RESULTS - len(unique)] + unique
+            return results
         except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError):
             continue
     return []

@@ -232,3 +232,47 @@ def test_semantic_current_query_without_date_prefers_free_news(monkeypatch):
     results = web_search.search_web("requisitos habilitación comercial", news_fallback=True)
     assert calls == ["news.google.com"]
     assert results[0]["url"] == "https://example.com/tramite"
+
+
+def test_opaque_google_news_links_use_bounded_bing_direct_publisher_fallback(monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.host)
+        if request.url.host == "news.google.com":
+            return httpx.Response(200, content=rss(*[
+                (f"News {i}", f"https://news.google.com/rss/articles/{i}", f"Snippet {i}")
+                for i in range(5)
+            ]))
+        return httpx.Response(200, content=rss(
+            ("Direct 1", "https://publisher.example/story", "Publisher excerpt"),
+            ("Direct 2", "https://other.example/story", "Other excerpt"),
+            ("Duplicate", "https://publisher.example/story", "Repeat"),
+        ))
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("¿Cuándo juega River?")
+    assert calls == ["news.google.com", "www.bing.com"]
+    assert len(results) == 4
+    assert [x["url"] for x in results][-2:] == [
+        "https://publisher.example/story", "https://other.example/story"
+    ]
+    assert results[0]["title"] == "News 0"
+
+
+def test_opaque_news_fallback_failure_preserves_news_snippets(monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.host)
+        if request.url.host == "news.google.com":
+            return httpx.Response(200, content=rss(
+                ("News", "https://news.google.com/rss/articles/opaque", "Snippet")
+            ))
+        return httpx.Response(503)
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("cotización hoy")
+    assert calls == ["news.google.com", "www.bing.com"]
+    assert len(results) == 1
+    assert results[0]["title"] == "News"

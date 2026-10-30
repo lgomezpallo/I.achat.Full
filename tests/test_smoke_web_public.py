@@ -18,7 +18,7 @@ def test_public_web_smoke_covers_domains_and_reads_a_page():
 
     def read(urls, *, max_pages, max_attempts, timeout):
         assert urls == ["https://example.org/article"]
-        assert (max_pages, max_attempts, timeout) == (1, 2, 3.0)
+        assert (max_pages, max_attempts, timeout) == (1, 3, 3.0)
         return (object(),)
 
     outcomes = smoke.probe_public_web(search=search, read=read)

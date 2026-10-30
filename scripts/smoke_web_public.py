@@ -23,7 +23,7 @@ def probe_public_web(*, search=search_web, read=read_pages, queries=QUERIES):
     for domain, query in queries:
         results = search(query, timeout=6.0, news_fallback=True)
         urls = [item["url"] for item in results if isinstance(item, dict) and isinstance(item.get("url"), str)]
-        pages = read(urls, max_pages=1, max_attempts=2, timeout=3.0) if urls else ()
+        pages = read(urls, max_pages=1, max_attempts=3, timeout=3.0) if urls else ()
         hosts = {urlsplit(url).hostname for url in urls}
         outcome = {
             "domain": domain,
