@@ -77,6 +77,8 @@ def test_short_clarification_triggers_real_chat_web_path(monkeypatch):
 
     class ClarifyingBackend:
         def answer(self, prompt):
+            if prompt[0]["role"] == "system" and "clasificador" in prompt[0]["content"].lower():
+                return '{"action":"search","query":"River Plate próximo partido"}'
             messages.append(prompt)
             return ("¿A qué entidad te referís?" if len(messages) == 1
                     else "Respuesta de prueba")
