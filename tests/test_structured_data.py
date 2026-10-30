@@ -243,3 +243,32 @@ def test_semantic_query_retries_empty_selection_without_inventing_ids(tmp_path):
     result = handle("¿cuántos kilómetros del vehículo utilitario?", "alice", planner, data, files)
     assert "120" in result["answer"]
     assert planner.semantic_calls == 2
+
+
+def test_explicit_numeric_query_retries_free_model_none(tmp_path):
+    from iachat.structured_data import handle
+    db = str(tmp_path / "retry-sum.db")
+    data = StructuredStore(db)
+    files = FileWorkspace(db)
+    collection = data.create("alice", "flota", [
+        {"name": "Unidad", "type": "text"},
+        {"name": "Kilómetros", "type": "number"},
+    ])
+    data.add("alice", collection["id"], {"Unidad": "Fiorino", "Kilómetros": 120})
+
+    class UnsteadyPlanner:
+        calls = 0
+
+        def answer(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"action":"none"}'
+            return json.dumps({
+                "action": "query", "collection_id": collection["id"],
+                "aggregate": "sum", "field": "Kilómetros", "filters": {},
+            })
+
+    planner = UnsteadyPlanner()
+    result = handle("¿cuánto suman los kilómetros?", "alice", planner, data, files)
+    assert "120" in result["answer"]
+    assert planner.calls == 2
