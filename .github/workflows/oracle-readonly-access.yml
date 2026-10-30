@@ -1,0 +1,45 @@
+name: Oracle read-only SSH diagnostic
+on:
+  push:
+    branches: ["ops/oracle-access-check-20261030"]
+    paths: [".github/workflows/oracle-readonly-access.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: oracle-production
+    steps:
+      - name: Verify pinned Oracle host and connect
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          trap 'rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts' EXIT
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts
+          actual="$(ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | awk '{print $2}' | head -1)"
+          expected="SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI"
+          test "$actual" = "$expected" || { echo "Oracle host fingerprint mismatch"; exit 1; }
+          chmod 600 ~/.ssh/known_hosts
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" '
+            set -eu
+            printf "SSH_CONNECTION=OK\n"
+            printf "IAchat="
+            systemctl is-active iachat
+            printf "Router="
+            systemctl is-active router
+            printf "Prisma="
+            systemctl is-active prisma
+            printf "IAchat_HTTP="
+            curl -s -o /dev/null -w "%{http_code}\n" --max-time 3 http://127.0.0.1:8000/health
+          '
