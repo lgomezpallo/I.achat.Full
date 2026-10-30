@@ -233,3 +233,26 @@ def test_bounded_summary_prioritizes_late_correction_over_old_quotes():
     assert "Corrijo: la variante final del proyecto es azul." in rendered
     assert "variante 49" in rendered
     assert render_summary(build_summary(history), max_chars=100) == ""
+
+
+def test_legacy_summary_rebuilds_from_full_transcript_to_restore_early_anchor():
+    history = [
+        {"role": "user", "content": "Decidimos conservar la decisión más antigua."},
+        *[
+            {"role": "user", "content": f"Decidimos cambiar el detalle número {i}."}
+            for i in range(160)
+        ],
+    ]
+    full = build_summary(history)
+    # Emulate a v1 summary that retained only the latest events.
+    legacy = {
+        "processed_count": full["processed_count"],
+        "prefix_hash": full["prefix_hash"],
+        "items": full["items"][-119:],
+    }
+    assert legacy["items"][0]["source_index"] != 0
+    migrated = build_summary(history, legacy)
+    assert migrated["format_version"] == 2
+    assert migrated["items"][0]["source_index"] == 0
+    assert "decisión más antigua" in render_summary(migrated)
+    assert build_summary(history, migrated) == migrated
