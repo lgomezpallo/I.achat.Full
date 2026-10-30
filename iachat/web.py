@@ -65,7 +65,7 @@ async function syncHistory(){var r=await fetch('/api/conversations?project='+enc
 
 /* Markdown is rendered with DOM text nodes, never by injecting model HTML. */
 function inlineMd(parent,value){
- var pattern=/(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g;
+ var pattern=/(\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\((?:https?:\/\/[^\s)]+|\/api\/files\/[a-f0-9-]{36}\/download)\))/g;
  var last=0,match;
  while((match=pattern.exec(value))!==null){
   if(match.index>last)parent.append(document.createTextNode(value.slice(last,match.index)));
@@ -73,9 +73,10 @@ function inlineMd(parent,value){
   if(token.startsWith('**')){element=document.createElement('strong');element.textContent=token.slice(2,-2)}
   else if(token.startsWith('`')){element=document.createElement('code');element.textContent=token.slice(1,-1)}
   else{
-   var parts=/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(token);
+   var parts=/^\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/api\/files\/[a-f0-9-]{36}\/download)\)$/.exec(token);
    element=document.createElement('a');element.textContent=parts[1];element.href=parts[2];
-   element.target='_blank';element.rel='noopener noreferrer';
+   if(parts[2].startsWith('/api/files/'))element.setAttribute('download','');
+   else{element.target='_blank';element.rel='noopener noreferrer'}
   }
   parent.append(element);last=pattern.lastIndex;
  }
