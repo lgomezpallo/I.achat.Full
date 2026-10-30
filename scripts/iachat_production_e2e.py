@@ -80,13 +80,14 @@ def cleanup_account(db_path: str, username: str) -> None:
 
 
 def stage_evidence(question: str) -> tuple[int, set[str]]:
-    from iachat.web_planner import plan_web_lookup
+    from iachat.web_planner import plan_web_lookup_semantic
     from iachat.web_research import web_evidence_with_pages
-    plan = plan_web_lookup(question, [])
-    print("PLANNER:", plan.action, plan.reason, flush=True)
+    from iachat.backend import ProviderBackend
+    plan = plan_web_lookup_semantic(question, [], ProviderBackend())
+    print("PLANNER:", plan.action, plan.reason, "query=", repr(plan.query[:160]), flush=True)
     if plan.action != "search":
         raise AssertionError("planner_skipped_current_question")
-    evidence = web_evidence_with_pages(question, news_fallback=True)
+    evidence = web_evidence_with_pages(plan.query, news_fallback=True)
     sources: set[str] = set()
     try:
         start = evidence.index("[")
