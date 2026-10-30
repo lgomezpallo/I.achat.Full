@@ -123,19 +123,23 @@ def test_redirect_is_not_followed():
     {"Content-Type": "application/pdf"},
     {"Content-Type": "image/png"},
     {"Content-Type": "text/html", "Content-Encoding": "gzip"},
-    {"Content-Type": "text/html", "Content-Length": "999999"},
     {"Content-Type": "text/html", "Content-Length": "invalid"},
 ])
-def test_rejects_unsupported_or_oversized_headers(headers):
+def test_rejects_unsupported_headers(headers):
     FakeConnection.response = FakeResponse(headers=headers)
     with pytest.raises(wf.PageFetchError):
         wf.fetch_page("https://example.com/")
 
 
-def test_rejects_stream_exceeding_limit_even_without_content_length():
-    FakeConnection.response = FakeResponse(body=b"x" * 501)
-    with pytest.raises(wf.PageFetchError, match="byte limit"):
-        wf.fetch_page("https://example.com/", max_bytes=500)
+def test_large_html_is_read_as_bounded_prefix():
+    FakeConnection.response = FakeResponse(
+        body=b"x" * 501,
+        headers={"Content-Type": "text/html", "Content-Length": "999999"},
+    )
+    result = wf.fetch_page("https://example.com/", max_bytes=500)
+    assert result.payload == b"x" * 500
+    assert len(FakeConnection.instances) == 1
+    assert FakeConnection.instances[0].closed
 
 
 @pytest.mark.parametrize("kwargs", [
