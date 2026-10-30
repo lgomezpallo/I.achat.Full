@@ -12,7 +12,7 @@ import unicodedata
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 import httpx
 
@@ -93,10 +93,26 @@ def _bing_news_publisher_url(link: str) -> str:
     """
     try:
         parsed = urlsplit(link)
-        if (parsed.scheme == "https" and parsed.hostname in ("www.bing.com", "bing.com")
+        if (parsed.scheme in ("http", "https")
+                and parsed.hostname in ("www.bing.com", "bing.com")
                 and parsed.path == "/news/apiclick.aspx"):
             candidates = parse_qs(parsed.query, keep_blank_values=True).get("url", [])
-            return candidates[0] if len(candidates) == 1 else ""
+            if len(candidates) != 1:
+                return ""
+            destination = candidates[0]
+            if _public_https_link(destination):
+                return destination
+            # Some Bing News feeds still publish HTTP article links. Never
+            # request HTTP or follow the click wrapper: upgrade only a plain
+            # public hostname to HTTPS and let the pinned-IP TLS fetcher
+            # validate the actual destination. Failed HTTPS stays unread.
+            target = urlsplit(destination)
+            if (target.scheme == "http" and target.port is None
+                    and target.username is None and target.password is None):
+                upgraded = urlunsplit(("https", target.netloc, target.path,
+                                      target.query, target.fragment))
+                return upgraded if _public_https_link(upgraded) else ""
+            return ""
     except ValueError:
         return ""
     return link
