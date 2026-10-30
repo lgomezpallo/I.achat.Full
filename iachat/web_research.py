@@ -41,6 +41,31 @@ def _prioritize_distinct_hosts(urls: list[str]) -> list[str]:
     return first_hosts + repeated_hosts
 
 
+def _prefer_readable_sources(results: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Try direct publishers before opaque Google News article proxies.
+
+    The Google News entries remain useful as labelled RSS snippets, but the
+    no-redirect HTTPS reader cannot extract their pages. A direct publisher
+    result has a chance to supply actual page text within the same strict
+    three-attempt budget. This is transport ordering, not a claim of quality
+    or factual correctness.
+    """
+    direct: list[dict[str, str]] = []
+    opaque: list[dict[str, str]] = []
+    for item in results:
+        url = str(item.get("url", ""))
+        try:
+            parsed = urlsplit(url)
+            is_opaque = (
+                parsed.hostname == "news.google.com"
+                and parsed.path.startswith(("/rss/articles/", "/articles/"))
+            )
+        except ValueError:
+            is_opaque = False
+        (opaque if is_opaque else direct).append(item)
+    return direct + opaque
+
+
 def web_evidence_with_pages(query: str, *, news_fallback: bool = False) -> str:
     """Search once and read at most two public HTTPS pages (three attempts).
 
@@ -51,7 +76,7 @@ def web_evidence_with_pages(query: str, *, news_fallback: bool = False) -> str:
     query = query.strip()[:300]
     # A semantic search can require fresh evidence even when its rewritten
     # query has no temporal keywords. Preserve the news-only RSS fallback.
-    results = (search_web(query, news_fallback=True) if news_fallback else search_web(query))[:MAX_RESULTS] if query else []
+    results = _prefer_readable_sources((search_web(query, news_fallback=True) if news_fallback else search_web(query))[:MAX_RESULTS]) if query else []
     if not results:
         return (
             f"Fecha de consulta: {now}. Se intentó una búsqueda web, pero no hubo "
@@ -140,5 +165,8 @@ def extracted_source_links(evidence_text: str) -> list[dict[str, str]]:
                 or len(url) > 500 or url in seen):
             continue
         seen.add(url)
-        sources.append({"title": title[:180], "url": url})
+        sources.append({"title": title[:180], "url": url, "evidence_type": (
+            "page_read" if isinstance(item.get("page_excerpt_unverified"), str)
+            else "rss_snippet"
+        )})
     return sources
