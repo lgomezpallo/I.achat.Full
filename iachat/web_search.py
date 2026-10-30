@@ -12,7 +12,7 @@ import unicodedata
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
@@ -49,6 +49,7 @@ RSS_HEADERS = {
 }
 # Fixed public endpoints only; never construct a request URL from RSS content.
 BING_RSS = "https://www.bing.com/search"
+BING_NEWS_RSS = "https://www.bing.com/news/search"
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
 
 
@@ -82,6 +83,23 @@ def _public_https_link(link: str) -> bool:
             return True
     except ValueError:
         return False
+
+
+def _bing_news_publisher_url(link: str) -> str:
+    """Unwrap only Bing News' known click wrapper; never follow its redirect.
+
+    The embedded URL is untrusted feed data. The ordinary public-HTTPS
+    validator still runs before any URL can be returned or fetched.
+    """
+    try:
+        parsed = urlsplit(link)
+        if (parsed.scheme == "https" and parsed.hostname in ("www.bing.com", "bing.com")
+                and parsed.path == "/news/apiclick.aspx"):
+            candidates = parse_qs(parsed.query, keep_blank_values=True).get("url", [])
+            return candidates[0] if len(candidates) == 1 else ""
+    except ValueError:
+        return ""
+    return link
 
 
 def _clean_snippet(value: str, limit: int) -> str:
@@ -125,6 +143,8 @@ def _fetch_feed(url: str, params: dict[str, str], timeout: float) -> list[dict[s
     for item in root.findall(".//channel/item")[:20]:
         title = _clean_snippet(item.findtext("title") or "", 180)
         link = (item.findtext("link") or "").strip()
+        if url == BING_NEWS_RSS:
+            link = _bing_news_publisher_url(link)
         snippet = _clean_snippet(item.findtext("description") or "", 450)
         if not title or not _public_https_link(link) or link in seen:
             continue
@@ -177,11 +197,12 @@ def _relevant_direct_fallback(item: dict[str, str], query: str) -> bool:
 
 
 def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False) -> list[dict[str, str]]:
-    """Try general RSS first; optionally use a news-only fallback.
+    """Use general RSS for evergreen search, news RSS for current information.
 
     The semantic planner can identify a current question whose rewritten
     search query has no temporal words. It explicitly opts into this fallback.
-    At most two public requests, no paid APIs or invented search results.
+    At most three public requests (Google News, Bing News, general RSS),
+    no paid APIs or invented search results.
     """
     query = query.strip()[:300]
     if not query:
@@ -195,10 +216,11 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
     # even with HTTP 200, which previously suppressed the relevant fallback.
     # This is a source-order decision, not a topic-specific language heuristic.
     bing = (BING_RSS, {"q": query, "format": "rss"})
+    bing_news = (BING_NEWS_RSS, {"q": query, "format": "rss", "setmkt": "es-AR"})
     news = (GOOGLE_NEWS_RSS, {
         "q": query, "hl": "es-419", "gl": "AR", "ceid": "AR:es-419",
     })
-    sources = [news, bing] if needs_current_information(query) or news_fallback else [bing]
+    sources = [news, bing_news, bing] if needs_current_information(query) or news_fallback else [bing]
     for url, params in sources:
         try:
             results = _fetch_feed(url, params, bounded_timeout)
@@ -207,22 +229,27 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
             # Google News currently exposes opaque /rss/articles/ links that
             # usually redirect. The SSRF-safe page reader deliberately does
             # not follow redirects, so five such links yield zero page text.
-            # Try the already-approved general RSS endpoint once for direct
-            # publisher URLs, keeping news snippets as primary evidence.
-            # Never follow or decode a Google redirect, or trust its target.
+            # Try the keyless Bing News RSS feed for direct publisher URLs,
+            # keeping Google News snippets as primary evidence. Bing News
+            # click wrappers expose a URL parameter; validate it as an
+            # untrusted candidate and never follow any redirect.
             if url == GOOGLE_NEWS_RSS and all(
                 urlsplit(item["url"]).hostname == "news.google.com"
                 and urlsplit(item["url"]).path.startswith(("/rss/articles/", "/articles/"))
                 for item in results
             ):
-                try:
-                    direct = [
-                        item for item in _fetch_feed(bing[0], bing[1], bounded_timeout)
-                        if urlsplit(item["url"]).hostname != "news.google.com"
-                        and _relevant_direct_fallback(item, query)
-                    ]
-                except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError):
-                    direct = []
+                direct = []
+                for secondary_url, secondary_params in (bing_news, bing):
+                    try:
+                        direct = [
+                            item for item in _fetch_feed(secondary_url, secondary_params, bounded_timeout)
+                            if urlsplit(item["url"]).hostname != "news.google.com"
+                            and _relevant_direct_fallback(item, query)
+                        ]
+                    except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError):
+                        direct = []
+                    if direct:
+                        break
                 if direct:
                     # Two or more current-news snippets are retained even when
                     # the generic feed offers many results. Distinct publishers

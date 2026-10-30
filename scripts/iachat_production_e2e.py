@@ -89,6 +89,7 @@ def stage_evidence(question: str) -> tuple[int, set[str]]:
         raise AssertionError("planner_skipped_current_question")
     evidence = web_evidence_with_pages(plan.query, news_fallback=True)
     sources: set[str] = set()
+    pages_read = 0
     try:
         start = evidence.index("[")
         records, _ = json.JSONDecoder().raw_decode(evidence[start:])
@@ -96,9 +97,14 @@ def stage_evidence(question: str) -> tuple[int, set[str]]:
             url = item.get("url")
             if isinstance(url, str) and urlsplit(url).scheme == "https":
                 sources.add(url)
+            if isinstance(item.get("page_excerpt_unverified"), str):
+                pages_read += 1
     except (ValueError, TypeError, KeyError):
         pass
-    print("WEB_EVIDENCE:", "sources", len(sources), "bytes", len(evidence.encode("utf-8")), flush=True)
+    direct_publishers = sum(urlsplit(url).hostname != "news.google.com" for url in sources)
+    print("WEB_EVIDENCE:", "sources", len(sources),
+          "direct_publishers", direct_publishers, "pages_read", pages_read,
+          "bytes", len(evidence.encode("utf-8")), flush=True)
     print("WEB_SOURCE_HOSTS:", ",".join(sorted({urlsplit(u).hostname or "" for u in sources})[:5]), flush=True)
     return len(sources), sources
 
