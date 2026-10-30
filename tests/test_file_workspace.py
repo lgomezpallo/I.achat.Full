@@ -51,7 +51,7 @@ def test_authenticated_file_generation_download_and_edit(monkeypatch, tmp_path):
                 return json.dumps({"name": "wrong-name.md", "content": "# Modificado"})
             return json.dumps({"name": "informe.md", "content": "# Informe\nTexto real"})
     monkeypatch.setattr(app_module, "get_backend", lambda: FakeBackend())
-    with TestClient(app_module.app) as client:
+    with TestClient(app_module.app, base_url="https://testserver") as client:
         assert client.get("/api/files").status_code == 401
         assert client.post("/auth/login", json={"username":"alice","password":"password123"}).status_code == 200
         created = client.post("/api/files/generate", json={"instruction":"Generá un informe breve"})
