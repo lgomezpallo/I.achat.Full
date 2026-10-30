@@ -14,7 +14,7 @@ from .web_content import MAX_TEXT_CHARS, extract_page_text
 from .web_fetch import PageFetchError, fetch_page
 
 MAX_PAGES = 2
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 4
 MAX_CANDIDATES = 10
 
 
@@ -51,7 +51,7 @@ def read_pages(
     max_attempts: int = MAX_ATTEMPTS,
     timeout: float = 5.0,
 ) -> tuple[ReadPage, ...]:
-    """Read at most two distinct pages, trying at most three candidate URLs.
+    """Read at most two distinct pages, trying at most four candidate URLs.
 
     Individual fetch/parse failures are skipped. No URL is retried, no
     redirect is followed, and a failed page does not count as evidence.
