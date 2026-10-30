@@ -23,6 +23,24 @@ def install_http(monkeypatch, handler):
     monkeypatch.setattr(web_search.httpx, "Client", mock_client)
 
 
+def test_opaque_google_news_retains_explicit_rss_publisher(monkeypatch):
+    def handler(request):
+        return httpx.Response(200, content=(
+            b"<rss><channel><item><title>Agenda</title>"
+            b"<link>https://news.google.com/rss/articles/abc</link>"
+            b"<description>Fecha por verificar</description>"
+            b"<source url='https://diario.example.com'>Diario Uno</source>"
+            b"</item></channel></rss>"
+        ))
+
+    install_http(monkeypatch, handler)
+    results = web_search._fetch_feed(
+        web_search.GOOGLE_NEWS_RSS, {"q": "agenda"}, 2.0
+    )
+    assert results[0]["rss_publisher"] == "Diario Uno"
+    assert results[0]["url"].startswith("https://news.google.com/")
+
+
 def test_bing_general_search_no_news_request(monkeypatch):
     calls = []
 
