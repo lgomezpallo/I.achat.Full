@@ -16,14 +16,14 @@ _MONTHS = {
     "noviembre": 11, "diciembre": 12,
 }
 _DATE = re.compile(
-    r"\\b([0-3]?\\d)\\s+de\\s+"
+    r"\b([0-3]?\d)\s+de\s+"
     r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
     r"septiembre|setiembre|octubre|noviembre|diciembre)"
-    r"\\s+(?:de\\s+)?(20\\d{2})\\b", re.I
+    r"\s+(?:de\s+)?(20\d{2})\b", re.I
 )
 _NEXT_RACE = re.compile(
-    r"(?:pr[oó]xim[ao]\\s+(?:carrera|gran\\s+premio|gp)|"
-    r"siguiente\\s+(?:carrera|gran\\s+premio|gp))", re.I
+    r"(?:pr[oó]xim[ao]\s+(?:carrera|gran\s+premio|gp)|"
+    r"siguiente\s+(?:carrera|gran\s+premio|gp))", re.I
 )
 
 
@@ -35,8 +35,8 @@ def reject_stale_next_event_answer(question: str, answer: str, *,
     context elsewhere. If detected, suppress the untrustworthy response:
     preserving other claims would risk repeating the stale event in summaries.
     """
-    if not re.search(r"pr[oó]xim[ao]\\s+carrera|cu[aá]ndo\\s+corre|"
-                     r"pr[oó]xim[ao]\\s+(?:gp|gran\\s+premio)", question, re.I):
+    if not re.search(r"pr[oó]xim[ao]\s+carrera|cu[aá]ndo\s+corre|"
+                     r"pr[oó]xim[ao]\s+(?:gp|gran\s+premio)", question, re.I):
         return answer
     today = today or datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).date()
     section = _NEXT_RACE.search(answer)
