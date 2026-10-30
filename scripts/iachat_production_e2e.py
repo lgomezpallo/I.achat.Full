@@ -58,6 +58,7 @@ def launcher() -> None:
     if not python.is_file():
         raise RuntimeError("production_virtualenv_missing")
     service_env["PYTHONPATH"] = str(ROOT)
+    service_env["IACHAT_E2E_EXPECTED_APP_SHA256"] = os.getenv("IACHAT_E2E_EXPECTED_APP_SHA256", "")
     os.chdir(cwd)
     os.initgroups(user.pw_name, user.pw_gid)
     os.setgid(user.pw_gid)
@@ -89,8 +90,7 @@ def stage_evidence(question: str) -> tuple[int, set[str]]:
     sources: set[str] = set()
     try:
         start = evidence.index("[")
-        end = evidence.index("]", start) + 1
-        records = json.loads(evidence[start:end])
+        records, _ = json.JSONDecoder().raw_decode(evidence[start:])
         for item in records:
             url = item.get("url")
             if isinstance(url, str) and urlsplit(url).scheme == "https":
