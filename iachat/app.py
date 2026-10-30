@@ -518,6 +518,28 @@ def generate_workspace_file(payload: FileGenerateInput, request: Request):
             raise HTTPException(404, "file_not_found")
         if len(existing["content"]) > 30000:
             raise HTTPException(422, "file_too_large_to_edit")
+    # When the user explicitly enumerates spreadsheet columns, the structure
+    # is fully specified. Build it directly instead of gambling on the free
+    # model's JSON, headings or file extension. Other requests still use the
+    # existing generator. This is format-general, not expense-specific.
+    if not existing and re.search(r"(?i)\b(?:excel|xlsx)\b", payload.instruction):
+        from .document_render import (
+            explicit_spreadsheet_columns, spreadsheet_needs_auto_total,
+            ensure_spreadsheet_auto_total,
+        )
+        columns = explicit_spreadsheet_columns(payload.instruction)
+        if columns:
+            import csv
+            from io import StringIO
+            buffer = StringIO(newline="")
+            csv.writer(buffer, lineterminator="\n").writerow(columns)
+            content = buffer.getvalue()
+            try:
+                if spreadsheet_needs_auto_total(payload.instruction):
+                    content = ensure_spreadsheet_auto_total(content)
+                return file_workspace.save(owner, "planilla.xlsx", content)
+            except WorkspaceError as exc:
+                _file_error(exc)
     guidance = (
         "Sos un generador y editor de documentos. Respondé EXCLUSIVAMENTE un objeto JSON "
         "válido con dos campos string: name y content. No uses Markdown alrededor del JSON. "
