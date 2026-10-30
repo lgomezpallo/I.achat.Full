@@ -148,6 +148,17 @@ def child() -> None:
             print("AUTH_COOKIE_AND_FILE_ROUTES: OK", flush=True)
 
             failures = []
+            # Ordinary inference must work independently of web search.
+            try:
+                normal = client.post("/api/chat", json={"text": "¿Cuánto es 7 por 8? Respondé con el resultado."})
+                normal_answer = normal.json().get("answer", "") if normal.status_code == 200 else ""
+                normal_ok = normal.status_code == 200 and "56" in normal_answer
+                print("NORMAL_CHAT:", "OK" if normal_ok else f"HTTP_{normal.status_code}", flush=True)
+                if not normal_ok:
+                    failures.append("normal_chat_failed")
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                print("NORMAL_CHAT_ERROR:", type(exc).__name__, flush=True)
+                failures.append("normal_chat_http_error")
             for idx, question in enumerate(QUESTIONS, 1):
                 count, sources = stage_evidence(question)
                 if not count:
