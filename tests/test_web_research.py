@@ -55,6 +55,50 @@ def test_prefers_distinct_hosts_within_three_page_attempts(monkeypatch):
     assert "Una página leída NO" in evidence
 
 
+def test_readable_publishers_precede_opaque_news_and_have_provenance(monkeypatch):
+    """The three real page attempts must not be wasted on opaque news URLs."""
+    results = [
+        {"title": "Google A", "url": "https://news.google.com/rss/articles/abc", "snippet": "A"},
+        {"title": "Google B", "url": "https://news.google.com/articles/def", "snippet": "B"},
+        {"title": "Diario A", "url": "https://publisher.example.org/story", "snippet": "C"},
+        {"title": "Diario B", "url": "https://other.example.net/story", "snippet": "D"},
+    ]
+    monkeypatch.setattr(research, "search_web", lambda query: results)
+    attempted = []
+
+    def fake_read(urls, **kwargs):
+        attempted.extend(urls)
+        return (ReadPage("https://publisher.example.org/story", "Texto extraído"),)
+
+    monkeypatch.setattr(research, "read_pages", fake_read)
+    evidence = research.web_evidence_with_pages("próximo evento")
+    records = _payload(evidence)
+    assert attempted[:2] == [
+        "https://publisher.example.org/story",
+        "https://other.example.net/story",
+    ]
+    assert [item["title"] for item in records] == [
+        "Diario A", "Diario B", "Google A", "Google B",
+    ]
+    sources = research.extracted_source_links(evidence)
+    assert sources[0] == {
+        "title": "Diario A",
+        "url": "https://publisher.example.org/story",
+        "evidence_type": "page_read",
+    }
+    assert sources[1]["evidence_type"] == "rss_snippet"
+    assert sources[2]["evidence_type"] == "rss_snippet"
+
+
+def test_direct_google_news_url_is_not_mistaken_for_opaque_proxy():
+    records = [
+        {"url": "https://news.google.com/rss/articles/opaque"},
+        {"url": "https://news.google.com/rss/search?q=test"},
+    ]
+    ordered = research._prefer_readable_sources(records)
+    assert ordered[0]["url"].endswith("/rss/search?q=test")
+
+
 def test_malformed_candidate_does_not_crash_host_prioritization():
     urls = ["https://[broken", "https://example.org/ok", "https://example.org/again"]
     assert research._prioritize_distinct_hosts(urls) == [
