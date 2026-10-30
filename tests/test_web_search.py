@@ -335,7 +335,7 @@ def test_opaque_google_news_uses_bing_news_publisher_urls_not_click_wrappers(mon
         wrapped = ("https://www.bing.com/news/apiclick.aspx?ref=abc&url="
                    + quote(direct, safe="") + "&foo=bar")
         return httpx.Response(200, content=rss(
-            ("River Plate próximo partido", wrapped, "Fecha River Plate por confirmar"),
+            ("River Plate próximo partido", wrapped.replace("&", "&amp;"), "Fecha River Plate por confirmar"),
             ("Enlace privado", "https://www.bing.com/news/apiclick.aspx?url=http%3A%2F%2F127.0.0.1%2Fprivate",
              "River Plate próximo partido"),
         ))
