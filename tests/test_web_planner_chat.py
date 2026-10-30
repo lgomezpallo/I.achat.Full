@@ -91,6 +91,8 @@ def test_short_clarification_triggers_real_chat_web_path(monkeypatch):
     })
     assert second.status_code == 200
     assert len(searches) == 2
-    assert "River Plate." in searches[1]
-    assert "¿Cuándo juega River?" in searches[1]
+    # Semantic planning may condense the follow-up into an equivalent search query.
+    # Do not require the literal chat wording: that would penalize better queries.
+    assert "River Plate" in searches[1]
+    assert "próximo partido" in searches[1]
     assert any("EVIDENCIA_WEB" in m["content"] for m in messages[-1])
