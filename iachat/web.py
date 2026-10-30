@@ -318,13 +318,13 @@ var stage='reading_files';var accepted=false;try{payload.attachments=await Promi
 if(Array.isArray(d.web_sources)&&d.web_sources.length){
  var sourcesBox=document.createElement('div');sourcesBox.className='web-sources';
  sourcesBox.style.cssText='margin-top:10px;padding-top:8px;border-top:1px solid var(--edge);font-size:12px;overflow-wrap:anywhere';
- var heading=document.createElement('div');heading.textContent='Enlaces encontrados (no verificados independientemente):';heading.style.cssText='color:var(--muted);margin-bottom:5px';sourcesBox.append(heading);
+ var heading=document.createElement('div');heading.textContent='Fuentes recuperadas (contenido no verificado independientemente):';heading.style.cssText='color:var(--muted);margin-bottom:5px';sourcesBox.append(heading);
  d.web_sources.slice(0,3).forEach(function(source,i){
   if(!source||typeof source.url!=='string')return;
   try{var parsed=new URL(source.url);if(parsed.protocol!=='https:')return}
   catch(_){return}
   var a=document.createElement('a');a.href=source.url;a.target='_blank';a.rel='noopener noreferrer';
-  a.textContent=(i+1)+'. '+(source.title||parsed.hostname);a.style.cssText='display:block;margin:3px 0';
+  a.textContent=(i+1)+'. '+(source.evidence_type==='page_read'?'Página leída: ':'Resumen RSS: ')+(source.title||parsed.hostname);a.style.cssText='display:block;margin:3px 0';
   sourcesBox.append(a);
  });
  responseNode.append(sourcesBox);
