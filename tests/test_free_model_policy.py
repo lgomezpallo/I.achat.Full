@@ -56,7 +56,7 @@ def test_mixed_overrides_only_call_allowlisted_free_model(monkeypatch):
     monkeypatch.setattr(backend.httpx, "post", fake_post)
     assert backend.ProviderBackend.configured()
     assert backend.ProviderBackend().answer([{"role": "user", "content": "hola"}]) == "respuesta gratis"
-    assert [model for _, model in sent] == ["openai/gpt-oss-20b", "openai/gpt-oss-20b:free"]
+    assert [model for _, model in sent] == ["openai/gpt-oss-20b", "openrouter/free"]
     assert "api.nvidia.com" not in " ".join(url for url, _ in sent)
 
 
@@ -74,8 +74,8 @@ def test_default_free_models_remain_available(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "fake-offline-key")
     assert backend.ProviderBackend.configured()
     assert backend.ProviderBackend._eligible_models(
-        "groq", ("openai/gpt-oss-20b", "llama-3.3-70b-versatile")
-    ) == ("openai/gpt-oss-20b", "llama-3.3-70b-versatile")
+        "groq", backend.ProviderBackend.PROVIDERS[0][3]
+    ) == ("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")
 
 
 def test_free_openrouter_fallback_after_groq_rate_limits(monkeypatch):
@@ -92,13 +92,14 @@ def test_free_openrouter_fallback_after_groq_rate_limits(monkeypatch):
 
     def fake_post(url, *, headers, json, timeout):
         attempted.append((url, json["model"]))
-        return Reply(200 if json["model"] == "dots-studio/dots-3-note-preview:free" else 429)
+        return Reply(200 if json["model"] == "openrouter/free" else 429)
 
     monkeypatch.setattr(backend.httpx, "post", fake_post)
     assert backend.ProviderBackend().answer([{"role": "user", "content": "hola"}]) == "respuesta gratis"
     assert [model for _, model in attempted] == [
         "openai/gpt-oss-20b",
-        "llama-3.3-70b-versatile",
-        "dots-studio/dots-3-note-preview:free",
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b",
+        "openrouter/free",
     ]
-    assert all(":free" in model for url, model in attempted if "openrouter.ai" in url)
+    assert all(model == "openrouter/free" for url, model in attempted if "openrouter.ai" in url)
