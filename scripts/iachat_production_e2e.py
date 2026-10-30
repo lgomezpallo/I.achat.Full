@@ -409,7 +409,7 @@ def child() -> None:
                                 ok = any("Informe E2E" in p.text for p in Document(BytesIO(download.content)).paragraphs)
                             else:
                                 sheet = load_workbook(BytesIO(download.content)).active
-                                ok = sheet["B2"].value == "123" and sheet["B3"].value == "=1+1" and sheet["B3"].data_type == "s"
+                                ok = sheet["B2"].value == 123 and sheet["B3"].value == "=1+1" and sheet["B3"].data_type == "s"
                         except Exception:
                             ok = False
                 print("OFFICE_DOWNLOAD:", filename.rsplit(".", 1)[-1], "OK" if ok else "FAILED", flush=True)
