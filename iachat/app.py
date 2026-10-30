@@ -427,8 +427,18 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                     part = (web_evidence_with_pages(query, news_fallback=True)
                             if lookup.reason == "semantic_current"
                             else web_evidence_with_pages(query))
+                    links = extracted_source_links(part)
+                    # Free-model rewrites can over-narrow current-event queries.
+                    # Retry the original question only if no links were found.
+                    if (not links and len(questions) == 1
+                            and lookup.reason == "semantic_current"
+                            and query.strip().casefold() != message.text.strip().casefold()):
+                        original = web_evidence_with_pages(message.text, news_fallback=True)
+                        original_links = extracted_source_links(original)
+                        if original_links:
+                            part, links = original, original_links
                     evidence_parts.append(f"[EVIDENCIA PARA PREGUNTA {len(evidence_parts) + 1}: {query[:300]}]\n{part}")
-                    source_groups.append(extracted_source_links(part))
+                    source_groups.append(links)
                 # The UI shows only the first three sources. Interleave the
                 # independent questions so the visible links cannot all belong
                 # to the first topic; preserve complete provenance for reload.
