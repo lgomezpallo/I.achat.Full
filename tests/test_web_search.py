@@ -43,13 +43,11 @@ def test_bing_general_search_no_news_request(monkeypatch):
     }]
 
 
-def test_news_fallback_after_bing_failure(monkeypatch):
+def test_current_news_preferred_over_unrelated_bing_results(monkeypatch):
     calls = []
 
     def handler(request):
         calls.append(request.url.host)
-        if request.url.host == "www.bing.com":
-            return httpx.Response(503)
         assert request.url.host == "news.google.com"
         return httpx.Response(200, content=rss(
             ("Partido", "https://news.google.com/rss/articles/123", "Horario por confirmar")
@@ -57,7 +55,7 @@ def test_news_fallback_after_bing_failure(monkeypatch):
 
     install_http(monkeypatch, handler)
     results = web_search.search_web("¿Cuándo juega River?")
-    assert calls == ["www.bing.com", "news.google.com"]
+    assert calls == ["news.google.com"]
     assert results[0]["title"] == "Partido"
 
 
@@ -112,20 +110,20 @@ def test_oversized_content_length_is_rejected(monkeypatch):
     assert web_search.search_web("documentación") == []
 
 
-def test_redirects_not_followed_and_news_fallback_used(monkeypatch):
+def test_news_redirect_not_followed_and_generic_fallback_used(monkeypatch):
     calls = []
 
     def handler(request):
         calls.append(request.url.host)
-        if request.url.host == "www.bing.com":
+        if request.url.host == "news.google.com":
             return httpx.Response(302, headers={"location": "http://127.0.0.1/private"})
         return httpx.Response(200, content=rss(
-            ("News", "https://news.google.com/rss/articles/123", "Info")
+            ("News", "https://example.com/news", "Info")
         ))
 
     install_http(monkeypatch, handler)
     assert len(web_search.search_web("Noticias de IA hoy")) == 1
-    assert calls == ["www.bing.com", "news.google.com"]
+    assert calls == ["news.google.com", "www.bing.com"]
 
 
 def test_blank_query_never_uses_network(monkeypatch):
@@ -146,12 +144,12 @@ def test_feed_is_bounded_to_five_results(monkeypatch):
     assert len(web_search.search_web("documentación")) == 5
 
 
-def test_bad_xml_uses_news_fallback(monkeypatch):
+def test_bad_news_xml_uses_generic_fallback(monkeypatch):
     calls = []
 
     def handler(request):
         calls.append(request.url.host)
-        if request.url.host == "www.bing.com":
+        if request.url.host == "news.google.com":
             return httpx.Response(200, content=b"<rss><broken>")
         return httpx.Response(200, content=rss(
             ("Result", "https://example.com/valid", "OK")
@@ -159,7 +157,7 @@ def test_bad_xml_uses_news_fallback(monkeypatch):
 
     install_http(monkeypatch, handler)
     assert len(web_search.search_web("últimas noticias")) == 1
-    assert calls == ["www.bing.com", "news.google.com"]
+    assert calls == ["news.google.com", "www.bing.com"]
 
 
 def test_snippets_are_not_described_as_verified_pages(monkeypatch):
@@ -203,13 +201,11 @@ def test_rss_pubdate_missing_invalid_or_without_timezone_is_omitted(monkeypatch)
     assert all("published_at_utc" not in item for item in results)
 
 
-def test_sports_question_without_date_uses_free_news_fallback(monkeypatch):
+def test_sports_question_without_date_prefers_free_news(monkeypatch):
     calls = []
 
     def handler(request):
         calls.append(request.url.host)
-        if request.url.host == "www.bing.com":
-            return httpx.Response(503)
         assert request.url.host == "news.google.com"
         return httpx.Response(200, content=rss(
             ("Resultado", "https://example.com/f1", "Resultado pendiente de verificar")
@@ -217,18 +213,16 @@ def test_sports_question_without_date_uses_free_news_fallback(monkeypatch):
 
     install_http(monkeypatch, handler)
     results = web_search.search_web("¿Cómo salió la F1?")
-    assert calls == ["www.bing.com", "news.google.com"]
+    assert calls == ["news.google.com"]
     assert results[0]["url"] == "https://example.com/f1"
 
 
-def test_semantic_current_query_without_date_keeps_free_news_fallback(monkeypatch):
+def test_semantic_current_query_without_date_prefers_free_news(monkeypatch):
     """The model can request fresh evidence using a query with no date words."""
     calls = []
 
     def handler(request):
         calls.append(request.url.host)
-        if request.url.host == "www.bing.com":
-            return httpx.Response(503)
         assert request.url.host == "news.google.com"
         return httpx.Response(200, content=rss(
             ("Trámite", "https://example.com/tramite", "Requisitos por verificar")
@@ -236,5 +230,5 @@ def test_semantic_current_query_without_date_keeps_free_news_fallback(monkeypatc
 
     install_http(monkeypatch, handler)
     results = web_search.search_web("requisitos habilitación comercial", news_fallback=True)
-    assert calls == ["www.bing.com", "news.google.com"]
+    assert calls == ["news.google.com"]
     assert results[0]["url"] == "https://example.com/tramite"
