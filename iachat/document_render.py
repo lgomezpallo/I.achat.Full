@@ -87,7 +87,7 @@ def _render_docx(content: str) -> bytes:
 # Excel stores English function names in OOXML even for Spanish-language UIs.
 _SAFE_AGGREGATE = re.compile(
     r"^=(SUM|SUMA|AVERAGE|PROMEDIO|COUNT|CONTAR|MIN|MAX)"
-    r"\(([A-Z]{1,2})([2-9][0-9]{0,3}):([A-Z]{1,2})([2-9][0-9]{0,3})\)$",
+    r"\(([A-Z]{1,2})([1-9][0-9]{0,3}):([A-Z]{1,2})([1-9][0-9]{0,3})\)$",
     re.IGNORECASE,
 )
 _AGGREGATE_NAMES = {"SUMA": "SUM", "PROMEDIO": "AVERAGE", "CONTAR": "COUNT"}
@@ -102,7 +102,8 @@ def _safe_formula(value: str) -> str | None:
         return None
     func, col_a, row_a, col_b, row_b = match.groups()
     from openpyxl.utils.cell import column_index_from_string
-    if (col_a.upper() != col_b.upper()
+    if (int(row_a) < 2
+            or col_a.upper() != col_b.upper()
             or column_index_from_string(col_a.upper()) > MAX_SPREADSHEET_COLUMNS
             or int(row_a) > int(row_b)
             or int(row_b) > MAX_SPREADSHEET_ROWS):
