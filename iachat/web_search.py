@@ -157,7 +157,7 @@ def _search_terms(text: str) -> set[str]:
         if not unicodedata.combining(char)
     )
     return {
-        term for term in re.findall(r"[^\\W_]+", plain)
+        term for term in re.findall(r"[^\W_]+", plain)
         if len(term) >= 4 and term not in _SEARCH_FILLER
     }
 
