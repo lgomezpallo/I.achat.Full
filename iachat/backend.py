@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 import logging
+import time
 import httpx
 
 logger = logging.getLogger("iachat.free_providers")
@@ -190,6 +191,7 @@ class ProviderBackend:
                 continue
             attempted = True
             for model in models:
+                attempt_started = time.monotonic()
                 try:
                     response = httpx.post(
                         base + "/chat/completions",
@@ -197,11 +199,14 @@ class ProviderBackend:
                         json={"model": model, "messages": prepared, "stream": False},
                         timeout=self.timeout_s,
                     )
-                    if response.status_code != 200:
-                        # Status-only diagnostics; never log keys, headers, prompts or responses.
-                        # Model identifiers are restricted by FREE_MODEL_ALLOWLIST.
-                        logger.warning("IACHAT_PROVIDER_DIAG provider=%s model=%s status=%s",
-                                       name, model, response.status_code)
+                    # Status, duration and allowlisted model only. No prompts,
+                    # response bodies, tokens, account IDs or credential values.
+                    logger.log(
+                        logging.INFO if response.status_code == 200 else logging.WARNING,
+                        "IACHAT_PROVIDER_DIAG provider=%s model=%s status=%s elapsed_ms=%d",
+                        name, model, response.status_code,
+                        int((time.monotonic() - attempt_started) * 1000),
+                    )
                     if response.status_code in (401, 403):
                         break
                     if response.status_code in (408, 429, 500, 502, 503, 504):
@@ -218,8 +223,11 @@ class ProviderBackend:
                 except (httpx.RequestError, ValueError, KeyError, IndexError, TypeError) as exc:
                     # Class name only, no exception message: URLs or response data
                     # could otherwise disclose credentials or private prompts.
-                    logger.warning("IACHAT_PROVIDER_DIAG provider=%s model=%s status=exception_%s",
-                                   name, model, type(exc).__name__)
+                    logger.warning(
+                        "IACHAT_PROVIDER_DIAG provider=%s model=%s status=exception_%s elapsed_ms=%d",
+                        name, model, type(exc).__name__,
+                        int((time.monotonic() - attempt_started) * 1000),
+                    )
                     temporary_failure = True
                     continue
         if images and not attempted and any(os.getenv(env, "").strip() for _, env, _, _ in self.PROVIDERS):
