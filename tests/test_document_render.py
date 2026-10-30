@@ -23,7 +23,7 @@ def test_pdf_docx_xlsx_real_bytes_and_text():
     excel, mime = render_download("datos.xlsx", 'nombre,valor\nObra,123\nAtaque,"=1+1"\n')
     assert mime.endswith("spreadsheetml.sheet")
     sheet = load_workbook(BytesIO(excel)).active
-    assert sheet["A2"].value == "Obra" and sheet["B2"].value == "123"
+    assert sheet["A2"].value == "Obra" and sheet["B2"].value == 123
     assert sheet["B3"].value == "=1+1" and sheet["B3"].data_type == "s"
 
 
