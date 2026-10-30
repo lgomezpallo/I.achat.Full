@@ -19,7 +19,7 @@ class AttachmentsTest(unittest.TestCase):
 
     def test_data_file_extract(self):
         for name, raw, marker in [
-            ("datos.csv", b"nombre,valor\\nobra,123", "obra,123"),
+            ("datos.csv", b"nombre,valor\nobra,123", "obra,123"),
             ("datos.json", b'{"obra":123}', '"obra":123'),
             ("reporte.html", b"<p>Informe de prueba</p>", "Informe de prueba"),
         ]:
@@ -47,12 +47,12 @@ class AttachmentsTest(unittest.TestCase):
         book.save(xlsx_data)
         text, names = extract([file("planilla.xlsx", xlsx_data.getvalue())])
         self.assertIn("123 | pendiente", text)
+        self.assertEqual(names, ["planilla.xlsx"])
         book.active["B3"] = "=1+1"
         xlsx_data = io.BytesIO()
         book.save(xlsx_data)
         text, _ = extract([file("formulas.xlsx", xlsx_data.getvalue())])
         self.assertIn("=1+1", text)
-        self.assertEqual(names, ["planilla.xlsx"])
 
     def test_reject_corrupt_office_file(self):
         with self.assertRaises(AttachmentError):
