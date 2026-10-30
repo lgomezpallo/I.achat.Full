@@ -189,3 +189,47 @@ def test_provider_failure_does_not_advance_summary_or_history(monkeypatch, tmp_p
     assert response.status_code == 503
     assert module.store.get_summary("c", "alice")["version"] == 1
     assert len(module.store.get("c", "alice")) == 2
+
+
+def test_long_ledger_keeps_original_decision_and_latest_change():
+    history = [
+        {"role": "user", "content": (
+            "Decidimos empezar con el plan inicial del proyecto."
+            if index == 0 else
+            f"Decidimos revisar el tema número {index} del proyecto."
+        )}
+        for index in range(180)
+    ]
+    history.append({"role": "user", "content": "Corrijo: el plan del proyecto ahora es semanal."})
+    summary = build_summary(history)
+    assert len(summary["items"]) == 120
+    assert summary["items"][0]["source_index"] == 0
+    assert summary["items"][-1]["source_index"] == 180
+    rendered = render_summary(summary)
+    assert "plan inicial del proyecto" in rendered
+    assert "Corrijo: el plan del proyecto ahora es semanal." in rendered
+    assert "tema número 179" in rendered
+    # The incremental path must not discard the original anchor on append.
+    summary2 = build_summary(
+        history + [{"role": "user", "content": "Falta validar el plan semanal."}],
+        summary,
+    )
+    assert summary2["items"][0]["source_index"] == 0
+    assert summary2["items"][-1]["source_index"] == 181
+
+
+def test_bounded_summary_prioritizes_late_correction_over_old_quotes():
+    history = [
+        {"role": "user", "content": "Decidimos comenzar con el plan original."},
+        *[
+            {"role": "user", "content": f"Decidimos trabajar sobre la variante {i} del proyecto."}
+            for i in range(50)
+        ],
+        {"role": "user", "content": "Corrijo: la variante final del proyecto es azul."},
+    ]
+    rendered = render_summary(build_summary(history), max_chars=520)
+    assert len(rendered) <= 520
+    assert "plan original" in rendered
+    assert "Corrijo: la variante final del proyecto es azul." in rendered
+    assert "variante 49" in rendered
+    assert render_summary(build_summary(history), max_chars=100) == ""
