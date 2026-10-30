@@ -386,3 +386,16 @@ def test_conversational_checks_do_not_spend_classifier_or_search():
     assert plan_web_lookup(
         "Probando si la cotización del dólar cambió hoy"
     ).action == "search"
+
+
+def test_two_independent_schedule_questions_split_without_duplication():
+    from iachat.web_planner import split_independent_search_questions
+    assert split_independent_search_questions(
+        "¿Cuándo juega River y cuándo corre la Fórmula 1?"
+    ) == ["Cuándo juega River?", "cuándo corre la Fórmula 1?"]
+    assert split_independent_search_questions(
+        "¿Cuándo juegan River y Boca?"
+    ) == ["¿Cuándo juegan River y Boca?"]
+    assert split_independent_search_questions(
+        "Probando si anda IAchat con mi cuenta de mail"
+    ) == ["Probando si anda IAchat con mi cuenta de mail"]

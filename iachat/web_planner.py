@@ -84,6 +84,35 @@ SELF_CONTAINED_TRANSFORMATION = re.compile(
 )
 
 
+# Split only explicit, independent double questions. Do not treat ordinary
+# conjunctions ("River y Boca") as separate web research requests.
+_SECOND_QUESTION = re.compile(
+    r"\s+y\s+([¿]?\s*(?:cu[aá]ndo|a\s+qu[eé]\s+hora|qu[eé]\s+d[ií]a)\b)",
+    flags=re.IGNORECASE,
+)
+
+
+def split_independent_search_questions(message: str) -> list[str]:
+    """Return up to two independently answerable questions, otherwise one.
+
+    Use the user's actual question rather than model-created subtopics.
+    This conservative gate avoids doubling searches on everyday messages.
+    """
+    text = message.strip()
+    if len(text) > 300:
+        return [text[:MAX_SEARCH_QUERY]]
+    match = _SECOND_QUESTION.search(text)
+    if not match:
+        return [text]
+    first = text[:match.start()].strip(" ?¿")
+    second = text[match.start() + len(" y "):].strip(" ?¿")
+    if not first or not second or len(first.split()) < 3 or len(second.split()) < 3:
+        return [text]
+    if not re.match(r"^¿?\s*(?:cu[aá]ndo|a\s+qu[eé]\s+hora|qu[eé]\s+d[ií]a)\b", first, re.I):
+        return [text]
+    return [first + "?", second + "?"]
+
+
 @dataclass(frozen=True)
 class WebLookupPlan:
     action: Literal["answer", "search"]
