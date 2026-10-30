@@ -521,7 +521,7 @@ def generate_workspace_file(payload: FileGenerateInput, request: Request):
     guidance = (
         "Sos un generador y editor de documentos. Respondé EXCLUSIVAMENTE un objeto JSON "
         "válido con dos campos string: name y content. No uses Markdown alrededor del JSON. "
-        "Formatos permitidos: .txt, .md, .csv, .json, .html, .pdf, .docx, .xlsx. Para .pdf y .docx escribí el contenido como texto con títulos Markdown (#) y viñetas (-); se convertirá a documento real al descargar. Para .xlsx devolvé contenido CSV con columnas separadas por comas y primera fila de encabezados; se convertirá a Excel real al descargar, sin ejecutar fórmulas. Máximo 200 KB de contenido. "
+        "Formatos permitidos: .txt, .md, .csv, .json, .html, .pdf, .docx, .xlsx. Para .pdf y .docx escribí el contenido como texto con títulos Markdown (#) y viñetas (-); se convertirá a documento real al descargar. Para .xlsx devolvé contenido CSV con columnas separadas por comas, primera fila de encabezados EXACTAMENTE como los pidió el usuario y celdas numéricas como números. Se convertirá a Excel real al descargar. Si pide total automático, se agregará una fórmula SUM segura que abarque las filas disponibles; NO devuelvas una guía ni macros ni fórmulas externas. Usá extensión .xlsx cuando pida Excel. Máximo 200 KB de contenido. "
         "Producí el documento solicitado, no una explicación. No ejecutes código ni solicites "
         "datos secretos. Si editás, conservá lo no solicitado del documento existente."
     )
@@ -540,6 +540,12 @@ def generate_workspace_file(payload: FileGenerateInput, request: Request):
         name, content = parse_generated_file(answer)
         if existing:
             name = existing["name"]
+        if re.search(r"(?i)\b(?:excel|xlsx)\b", payload.instruction) and not name.lower().endswith(".xlsx"):
+            raise WorkspaceError("requested_xlsx_not_generated")
+        if name.lower().endswith(".xlsx"):
+            from .document_render import spreadsheet_needs_auto_total, ensure_spreadsheet_auto_total
+            if spreadsheet_needs_auto_total(payload.instruction):
+                content = ensure_spreadsheet_auto_total(content)
         return file_workspace.save(owner, name, content, payload.file_id)
     except WorkspaceError as exc:
         _file_error(exc)
