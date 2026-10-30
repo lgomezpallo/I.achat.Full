@@ -540,6 +540,9 @@ def child() -> None:
                     if logged.status_code != 200:
                         raise AssertionError("same_user_second_session_login_failed")
                     another_device.headers["Cookie"] = "iachat_session=" + logged.cookies["iachat_session"]
+                    same_history = another_device.get("/api/conversations/" + first["conversation_id"])
+                    if same_history.status_code != 200:
+                        raise AssertionError("same_user_history_not_synchronized")
                     retained = data_chat(another_device, "¿cuánto gasté en transporte?")
                     if "45000" not in retained["answer"]:
                         raise AssertionError("structured_cross_session_persistence_failed")
