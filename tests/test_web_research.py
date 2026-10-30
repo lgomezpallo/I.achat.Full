@@ -489,7 +489,8 @@ def test_web_answer_never_exposes_unconsulted_model_urls():
     assert "https://publisher.example.com/actual" in grounded
     assert "https://other.example.net/inventada" not in grounded
     assert "https://fake.example.org/nota" not in grounded
-    assert "enlace omitido" not in grounded\n    assert "No citar" in grounded
+    assert "enlace omitido" not in grounded
+    assert "No citar" in grounded
 
 
 def test_web_answer_with_no_sources_does_not_invent_citations():
