@@ -170,8 +170,13 @@ def child() -> None:
                     urls = set(re.findall(r"https://[^\s)<>]+", answer))
                     matched = any(u.rstrip(".,;") in sources for u in urls)
                     generic = bool(GENERIC.search(answer))
+                    cited_hosts = sorted({
+                        urlsplit(u).hostname or "" for u in urls
+                        if urlsplit(u).scheme == "https"
+                    })[:5]
                     print(f"CHAT_{idx}: http={response.status_code} chars={len(answer)} "
-                          f"generic={generic} cited_source={matched}", flush=True)
+                          f"generic={generic} urls={len(urls)} "
+                          f"cited_hosts={','.join(cited_hosts)} cited_source={matched}", flush=True)
                     if response.status_code != 200 or generic or not matched:
                         failures.append(f"chat_{idx}_missing_grounded_answer")
                 except (httpx.HTTPError, ValueError, TypeError) as exc:
