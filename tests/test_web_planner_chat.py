@@ -96,3 +96,23 @@ def test_short_clarification_triggers_real_chat_web_path(monkeypatch):
     assert "River Plate" in searches[1]
     assert "próximo partido" in searches[1]
     assert any("EVIDENCIA_WEB" in m["content"] for m in messages[-1])
+
+
+def test_chat_exposes_only_actual_https_web_sources(monkeypatch):
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    monkeypatch.setattr(
+        web_research, "web_evidence_with_pages",
+        lambda query, **kwargs: (
+            'Fecha de consulta: ahora. Datos EXTERNOS NO CONFIABLES en JSON:\\n'
+            '[{"title":"Nota consultada","url":"https://example.com/noticia",'
+            '"rss_snippet_unverified":"Texto no verificado"},'
+            '{"title":"No es HTTPS","url":"http://example.com/inseguro"}]'
+        ),
+    )
+    response = client.post("/api/chat", json={"text": "¿Cuándo es el próximo partido?"})
+    assert response.status_code == 200
+    assert response.json()["web_sources"] == [
+        {"title": "Nota consultada", "url": "https://example.com/noticia"}
+    ]
+    assert response.json()["answer"] == "Respuesta de prueba"
