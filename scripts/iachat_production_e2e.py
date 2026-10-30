@@ -253,6 +253,27 @@ def child() -> None:
                         and urlsplit(item["url"]).scheme == "https"
                     } if isinstance(returned, list) else set()
                     urls = set(re.findall(r"https://[^\s)<>]+", answer))
+                    ordered_sources = [
+                        item for item in returned if isinstance(item, dict)
+                        and isinstance(item.get("url"), str)
+                    ] if isinstance(returned, list) else []
+                    direct_count = sum(
+                        urlsplit(item["url"]).hostname != "news.google.com"
+                        for item in ordered_sources
+                    )
+                    pages_read = sum(
+                        item.get("evidence_type") == "page_read"
+                        for item in ordered_sources
+                    )
+                    first_three_direct = sum(
+                        urlsplit(item["url"]).hostname != "news.google.com"
+                        for item in ordered_sources[:3]
+                    )
+                    print(f"CHAT_{idx}_PROVENANCE: direct={direct_count} "
+                          f"pages_read={pages_read} first_three_direct={first_three_direct}",
+                          flush=True)
+                    if direct_count and not first_three_direct:
+                        failures.append(f"chat_{idx}_publisher_links_hidden")
                     matched = any(u.rstrip(".,;") in source_urls for u in urls)
                     generic = bool(GENERIC.search(answer))
                     cited_hosts = sorted({
