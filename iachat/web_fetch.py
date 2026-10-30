@@ -148,7 +148,7 @@ def fetch_page(
         response = connection.getresponse()
         # In particular, NEVER follow redirects to an unvalidated destination.
         if response.status != 200:
-            raise PageFetchError("page returned a non-200 status")
+            raise PageFetchError(f"page returned a non-200 status (HTTP_{response.status})")
         media_type = (response.getheader("Content-Type", "") or "").split(";", 1)[0].strip().lower()
         if media_type not in _ALLOWED_TYPES:
             raise PageFetchError("unsupported page content type")
