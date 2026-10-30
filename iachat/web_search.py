@@ -217,6 +217,40 @@ def _relevant_direct_fallback(item: dict[str, str], query: str, *, minimum_overl
     return len(query_terms & result_terms) >= required
 
 
+def _plausibly_relevant(item: dict[str, str], query: str) -> bool:
+    """Conservative RSS sanity check, never a factual-verification claim.
+
+    Some feeds return unrelated non-Latin-language articles even for Spanish
+    queries. Reject dominant script mismatches and long-query results without
+    two matching content terms; keep short queries permissive.
+    """
+    text = item.get("title", "") + " " + item.get("snippet", "")
+    if not any(ch.isalpha() for ch in query):
+        return True
+    query_non_latin = sum(
+        ch.isalpha() and "LATIN" not in unicodedata.name(ch, "")
+        for ch in query
+    )
+    result_non_latin = sum(
+        ch.isalpha() and "LATIN" not in unicodedata.name(ch, "")
+        for ch in text
+    )
+    result_letters = sum(ch.isalpha() for ch in text)
+    explicitly_other_language = re.search(
+        r"(?i)\b(?:en|idioma|language|in)\s+"
+        r"(?:chino|chinese|japon[eé]s|japanese|coreano|korean|"
+        r"ruso|russian|[aá]rabe|arabic|hindi)\b",
+        query,
+    )
+    if (not query_non_latin and not explicitly_other_language
+            and result_non_latin >= 6 and result_non_latin * 5 >= result_letters):
+        return False
+    terms = _search_terms(query)
+    if len(terms) >= 4:
+        return len(terms & _search_terms(text)) >= 2
+    return True
+
+
 def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False) -> list[dict[str, str]]:
     """Use general RSS for evergreen search, news RSS for current information.
 
@@ -244,7 +278,10 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
     sources = [news, bing_news, bing] if needs_current_information(query) or news_fallback else [bing]
     for url, params in sources:
         try:
-            results = _fetch_feed(url, params, bounded_timeout)
+            results = [
+                item for item in _fetch_feed(url, params, bounded_timeout)
+                if _plausibly_relevant(item, query)
+            ]
             if not results:
                 continue
             # Google News currently exposes opaque /rss/articles/ links that
@@ -265,6 +302,7 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
                         direct = [
                             item for item in _fetch_feed(secondary_url, secondary_params, bounded_timeout)
                             if urlsplit(item["url"]).hostname != "news.google.com"
+                            and _plausibly_relevant(item, query)
                             and _relevant_direct_fallback(
                                 item, query,
                                 minimum_overlap=1 if secondary_url == bing_news[0] else None,
