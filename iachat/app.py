@@ -274,9 +274,12 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
     # by the explicit Files UI. The model chooses from an allowlist of actions;
     # it cannot select filesystem paths or another user's file ID.
     if message.text.strip() and not message.attachments:
-        from .tool_planner import select_file_action
-        action = select_file_action(message.text, file_workspace.list(owner), get_backend())
-        if action.action in ("create", "edit"):
+        from .tool_planner import is_file_action_candidate, select_file_action
+        if is_file_action_candidate(message.text):
+            action = select_file_action(message.text, file_workspace.list(owner), get_backend())
+        else:
+            action = None
+        if action is not None and action.action in ("create", "edit"):
             generated = generate_workspace_file(
                 FileGenerateInput(instruction=message.text, file_id=action.file_id),
                 request,
