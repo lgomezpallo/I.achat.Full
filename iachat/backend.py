@@ -109,6 +109,16 @@ class ProviderBackend:
         "nvidia": frozenset(),
     }
 
+    # These were formerly free but return 404 on the actual Oracle account.
+    # Unknown overrides, including paid models, must never activate fallback.
+    RETIRED_FREE_MODELS = {
+        "groq": frozenset(("llama-3.3-70b-versatile",)),
+        "openrouter": frozenset((
+            "dots-studio/dots-3-note-preview:free", "openai/gpt-oss-20b:free"
+        )),
+        "nvidia": frozenset(),
+    }
+
     def __init__(self, timeout_s: float = 45.0):
         self.timeout_s = timeout_s
 
@@ -125,7 +135,7 @@ class ProviderBackend:
         # Oracle can retain old *_MODELS values from retired free endpoints.
         # Preserve valid explicit choices, but replace retired/disallowed IDs
         # with current, strictly allowlisted free fallbacks. Never call paid IDs.
-        if not images and len(eligible) != len(models):
+        if not images and any(m in cls.RETIRED_FREE_MODELS[name] for m in models):
             eligible += tuple(m for m in defaults if m in allowed and m not in eligible)
         return eligible
 
