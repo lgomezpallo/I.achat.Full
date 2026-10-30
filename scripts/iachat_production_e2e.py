@@ -69,7 +69,7 @@ def launcher() -> None:
 
 def cleanup_account(db_path: str, username: str) -> None:
     with sqlite3.connect(db_path, timeout=20) as connection:
-        for table in ("workspace_files", "automatic_memory_log", "memories",
+        for table in ("structured_records", "structured_collections", "workspace_files", "automatic_memory_log", "memories",
                       "conversation_index", "conversations", "image_attachments"):
             if connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
@@ -262,9 +262,16 @@ def child() -> None:
 
     username = "e2e-" + secrets.token_hex(8)
     password = secrets.token_urlsafe(32)
+    other_username = "e2e-" + secrets.token_hex(8)
+    other_password = secrets.token_urlsafe(32)
     store = ConversationStore(db_path)
     if not store.create_user(username, password):
         raise AssertionError("temporary_user_creation_failed")
+    if not store.create_user(other_username, other_password):
+        cleanup_account(db_path, username)
+        raise AssertionError("second_temporary_user_creation_failed")
+    with sqlite3.connect(db_path) as audit_db:
+        print("PRODUCTION_ACCOUNT_COUNT:", audit_db.execute("SELECT count(*) FROM users").fetchone()[0], flush=True)
     try:
         with httpx.Client(base_url=BASE, timeout=160.0, follow_redirects=False) as client:
             login = client.post("/auth/login", json={"username": username, "password": password})
@@ -506,6 +513,93 @@ def child() -> None:
                       "OK" if ok else f"FAILED_HTTP_{status_code}", flush=True)
                 if not ok:
                     failures.append(f"chat_excel_autototal_{index}_failed")
+            # One complete authenticated LIVE free-model sequence for persistent
+            # structured records, followed by another browser session, a second
+            # user and a non-financial collection. Only synthetic test accounts.
+            try:
+                def data_chat(session, prompt):
+                    response = session.post("/api/chat", json={"text": prompt})
+                    if response.status_code != 200:
+                        raise AssertionError("structured_chat_http_" + str(response.status_code))
+                    return response.json()
+
+                first = data_chat(client, "creá planilla gastos fecha concepto categoría importe")
+                if "colección" not in first["answer"].casefold():
+                    raise AssertionError("structured_create_failed")
+                second = data_chat(client, "anotá 40000 nafta hoy")
+                if "40000" not in second["answer"]:
+                    raise AssertionError("structured_add_failed")
+                summed = data_chat(client, "¿cuánto gasté en transporte?")
+                if "40000" not in summed["answer"]:
+                    raise AssertionError("structured_sum_failed")
+                corrected = data_chat(client, "corregí el importe a 45000")
+                if "45000" not in corrected["answer"]:
+                    raise AssertionError("structured_update_failed")
+                with httpx.Client(base_url=BASE, timeout=160.0, follow_redirects=False) as another_device:
+                    logged = another_device.post("/auth/login", json={"username": username, "password": password})
+                    if logged.status_code != 200:
+                        raise AssertionError("same_user_second_session_login_failed")
+                    another_device.headers["Cookie"] = "iachat_session=" + logged.cookies["iachat_session"]
+                    same_history = another_device.get("/api/conversations/" + first["conversation_id"])
+                    if same_history.status_code != 200:
+                        raise AssertionError("same_user_history_not_synchronized")
+                    retained = data_chat(another_device, "¿cuánto gasté en transporte?")
+                    if "45000" not in retained["answer"]:
+                        raise AssertionError("structured_cross_session_persistence_failed")
+                    export = data_chat(another_device, "descargá Excel")
+                    info = export.get("generated_file")
+                    if not isinstance(info, dict) or not str(info.get("name", "")).endswith(".xlsx"):
+                        raise AssertionError("structured_export_missing_file")
+                    file_id = info["id"]
+                    if f"/api/files/{file_id}/download" not in export["answer"]:
+                        raise AssertionError("structured_export_missing_link")
+                    download = another_device.get(f"/api/files/{file_id}/download")
+                    if download.status_code != 200 or not download.content.startswith(b"PK"):
+                        raise AssertionError("structured_export_download_failed")
+                    book = load_workbook(BytesIO(download.content))
+                    sheet = book.active
+                    headers = [sheet.cell(1, i).value for i in range(1, 5)]
+                    if headers != ["Fecha", "Concepto", "Categoría", "Importe"]:
+                        raise AssertionError("structured_export_headers_failed")
+                    if sheet["D2"].value != 45000 or sheet["D3"].value != "=SUM(D2:D2)":
+                        raise AssertionError("structured_export_values_or_formula_failed")
+                    if sheet["D3"].data_type != "f":
+                        raise AssertionError("structured_export_formula_not_real")
+                    # New conversation and session share the same stored data.
+                    if retained["conversation_id"] == corrected["conversation_id"]:
+                        raise AssertionError("structured_new_conversation_not_created")
+                print("STRUCTURED_LIVE_EXPENSES_CREATE_ADD_SUM_UPDATE_EXPORT: OK", flush=True)
+                print("STRUCTURED_SAME_USER_SECOND_SESSION: OK", flush=True)
+                with httpx.Client(base_url=BASE, timeout=160.0, follow_redirects=False) as other:
+                    login_other = other.post("/auth/login", json={
+                        "username": other_username, "password": other_password
+                    })
+                    if login_other.status_code != 200:
+                        raise AssertionError("other_user_login_failed")
+                    other.headers["Cookie"] = "iachat_session=" + login_other.cookies["iachat_session"]
+                    if other.get(f"/api/files/{file_id}/download").status_code != 404:
+                        raise AssertionError("structured_cross_user_file_leak")
+                    if other.get("/api/conversations/" + first["conversation_id"]).status_code != 404:
+                        raise AssertionError("structured_cross_user_history_leak")
+                    nonfinancial = data_chat(other, "creá colección inventario con campos producto, cantidad, ubicación")
+                    if "colección" not in nonfinancial["answer"].casefold():
+                        raise AssertionError("structured_nonfinancial_create_failed")
+                    added = data_chat(other, "anotá 12 tornillos en depósito")
+                    if "12" not in added["answer"]:
+                        raise AssertionError("structured_nonfinancial_add_failed")
+                    own_collections = __import__("iachat.structured_data", fromlist=["StructuredStore"]).StructuredStore(db_path)
+                    if len(own_collections.collections(other_username)) != 1:
+                        raise AssertionError("structured_other_user_collection_missing")
+                    if any(c["name"].casefold() == "gastos" for c in own_collections.collections(other_username)):
+                        raise AssertionError("structured_cross_user_collection_leak")
+                    if len(own_collections.records(other_username, own_collections.collections(other_username)[0]["id"])) != 1:
+                        raise AssertionError("structured_nonfinancial_record_missing")
+                    if len(own_collections.collections(username)) != 1:
+                        raise AssertionError("structured_first_user_collection_changed")
+                print("STRUCTURED_NONFINANCIAL_AND_USER_ISOLATION: OK", flush=True)
+            except (AssertionError, httpx.HTTPError, ValueError, TypeError, KeyError, OSError) as exc:
+                print("STRUCTURED_E2E_FAILURE:", type(exc).__name__, str(exc)[:120], flush=True)
+                failures.append("structured_live_end_to_end_failed")
             # Critical acceptance: create and download a real file from an
             # ordinary authenticated chat message, without entering Files mode.
             # This is a LIVE model decision and LIVE model-generated content.
@@ -580,7 +674,8 @@ def child() -> None:
             print("E2E_AUTH_WEB_CHAT_FILES: PASS", flush=True)
     finally:
         cleanup_account(db_path, username)
-        print("TEMPORARY_ACCOUNT_AND_DATA: CLEANED", flush=True)
+        cleanup_account(db_path, other_username)
+        print("TEMPORARY_ACCOUNTS_AND_DATA: CLEANED", flush=True)
 
 
 if __name__ == "__main__":

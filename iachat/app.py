@@ -18,6 +18,8 @@ app = FastAPI(title="IAchat", version="0.3.0")
 store = ConversationStore(os.getenv("IACHAT_DB", "iachat.db"))
 from .file_workspace import FileWorkspace, WorkspaceError, parse_generated_file
 file_workspace = FileWorkspace(os.getenv("IACHAT_DB", "iachat.db"))
+from .structured_data import StructuredStore, handle as handle_structured_chat
+structured_store = StructuredStore(os.getenv("IACHAT_DB", "iachat.db"))
 
 def _signed_user(value: str) -> str | None:
     secret = os.getenv("IACHAT_AUTH_SECRET", "")
@@ -270,6 +272,22 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         existing_project = store.conversation_project(conversation_id, owner)
         if existing_project is not None and existing_project != message.project.strip():
             raise HTTPException(409, "conversation_project_mismatch")
+    # Structured records persist per authenticated user across conversations.
+    # This path precedes one-off file generation; explicit downloadable-file
+    # requests continue through the existing file tool unchanged.
+    if message.text.strip() and not message.attachments:
+        structured = handle_structured_chat(
+            message.text, owner, get_backend(), structured_store, file_workspace
+        )
+        if structured is not None:
+            answer = structured["answer"]
+            updated = [*history, {"role": "user", "content": message.text},
+                       {"role": "assistant", "content": answer}]
+            store.put(conversation_id, updated, owner, message.project.strip())
+            return MessageOutput(
+                conversation_id=conversation_id, answer=answer, history=updated,
+                generated_file=structured.get("generated_file"),
+            )
     # A normal chat request can invoke the same bounded file generator used
     # by the explicit Files UI. The model chooses from an allowlist of actions;
     # it cannot select filesystem paths or another user's file ID.
