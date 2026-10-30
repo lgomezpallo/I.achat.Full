@@ -316,3 +316,62 @@ def test_opaque_news_fallback_failure_preserves_news_snippets(monkeypatch):
     assert calls == ["news.google.com", "www.bing.com"]
     assert len(results) == 1
     assert results[0]["title"] == "News"
+
+
+def test_opaque_google_news_uses_bing_news_publisher_urls_not_click_wrappers(monkeypatch):
+    """Live-shaped Bing News RSS click URLs must become safe publisher URLs."""
+    from urllib.parse import quote
+
+    requests = []
+
+    def handler(request):
+        requests.append((request.url.host, request.url.path))
+        if request.url.host == "news.google.com":
+            return httpx.Response(200, content=rss(
+                ("River", "https://news.google.com/rss/articles/opaque", "Noticia"),
+            ))
+        assert request.url.path == "/news/search"
+        direct = "https://diario.example.com/deportes/river-partido"
+        wrapped = ("https://www.bing.com/news/apiclick.aspx?ref=abc&url="
+                   + quote(direct, safe="") + "&foo=bar")
+        return httpx.Response(200, content=rss(
+            ("River Plate próximo partido", wrapped, "Fecha River Plate por confirmar"),
+            ("Enlace privado", "https://www.bing.com/news/apiclick.aspx?url=http%3A%2F%2F127.0.0.1%2Fprivate",
+             "River Plate próximo partido"),
+        ))
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("próximo partido River Plate")
+    assert requests == [
+        ("news.google.com", "/rss/search"),
+        ("www.bing.com", "/news/search"),
+    ]
+    assert [item["url"] for item in results] == [
+        "https://news.google.com/rss/articles/opaque",
+        "https://diario.example.com/deportes/river-partido",
+    ]
+
+
+def test_news_fallback_without_google_results_uses_bing_news_not_generic(monkeypatch):
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.path)
+        if request.url.host == "news.google.com":
+            return httpx.Response(503)
+        return httpx.Response(200, content=rss(
+            ("Precio dólar oficial", "https://finanzas.example.com/cotizacion", "Cotización del día")
+        ))
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("dólar oficial hoy")
+    assert paths == ["/rss/search", "/news/search"]
+    assert results[0]["url"] == "https://finanzas.example.com/cotizacion"
+
+
+def test_bing_news_wrapper_rejects_multiple_or_non_https_destinations():
+    base = "https://www.bing.com/news/apiclick.aspx?"
+    assert web_search._bing_news_publisher_url(base + "url=https%3A%2F%2Fexample.com%2Fa&url=https%3A%2F%2Fevil.example%2F") == ""
+    assert not web_search._public_https_link(
+        web_search._bing_news_publisher_url(base + "url=http%3A%2F%2F127.0.0.1%2F")
+    )
