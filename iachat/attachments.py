@@ -19,7 +19,7 @@ def extract(attachments):
     for item in attachments:
         name = PurePath(item.name.replace("\\", "/")).name[:180]
         ext = name.lower().rsplit(".", 1)[-1]
-        if ext not in ("txt", "md", "pdf", "docx", "xlsx"):
+        if ext not in ("txt", "md", "csv", "json", "html", "pdf", "docx", "xlsx"):
             raise AttachmentError("unsupported_attachment_type")
         if len(item.content_base64) > 3_000_000:
             raise AttachmentError("attachment_too_large")
@@ -47,10 +47,10 @@ def extract(attachments):
                     for table in doc.tables[:20]:
                         for row in table.rows[:100]:
                             paragraphs.append(" | ".join(cell.text for cell in row.cells[:30]))
-                    content = "\\n".join(paragraphs)
+                    content = "\n".join(paragraphs)
                 else:
                     from openpyxl import load_workbook
-                    book = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+                    book = load_workbook(io.BytesIO(raw), read_only=True, data_only=False)
                     try:
                         lines = []
                         for sheet in book.worksheets[:5]:
@@ -60,7 +60,7 @@ def extract(attachments):
                                     lines.append(" | ".join("" if value is None else str(value)[:500] for value in row))
                                 if sum(len(line) for line in lines) > MAX_TOTAL_CHARS:
                                     break
-                        content = "\\n".join(lines)
+                        content = "\n".join(lines)
                     finally:
                         book.close()
             except AttachmentError:
