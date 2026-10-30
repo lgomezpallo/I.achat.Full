@@ -108,3 +108,20 @@ def test_ambiguous_edit_and_cross_owner_fail_closed(tmp_path):
         assert False
     except DataError:
         pass
+
+
+def test_arbitrary_numeric_field_exports_as_number_and_formula(tmp_path):
+    db=str(tmp_path/"custom.db")
+    data=StructuredStore(db)
+    files=FileWorkspace(db)
+    collection=data.create("alice","flota",[
+        {"name":"Unidad","type":"text"},{"name":"Kilómetros","type":"number"}])
+    data.add("alice",collection["id"],{"Unidad":"Fiorino","Kilómetros":21345})
+    saved=data.export("alice",collection["id"],files)
+    from iachat.document_render import render_download
+    row=files.get("alice",saved["id"])
+    payload,media=render_download(row["name"],row["content"])
+    sheet=load_workbook(BytesIO(payload)).active
+    assert sheet["B2"].value==21345 and sheet["B2"].data_type=="n"
+    assert sheet["B3"].value=="=SUM(B2:B2)" and sheet["B3"].data_type=="f"
+    assert files.get("bob",saved["id"]) is None
