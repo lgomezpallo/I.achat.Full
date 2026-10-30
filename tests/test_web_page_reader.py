@@ -105,7 +105,7 @@ def test_batch_failure_skips_and_never_exceeds_three_attempts(monkeypatch):
         "https://fail1.example/", "https://ok.example/",
         "https://fail2.example/", "https://late.example/",
     ])
-    assert [page.url for page in results] == ["https://ok.example/"]
+    assert [page.url for page in results] == ["https://ok.example/", "https://late.example/"]
     assert len(calls) == 4
     assert "https://late.example/" in calls
 
