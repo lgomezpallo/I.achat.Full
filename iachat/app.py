@@ -431,7 +431,8 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                     evidence_query = query
                     # Free-model rewrites can over-narrow current-event queries.
                     # Retry the original question only if no links were found.
-                    if (not links and len(questions) == 1
+                    if (not links and "no hubo resultados disponibles" in part.casefold()
+                            and len(questions) == 1
                             and lookup.reason == "semantic_current"
                             and query.strip().casefold() != message.text.strip().casefold()):
                         original = web_evidence_with_pages(message.text, news_fallback=True)
