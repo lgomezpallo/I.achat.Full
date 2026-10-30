@@ -102,6 +102,9 @@ def test_explicit_creation_never_depends_on_model_action_json():
         def answer(self, messages):
             raise RuntimeError("selector_should_not_run")
     from iachat.tool_planner import explicit_file_create_request
+    from iachat.document_render import explicit_spreadsheet_columns
+    assert explicit_spreadsheet_columns("Que tenga fecha, concepto, categoría, importe y un total automático.") == ["Fecha", "Concepto", "Categoría", "Importe"]
+    assert explicit_spreadsheet_columns("para anotar Fecha, Concepto, Categoría e Importe, con suma automática.") == ["Fecha", "Concepto", "Categoría", "Importe"]
     for request in (
         "Creame una planilla Excel para controlar mis gastos mensuales. Que tenga fecha, concepto, categoría, importe y un total automático. Dame el archivo para descargar.",
         "Armame un Excel descargable de movimientos con una suma automática de importes.",
@@ -154,7 +157,7 @@ def test_authenticated_excel_creation_from_exact_chat_and_equivalent(monkeypatch
             assert [sheet.cell(1, i).value for i in range(1, 5)] == [
                 "Fecha", "Concepto", "Categoría", "Importe",
             ]
-            assert sheet["D2"].value == 125.5 and sheet["D2"].data_type == "n"
+            assert sheet["D2"].value in (None, "")  # Ready for the user to enter a real amount.
             assert sheet["D102"].value == "=SUM(D2:D101)"
             assert sheet["D102"].data_type == "f"
             assert sheet["A102"].value == "TOTAL"

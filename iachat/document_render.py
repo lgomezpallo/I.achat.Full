@@ -112,6 +112,41 @@ def _safe_formula(value: str) -> str | None:
     return f"={name}({col_a.upper()}{row_a}:{col_b.upper()}{row_b})"
 
 
+
+
+def explicit_spreadsheet_columns(instruction: str) -> list[str] | None:
+    """Parse a clearly enumerated set of columns, independent of subject."""
+    match = re.search(
+        r"(?i)\b(?:que\s+tenga|que\s+incluya|(?:con\s+)?(?:las\s+)?columnas?|"
+        r"para\s+anotar|para\s+registrar|con\s+campos)\b\s*:?\s*",
+        instruction,
+    )
+    if not match:
+        return None
+    sample = instruction[match.end():].split(".", 1)[0].split("\n", 1)[0]
+    # A summary instruction is not a column name. This is grammatical
+    # extraction, not a special case for expenses or a specific prompt.
+    # Remove "con suma automática" before the broader total/sum suffix,
+    # otherwise the word "con" would be mistaken for a fifth column.
+    sample = re.split(
+        r"(?i),?\s+con\s+(?:un\s+|una\s+)?(?:total|suma|f[oó]rmula)\b",
+        sample, maxsplit=1,
+    )[0]
+    sample = re.split(
+        r"(?i)(?:,\s*|\s+(?:y|e)\s+)?(?:un\s+|una\s+|el\s+|la\s+)?"
+        r"(?:total|suma)\s+autom[aá]tic[oa]",
+        sample, maxsplit=1,
+    )[0]
+    sample = re.sub(r"(?i)\s+(?:y|e)\s+", ",", sample)
+    parts = [part.strip(" :;,") for part in sample.split(",")]
+    if not (2 <= len(parts) <= 20) or any(
+        not re.fullmatch(r"[\wÁÉÍÓÚáéíóúÑñ /-]{2,40}", part, re.UNICODE)
+        for part in parts
+    ):
+        return None
+    return [part[0].upper() + part[1:] for part in parts]
+
+
 def spreadsheet_needs_auto_total(instruction: str) -> bool:
     return bool(
         re.search(r"(?i)\b(?:total|suma|sumatoria)\b", instruction)
