@@ -2,6 +2,7 @@
 # Runs on Oracle, receives the GitHub run ID. Requires existing ubuntu sudo permissions.
 set -Eeuo pipefail
 run_id="${1:?missing_run_id}"
+deploy_started_epoch="$(date +%s)"
 [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "invalid_run_id"; exit 1; }
 app="$HOME/Proyecto/Aplicaciones/IAchat"
 archive="/tmp/iachat-release-${run_id}.tar.gz"
@@ -34,6 +35,11 @@ rollback() {
   fi
   if [[ "$status" -ne 0 && "$deployed" -eq 1 ]]; then
     echo "Deployment failed; reverting application code."
+    # Only allowlisted status metadata from this deployment. Never emit raw
+    # journal entries, prompts, response bodies or credential-bearing errors.
+    sudo -n journalctl -u iachat --since "@$deploy_started_epoch" --no-pager --output=cat 2>/dev/null |
+      grep -oE 'IACHAT_PROVIDER_DIAG provider=(groq|openrouter|nvidia) model=[A-Za-z0-9./:_-]+ status=[A-Za-z0-9_]+' |
+      sort | uniq -c | head -40 || true
     # Only remove files introduced by this release; preserve runtime data.
     rollback_ok=1
     if ! python3 "$stage/scripts/rollback_release.py" "$stage" "$backup" "$app"; then
@@ -111,6 +117,34 @@ rsync -a --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*
 # Online SQLite snapshot before additive schema changes. Private and checked.
 sudo -n env IACHAT_DB_BACKUP_TARGET="$recovery_dir/database-before.sqlite3" \
   /usr/bin/python3 "$stage/scripts/backup_iachat_db.py"
+# Verify Google OAuth credentials privately before any service change.
+# The original Google JSON is only used for consistency checks; never copied.
+sudo -n python3 - <<'PY'
+import json, os, stat
+from pathlib import Path
+root = Path("/etc/iachat")
+json_path, env_path = root / "google-client.json", root / "google-oidc.env"
+for path in (json_path, env_path):
+    st = path.stat()
+    assert stat.S_IMODE(st.st_mode) == 0o600 and st.st_uid == 0 and st.st_gid == 0 and st.st_size > 0, "google_credentials_permissions_invalid"
+data = json.loads(json_path.read_text())
+web = data.get("web")
+assert isinstance(web, dict), "google_client_not_web"
+env = {}
+for raw in env_path.read_text().splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    key, sep, value = line.partition("=")
+    assert sep, "google_env_format_invalid"
+    env[key.strip().removeprefix("export ").strip()] = value.strip().strip('"').strip("'")
+assert env.get("IACHAT_GOOGLE_CLIENT_ID") and env.get("IACHAT_GOOGLE_CLIENT_SECRET"), "google_env_values_missing"
+assert env.get("IACHAT_PUBLIC_ORIGIN") == "https://ia-chat.duckdns.org", "google_public_origin_invalid"
+assert env["IACHAT_GOOGLE_CLIENT_ID"] == web.get("client_id"), "google_client_id_mismatch"
+assert env["IACHAT_GOOGLE_CLIENT_SECRET"] == web.get("client_secret"), "google_client_secret_mismatch"
+assert "https://ia-chat.duckdns.org/auth/google/callback" in web.get("redirect_uris", []), "google_redirect_mismatch"
+print("GOOGLE_OIDC_PREFLIGHT: files present, root 0600, values and redirect consistent (secrets withheld)")
+PY
 deployed=1
 rsync -a --checksum --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$stage/" "$app/"
@@ -137,7 +171,7 @@ if sudo -n test -e "$dropin"; then
   dropin_existed=1
 fi
 dropin_changed=1
-printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=-/etc/iachat/google-oidc.env\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
+printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=/etc/iachat/google-oidc.env\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart iachat
 sudo -n systemctl is-active --quiet iachat
@@ -192,6 +226,7 @@ base = "http://127.0.0.1:8000"
 with urllib.request.urlopen(base + "/auth/status", timeout=5) as response:
     status = json.load(response)
 assert status["authenticated"] is False
+assert status.get("google_enabled") is True, "google_oidc_not_loaded"
 if status.get("google_enabled"):
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
