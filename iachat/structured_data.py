@@ -58,6 +58,8 @@ def clean_values(fields, raw):
             value = int(number) if number.is_integer() else number
         else:
             value = str(value).strip()
+            if field["type"] == "date" and norm(value) == "hoy":
+                value = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).date().isoformat()
             if len(value) > 500:
                 raise DataError("value_too_long")
         result[field["name"]] = value
