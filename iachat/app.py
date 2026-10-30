@@ -433,9 +433,14 @@ def download_workspace_file(file_id: str, request: Request):
     row = file_workspace.get(_user(request), file_id)
     if row is None:
         raise HTTPException(404, "file_not_found")
+    from .document_render import render_download
+    try:
+        data, media_type = render_download(row["name"], row["content"])
+    except WorkspaceError as exc:
+        _file_error(exc)
     filename = quote(row["name"], safe="")
     return RawResponse(
-        row["content"].encode("utf-8"), media_type="application/octet-stream",
+        data, media_type=media_type,
         headers={
             "Content-Disposition": "attachment; filename=\"document.txt\"; filename*=UTF-8''" + filename,
             "X-Content-Type-Options": "nosniff",
@@ -481,7 +486,7 @@ def generate_workspace_file(payload: FileGenerateInput, request: Request):
     guidance = (
         "Sos un generador y editor de documentos. Respondé EXCLUSIVAMENTE un objeto JSON "
         "válido con dos campos string: name y content. No uses Markdown alrededor del JSON. "
-        "Formatos permitidos: .txt, .md, .csv, .json, .html. Máximo 200 KB de contenido. "
+        "Formatos permitidos: .txt, .md, .csv, .json, .html, .pdf, .docx, .xlsx. Para .pdf y .docx escribí el contenido como texto con títulos Markdown (#) y viñetas (-); se convertirá a documento real al descargar. Para .xlsx devolvé contenido CSV con columnas separadas por comas y primera fila de encabezados; se convertirá a Excel real al descargar, sin ejecutar fórmulas. Máximo 200 KB de contenido. "
         "Producí el documento solicitado, no una explicación. No ejecutes código ni solicites "
         "datos secretos. Si editás, conservá lo no solicitado del documento existente."
     )
