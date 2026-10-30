@@ -113,10 +113,17 @@ def diagnose_news_feed(query: str) -> None:
             safe = 0
             relevant = 0
             wrappers = 0
+            wrapper_schemes: set[str] = set()
+            target_schemes: set[str] = set()
             for item in items:
                 raw = (item.findtext("link") or "").strip()
                 if "/news/apiclick.aspx?" in raw:
+                    from urllib.parse import parse_qs
                     wrappers += 1
+                    parsed_wrapper = urlsplit(raw)
+                    wrapper_schemes.add(parsed_wrapper.scheme[:12])
+                    for target in parse_qs(parsed_wrapper.query).get("url", [])[:2]:
+                        target_schemes.add(urlsplit(target).scheme[:12])
                 direct = _bing_news_publisher_url(raw) if label == "bing_news" else raw
                 if _public_https_link(direct):
                     safe += 1
@@ -127,8 +134,9 @@ def diagnose_news_feed(query: str) -> None:
                     if _relevant_direct_fallback(candidate, query):
                         relevant += 1
             print("RSS_DIAG:", label, "http", status, "items", len(items),
-                  "wrapped", wrappers, "safe_https", safe,
-                  "relevant", relevant, flush=True)
+                  "wrapped", wrappers, "wrapper_schemes", ",".join(sorted(wrapper_schemes)),
+                  "target_schemes", ",".join(sorted(target_schemes)),
+                  "safe_https", safe, "relevant", relevant, flush=True)
         except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError, TypeError) as exc:
             print("RSS_DIAG:", label, "error", type(exc).__name__, flush=True)
 
