@@ -422,16 +422,24 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 questions = split_independent_search_questions(message.text)
                 queries = questions if len(questions) > 1 else [lookup.query]
                 evidence_parts = []
-                seen_urls = set()
+                source_groups = []
                 for query in queries[:2]:
                     part = (web_evidence_with_pages(query, news_fallback=True)
                             if lookup.reason == "semantic_current"
                             else web_evidence_with_pages(query))
                     evidence_parts.append(f"[EVIDENCIA PARA PREGUNTA {len(evidence_parts) + 1}: {query[:300]}]\n{part}")
-                    for source in extracted_source_links(part):
-                        if source["url"] not in seen_urls:
-                            seen_urls.add(source["url"])
-                            web_sources.append(source)
+                    source_groups.append(extracted_source_links(part))
+                # The UI shows only the first three sources. Interleave the
+                # independent questions so the visible links cannot all belong
+                # to the first topic; preserve complete provenance for reload.
+                seen_urls = set()
+                for source_index in range(max((len(group) for group in source_groups), default=0)):
+                    for group in source_groups:
+                        if source_index < len(group):
+                            source = group[source_index]
+                            if source["url"] not in seen_urls:
+                                seen_urls.add(source["url"])
+                                web_sources.append(source)
                 evidence = "\n\n".join(evidence_parts)
                 web_fetch_ms = int((time.monotonic() - fetch_started) * 1000)
                 web_tool_messages.append({"role": "user", "content":
