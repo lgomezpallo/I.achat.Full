@@ -196,6 +196,8 @@ def ground_web_answer_urls(answer: str, sources: list[dict[str, str]]) -> str:
         candidate = raw.rstrip(".,;")
         if candidate in allowed:
             return raw
-        return "[enlace omitido: no figura entre las fuentes consultadas]" + raw[len(candidate):]
+        # Do not expose internal URL validation diagnostics to readers.
+        # The consulted links remain available separately as web_sources.
+        return raw[len(candidate):]
 
     return re.sub(r"https?://[^\s)<>]+", replace, answer)
