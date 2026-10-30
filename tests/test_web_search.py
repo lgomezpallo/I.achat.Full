@@ -234,7 +234,7 @@ def test_semantic_current_query_without_date_prefers_free_news(monkeypatch):
     assert results[0]["url"] == "https://example.com/tramite"
 
 
-def test_opaque_google_news_links_use_bounded_bing_direct_publisher_fallback(monkeypatch):
+def test_opaque_google_news_links_use_only_relevant_direct_publisher_fallback(monkeypatch):
     calls = []
 
     def handler(request):
@@ -245,19 +245,59 @@ def test_opaque_google_news_links_use_bounded_bing_direct_publisher_fallback(mon
                 for i in range(5)
             ]))
         return httpx.Response(200, content=rss(
-            ("Direct 1", "https://publisher.example/story", "Publisher excerpt"),
-            ("Direct 2", "https://other.example/story", "Other excerpt"),
-            ("Duplicate", "https://publisher.example/story", "Repeat"),
+            ("Mapa de restaurantes", "https://maps.example/restaurants", "Direcciones y opiniones"),
+            ("Precios de combustibles en Argentina", "https://publisher.example/story",
+             "Precios de combustibles Argentina hoy"),
+            ("Precio combustibles hoy", "https://other.example/story",
+             "Valores de combustibles Argentina"),
+            ("Duplicado", "https://publisher.example/story", "Repetido"),
         ))
 
     install_http(monkeypatch, handler)
-    results = web_search.search_web("¿Cuándo juega River?")
+    results = web_search.search_web("precios combustibles Argentina hoy")
     assert calls == ["news.google.com", "www.bing.com"]
     assert len(results) == 5
     assert [x["url"] for x in results][-2:] == [
         "https://publisher.example/story", "https://other.example/story"
     ]
+    assert "https://maps.example/restaurants" not in [x["url"] for x in results]
     assert results[0]["title"] == "News 0"
+
+
+def test_irrelevant_direct_fallback_keeps_news_instead_of_padding_sources(monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.host)
+        if request.url.host == "news.google.com":
+            return httpx.Response(200, content=rss(
+                ("Noticia 1", "https://news.google.com/rss/articles/a", "Texto 1"),
+                ("Noticia 2", "https://news.google.com/rss/articles/b", "Texto 2"),
+            ))
+        return httpx.Response(200, content=rss(
+            ("Movie listings", "https://cinema.example/movies", "Film reviews"),
+            ("Map locations", "https://maps.example/places", "Restaurants"),
+        ))
+
+    install_http(monkeypatch, handler)
+    results = web_search.search_web("cotización dólar oficial Argentina hoy")
+    assert calls == ["news.google.com", "www.bing.com"]
+    assert len(results) == 2
+    assert all(item["url"].startswith("https://news.google.com/") for item in results)
+
+
+def test_direct_fallback_relevance_is_general_and_accent_insensitive():
+    candidate = {
+        "title": "Cotizacion del dolar oficial",
+        "snippet": "Argentina: precio actualizado",
+    }
+    assert web_search._relevant_direct_fallback(
+        candidate, "cotización dólar oficial Argentina hoy"
+    )
+    assert not web_search._relevant_direct_fallback(
+        {"title": "Información de mapas", "snippet": "Ubicaciones de Argentina"},
+        "cotización dólar oficial Argentina hoy",
+    )
 
 
 def test_opaque_news_fallback_failure_preserves_news_snippets(monkeypatch):
