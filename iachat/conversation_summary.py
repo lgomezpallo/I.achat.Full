@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 
 _RULES = (
     ("cambio", re.compile(r"^(?:corrijo|correcci[oó]n\s*:|rectifico|en realidad\b|cambiamos\b|cambi[eé]\b)", re.I)),
@@ -82,7 +83,21 @@ def build_summary(history: list[dict], previous: dict | None = None) -> dict:
     }
 
 
-def render_summary(summary: dict | None, max_chars: int = 3500) -> str:
+def _matching_terms(text: str) -> set[str]:
+    """Accent-insensitive lexical terms for conservative evidence selection."""
+    plain = "".join(
+        ch for ch in unicodedata.normalize("NFD", text.casefold())
+        if unicodedata.category(ch) != "Mn"
+    )
+    stop = {
+        "que", "como", "para", "sobre", "donde", "cuando", "cual",
+        "dijimos", "decidimos", "recuerdas", "recordas", "tenemos",
+        "proyecto", "hablamos", "antes", "ahora", "quiero",
+    }
+    return {word for word in re.findall(r"[a-z]{4,}", plain) if word not in stop}
+
+
+def render_summary(summary: dict | None, max_chars: int = 3500, question: str = "") -> str:
     """Select provenance-backed evidence with a strict context budget.
 
     Recent corrections and decisions are reserved first, then original
@@ -111,6 +126,20 @@ def render_summary(summary: dict | None, max_chars: int = 3500) -> str:
         if isinstance(index, int) and index not in seen:
             seen.add(index)
             priority.append(item)
+
+    # Reserve context for source-backed statements matching the question,
+    # including decisions in the middle of long conversations.
+    terms = _matching_terms(question) if question else set()
+    if terms:
+        ranked = []
+        for item in entries:
+            overlap = len(terms & _matching_terms(str(item.get("quote", ""))))
+            if overlap:
+                ranked.append((overlap, item.get("kind") == "cambio",
+                               item.get("source_index", -1), item))
+        ranked.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+        for _, _, _, item in ranked[:6]:
+            offer(item)
 
     for group in by_kind.values():
         if group:
