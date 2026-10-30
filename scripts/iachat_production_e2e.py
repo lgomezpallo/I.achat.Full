@@ -466,6 +466,46 @@ def child() -> None:
             except (httpx.HTTPError, ValueError, TypeError) as exc:
                 print("MODEL_FILE_GENERATION_ERROR:", type(exc).__name__, flush=True)
                 failures.append("model_file_generation_error")
+            # Regression for the actual 30/10 incident. These are real
+            # authenticated conversations using the configured FREE provider,
+            # followed by HTTP downloads and OOXML inspection. Fail deployment
+            # if either prompt yields a guide instead of a genuine XLSX.
+            excel_requests = (
+                "Creame una planilla Excel para controlar mis gastos mensuales. Que tenga fecha, concepto, categoría, importe y un total automático. Dame el archivo para descargar.",
+                "Armame un Excel descargable para anotar Fecha, Concepto, Categoría e Importe, con suma automática.",
+            )
+            for index, instruction in enumerate(excel_requests, 1):
+                ok = False
+                status_code = 0
+                try:
+                    response = client.post("/api/chat", json={"text": instruction})
+                    status_code = response.status_code
+                    if response.status_code == 200:
+                        payload = response.json()
+                        info = payload.get("generated_file")
+                        if (isinstance(info, dict)
+                                and isinstance(info.get("id"), str)
+                                and str(info.get("name", "")).lower().endswith(".xlsx")
+                                and f"/api/files/{info['id']}/download" in payload.get("answer", "")):
+                            download = client.get(f"/api/files/{info['id']}/download")
+                            if download.status_code == 200 and download.content.startswith(b"PK"):
+                                sheet = load_workbook(BytesIO(download.content)).active
+                                headers = [sheet.cell(1, i).value for i in range(1, 5)]
+                                total_row = sheet.max_row
+                                formula = sheet.cell(total_row, 4)
+                                ok = (
+                                    headers == ["Fecha", "Concepto", "Categoría", "Importe"]
+                                    and sheet.cell(total_row, 1).value == "TOTAL"
+                                    and formula.data_type == "f"
+                                    and bool(re.fullmatch(r"=SUM\(D2:D[0-9]{2,4}\)", str(formula.value)))
+                                    and sheet.parent.calculation.calcMode == "auto"
+                                )
+                except (httpx.HTTPError, ValueError, TypeError, KeyError, OSError):
+                    ok = False
+                print(f"CHAT_EXCEL_AUTOTOTAL_{index}:",
+                      "OK" if ok else f"FAILED_HTTP_{status_code}", flush=True)
+                if not ok:
+                    failures.append(f"chat_excel_autototal_{index}_failed")
             # Critical acceptance: create and download a real file from an
             # ordinary authenticated chat message, without entering Files mode.
             # This is a LIVE model decision and LIVE model-generated content.
