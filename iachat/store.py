@@ -15,6 +15,7 @@ class ConversationStore:
         self._db.execute("CREATE TABLE IF NOT EXISTS conversation_index (id TEXT PRIMARY KEY, title TEXT NOT NULL, updated_at INTEGER NOT NULL)")
         self._db.execute("CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, updated_at INTEGER NOT NULL)")
         self._db.execute("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, admin INTEGER NOT NULL DEFAULT 0)")
+        self._db.execute("CREATE TABLE IF NOT EXISTS oidc_identities (provider TEXT NOT NULL, subject TEXT NOT NULL, username TEXT NOT NULL UNIQUE, PRIMARY KEY(provider,subject), FOREIGN KEY(username) REFERENCES users(username))")
         for table in ("conversations", "conversation_index", "memories"):
             cols = {c[1] for c in self._db.execute(f"PRAGMA table_info({table})")}
             if "owner" not in cols:
@@ -54,6 +55,39 @@ class ConversationStore:
                 return True
             except sqlite3.IntegrityError:
                 return False
+
+    def get_or_create_oidc_user(self, provider: str, subject: str) -> str:
+        """Persist the verified provider subject; never link accounts by email."""
+        if provider != "google" or not isinstance(subject, str) or not 1 <= len(subject) <= 255:
+            raise ValueError("invalid_identity")
+        with self._lock:
+            row = self._db.execute(
+                "SELECT u.username,u.enabled FROM oidc_identities i JOIN users u "
+                "ON u.username=i.username WHERE i.provider=? AND i.subject=?",
+                (provider, subject),
+            ).fetchone()
+            if row:
+                if not row[1]:
+                    raise ValueError("account_disabled")
+                return row[0]
+            username = "g_" + secrets.token_hex(12)
+            salt = secrets.token_hex(16)
+            # OIDC users have an unknown random password and cannot log in by password.
+            password_hash = salt + ":" + self._digest(secrets.token_urlsafe(48), salt)
+            try:
+                self._db.execute(
+                    "INSERT INTO users(username,password_hash,enabled,admin) VALUES(?,?,1,0)",
+                    (username, password_hash),
+                )
+                self._db.execute(
+                    "INSERT INTO oidc_identities(provider,subject,username) VALUES(?,?,?)",
+                    (provider, subject, username),
+                )
+                self._db.commit()
+            except Exception:
+                self._db.rollback()
+                raise
+            return username
 
     def verify_user(self, username: str, password: str) -> bool:
         row = self._db.execute("SELECT password_hash FROM users WHERE username=? AND enabled=1", (username,)).fetchone()
