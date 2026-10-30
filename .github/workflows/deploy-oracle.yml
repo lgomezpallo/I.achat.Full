@@ -55,6 +55,8 @@ jobs:
           expected='SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
           test "$actual" = "$expected" || { echo "::error::La huella SSH cambió. No se despliega."; exit 1; }
           chmod 600 ~/.ssh/known_hosts
+      # Mandatory: deterministic unit tests, installation hash, service health, OIDC and private APIs.
+      # Live free-provider inference is a separate check, not a deployment gate.
       - name: Transferir y desplegar con reversión
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
