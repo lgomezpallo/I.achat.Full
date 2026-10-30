@@ -138,6 +138,31 @@ def test_long_conversation_recalls_start_middle_end_without_assistant_fabricatio
     assert module.store.get_summary("long", "bob") is None
 
 
+def test_stale_writer_from_second_process_cannot_erase_turns(tmp_path):
+    path = str(tmp_path / "multi-process.db")
+    first = ConversationStore(path)
+    second = ConversationStore(path)
+    initial = [
+        {"role": "user", "content": "Decidimos guardar todas las respuestas."},
+        {"role": "assistant", "content": "OK"},
+    ]
+    first.put("shared", initial, "alice")
+    stale = second.get("shared", "alice")
+    first.put("shared", [
+        *initial,
+        {"role": "user", "content": "Falta comprobar persistencia."},
+        {"role": "assistant", "content": "OK"},
+    ], "alice")
+    with pytest.raises(ValueError, match="conversation_history_conflict"):
+        second.put("shared", [
+            *stale,
+            {"role": "user", "content": "Corrijo: otro texto."},
+            {"role": "assistant", "content": "OK"},
+        ], "alice")
+    assert len(ConversationStore(path).get("shared", "alice")) == 4
+    assert first.get_summary("shared", "alice")["version"] == 2
+
+
 def test_provider_failure_does_not_advance_summary_or_history(monkeypatch, tmp_path):
     module.store = ConversationStore(str(tmp_path / "failed.db"))
     module.store.put("c", [
