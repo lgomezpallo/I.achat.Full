@@ -182,7 +182,7 @@ def child() -> None:
                         if isinstance(item, dict) and isinstance(item.get("url"), str)
                         and urlsplit(item["url"]).scheme == "https"
                     } if isinstance(returned, list) else set()
-                    urls = set(re.findall(r"https://[^\\s)<>]+", answer))
+                    urls = set(re.findall(r"https://[^\s)<>]+", answer))
                     matched = any(u.rstrip(".,;") in source_urls for u in urls)
                     generic = bool(GENERIC.search(answer))
                     cited_hosts = sorted({
