@@ -139,7 +139,7 @@ class ConversationStore:
                         {key: source[key] for key in (
                             "title", "url", "evidence_type", "rss_publisher_unverified"
                         ) if isinstance(source.get(key), str)}
-                        for source in sources[:5]
+                        for source in sources[:10]
                         if isinstance(source, dict)
                         and isinstance(source.get("url"), str)
                         and source["url"].startswith("https://")
