@@ -179,3 +179,28 @@ def test_semantic_query_rejects_invented_record_ids(tmp_path):
 
     answer = handle("sumá kilómetros", "alice", InventedIds(), data, files)
     assert "No se modificaron datos" in answer["answer"]
+
+
+def test_localized_numeric_values_do_not_turn_thousands_into_decimals(tmp_path):
+    data = StructuredStore(str(tmp_path / "numbers.db"))
+    collection = data.create("alice", "mediciones", [
+        {"name": "Concepto", "type": "text"},
+        {"name": "Cantidad", "type": "number"},
+    ])
+    cid = collection["id"]
+    for raw, expected in (
+        ("40.000", 40000),
+        ("$40.000,50", 40000.5),
+        ("1,234.56", 1234.56),
+        ("1234,56", 1234.56),
+        ("0.125", 0.125),
+        (40000, 40000),
+    ):
+        values = data.add("alice", cid, {"Concepto": "prueba", "Cantidad": raw})
+        assert values["Cantidad"] == expected
+    for bad in ("40.00.0", "40,00,0", "NaN", "1e309"):
+        try:
+            data.add("alice", cid, {"Cantidad": bad})
+            assert False, bad
+        except DataError:
+            pass
