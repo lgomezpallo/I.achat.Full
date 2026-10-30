@@ -341,6 +341,21 @@ def child() -> None:
                 )
                 if not probe_ok:
                     failures.append("google_banal_chat_web_or_answer_regression")
+                if probe_ok:
+                    restored = client.get("/api/conversations/" + probe_data["conversation_id"])
+                    restored_last = (
+                        restored.json().get("history", [{}])[-1]
+                        if restored.status_code == 200 else {}
+                    )
+                    persisted_ok = (
+                        restored_last.get("web_sources") == []
+                        and isinstance(restored_last.get("elapsed_ms"), int)
+                        and isinstance(restored_last.get("completed_at"), str)
+                    )
+                    print("GOOGLE_BANAL_RELOAD_METADATA:",
+                          "OK" if persisted_ok else "FAIL", flush=True)
+                    if not persisted_ok:
+                        failures.append("google_banal_reload_metadata_missing")
             except (httpx.HTTPError, ValueError, TypeError) as exc:
                 print("GOOGLE_BANAL_CHAT_ERROR:", type(exc).__name__, flush=True)
                 failures.append("google_banal_chat_http_error")
@@ -366,6 +381,21 @@ def child() -> None:
                     # The actual chat response carries the exact consulted links;
                     # an independent second RSS request can return different URLs.
                     returned = data.get("web_sources", [])
+                    if response.status_code == 200 and data.get("conversation_id"):
+                        restored = client.get("/api/conversations/" + data["conversation_id"])
+                        restored_last = (
+                            restored.json().get("history", [{}])[-1]
+                            if restored.status_code == 200 else {}
+                        )
+                        persisted_ok = (
+                            restored_last.get("web_sources") == returned
+                            and isinstance(restored_last.get("elapsed_ms"), int)
+                            and isinstance(restored_last.get("completed_at"), str)
+                        )
+                        print(f"CHAT_{idx}_RELOAD_METADATA:",
+                              "OK" if persisted_ok else "FAIL", flush=True)
+                        if not persisted_ok:
+                            failures.append(f"chat_{idx}_reload_metadata_missing")
                     source_urls = {
                         item["url"] for item in returned
                         if isinstance(item, dict) and isinstance(item.get("url"), str)

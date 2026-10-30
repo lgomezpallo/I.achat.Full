@@ -179,7 +179,7 @@ class MemoryInput(BaseModel):
 class MessageOutput(BaseModel):
     conversation_id: str
     answer: str
-    history: list[dict[str, str]]
+    history: list[dict[str, object]]
     web_sources: list[dict[str, str]] = Field(default_factory=list)
     generated_file: dict[str, str] | None = None
 
@@ -495,7 +495,14 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         model_ms, int((time.monotonic() - chat_started) * 1000),
     )
     visible_text = message.text + ("\n\nAdjuntos: " + ", ".join(attachment_names) if attachment_names else "")
-    updated = [*history, {"role": "user", "content": visible_text}, {"role": "assistant", "content": answer}]
+    from datetime import datetime, timezone
+    assistant_record = {
+        "role": "assistant", "content": answer,
+        "web_sources": web_sources,
+        "elapsed_ms": int((time.monotonic() - chat_started) * 1000),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    updated = [*history, {"role": "user", "content": visible_text}, assistant_record]
     store.put(conversation_id, updated, owner, message.project.strip())
     if images:
         store.save_images(conversation_id, owner, len(history), images, image_names)

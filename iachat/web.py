@@ -130,6 +130,24 @@ function addResponseTiming(node,elapsedMs,completedAt){
   meta.textContent=clock+' · '+(elapsedMs/1000).toFixed(1).replace('.',',')+' s';
   node.appendChild(meta);
 }
+function addAssistantMetadata(node,sources,elapsedMs,completedAt){
+ if(Array.isArray(sources)&&sources.length){
+  var sourcesBox=document.createElement('div');sourcesBox.className='web-sources';
+  sourcesBox.style.cssText='margin-top:10px;padding-top:8px;border-top:1px solid var(--edge);font-size:12px;overflow-wrap:anywhere';
+  var heading=document.createElement('div');heading.textContent='Fuentes recuperadas (contenido no verificado independientemente):';heading.style.cssText='color:var(--muted);margin-bottom:5px';sourcesBox.append(heading);
+  sources.slice(0,3).forEach(function(source,i){
+   if(!source||typeof source.url!=='string')return;
+   try{var parsed=new URL(source.url);if(parsed.protocol!=='https:')return}
+   catch(_){return}
+   var a=document.createElement('a');a.href=source.url;a.target='_blank';a.rel='noopener noreferrer';
+   a.textContent=(i+1)+'. '+(source.evidence_type==='page_read'?'Página leída: ':'Resumen RSS: ')+(source.title||parsed.hostname);a.style.cssText='display:block;margin:3px 0';
+   sourcesBox.append(a);
+  });
+  if(sourcesBox.querySelector('a'))node.append(sourcesBox);
+ }
+ var when=completedAt instanceof Date?completedAt:new Date(completedAt);
+ if(Number.isFinite(elapsedMs)&&elapsedMs>=0&&!Number.isNaN(when.getTime()))addResponseTiming(node,elapsedMs,when);
+}
 function reset(){clearFileMode();conversationId=null;messages.innerHTML='<div class="empty" id="empty">¿En qué te puedo ayudar?</div>';input.value='';drawer.classList.remove('open');settingsDrawer.classList.remove('open');}
 function renderHistory(){var list=document.getElementById('historyList');list.replaceChildren();ids.forEach(function(item){var wrap=document.createElement('div');wrap.style.cssText='display:flex;align-items:center;gap:4px';var b=document.createElement('button');b.className='history-item';b.style.flex='1';b.textContent=item.title||'Conversación';b.onclick=function(){openConversation(item.id)};var del=document.createElement('button');del.textContent='×';del.title='Borrar conversación';del.setAttribute('aria-label','Borrar conversación');del.style.cssText='background:transparent;padding:10px';del.onclick=async function(){if(!confirm('¿Borrar esta conversación?'))return;var r=await fetch('/api/conversations/'+encodeURIComponent(item.id),{method:'DELETE'});if(r.ok){if(conversationId===item.id)reset();await syncHistory()}};var move=document.createElement('button');move.textContent='⇄';move.title='Mover conversación a otro proyecto';move.setAttribute('aria-label','Mover conversación');move.style.cssText='background:transparent;padding:10px';move.onclick=async function(){var value=prompt('Mover a proyecto (vacío = General)',item.project||'');if(value===null)return;value=value.trim();if(value.length>60||!/^[\p{L}\p{N}_ -]*$/u.test(value)){alert('Nombre de proyecto no válido');return}var resp=await fetch('/api/conversations/'+encodeURIComponent(item.id)+'/project',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({project:value})});if(resp.ok){if(conversationId===item.id)reset();await syncHistory()}else alert('No se pudo mover la conversación')};wrap.append(b,move,del);list.appendChild(wrap)})}
 var searchTimer, searchSequence=0;
@@ -150,7 +168,7 @@ document.getElementById('historySearch').addEventListener('input',function(){
   }catch(e){if(sequence===searchSequence)document.getElementById('historySearchStatus').textContent='No se pudo buscar'}
  },280);
 });
-async function openConversation(id){try{var r=await fetch('/api/conversations/'+encodeURIComponent(id));if(r.status===401){showLogin();return}if(!r.ok)throw Error('No se pudo recuperar la conversación');var d=await r.json();conversationId=id;messages.replaceChildren();if(!d.history.length)reset();else d.history.forEach(function(m){add(m.role,m.content)});drawer.classList.remove('open')}catch(e){add('assistant',String(e.message||e),true)}}
+async function openConversation(id){try{var r=await fetch('/api/conversations/'+encodeURIComponent(id));if(r.status===401){showLogin();return}if(!r.ok)throw Error('No se pudo recuperar la conversación');var d=await r.json();conversationId=id;messages.replaceChildren();if(!d.history.length)reset();else d.history.forEach(function(m){var node=add(m.role,m.content);if(m.role==='assistant')addAssistantMetadata(node,m.web_sources,m.elapsed_ms,m.completed_at)});drawer.classList.remove('open')}catch(e){add('assistant',String(e.message||e),true)}}
 async function syncMemories(){var r=await fetch('/api/memories');if(!r.ok)return;var d=await r.json();var box=document.getElementById('memoryList');box.replaceChildren();if(!d.memories.length){var empty=document.createElement('p');empty.textContent='Todavía no hay recuerdos guardados.';empty.style.cssText='color:var(--muted);font-size:13px';box.append(empty)}d.memories.forEach(function(item){var el=document.createElement('div');el.style.cssText='padding:8px 0;border-bottom:1px solid var(--edge)';var txt=document.createElement('div');txt.textContent=(item.project?'['+item.project+'] ':'[General] ')+item.content;txt.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px';var controls=document.createElement('div');controls.style.cssText='display:flex;gap:8px';var edit=document.createElement('button');edit.textContent='Editar';edit.style.cssText='background:transparent;color:var(--accent)';edit.onclick=async function(){var value=prompt('Editar recuerdo',item.content);if(value===null||!value.trim())return;var q=await fetch('/api/memories/'+encodeURIComponent(item.id),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({content:value.trim(),project:item.project||''})});if(q.ok)syncMemories()};var del=document.createElement('button');del.textContent='Borrar';del.style.cssText='background:transparent;color:#ff9da7';del.onclick=async function(){if(!confirm('¿Eliminar este recuerdo?'))return;var q=await fetch('/api/memories/'+encodeURIComponent(item.id),{method:'DELETE'});if(q.ok)syncMemories()};var move=document.createElement('button');move.textContent='Proyecto';move.title='Cambiar proyecto del recuerdo';move.style.cssText='background:transparent;color:var(--accent)';move.onclick=async function(){var value=prompt('Proyecto del recuerdo (dejá vacío para General)',item.project||'');if(value===null)return;value=value.trim();if(value.length>60||!/^[\p{L}\p{N}_ -]*$/u.test(value)){alert('Usá un nombre de hasta 60 caracteres, sin símbolos especiales.');return}var q=await fetch('/api/memories/'+encodeURIComponent(item.id),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({content:item.content,project:value})});if(q.ok)syncMemories();else alert('No se pudo cambiar el proyecto')};controls.append(edit,move,del);el.append(txt,controls);box.append(el)})}
 document.getElementById('showAutoMemories').onclick=async function(){
  var box=document.getElementById('autoMemoryLog');box.replaceChildren();
@@ -315,21 +333,10 @@ var stage='reading_files';var accepted=false;try{payload.attachments=await Promi
   if(!cached.ok)throw new Error('file_read_failed_reselect');
   return {name:f.name,content_base64:cached.data};
 }));stage='sending_request';var r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});var raw=await r.text(),d;try{d=JSON.parse(raw)}catch(_){d={detail:'El servidor respondió con un error no válido.'}}waiting.remove();if(!r.ok){var detail=typeof d.detail==='string'?d.detail:'No se pudo procesar el adjunto';alert('No se envió el mensaje (HTTP '+r.status+'): '+detail+'. Podés reintentar.');if(r.status===401)showLogin();return}if(!d||typeof d.answer!=='string'||!d.conversation_id){alert('El servidor devolvió una respuesta incompleta. Conservamos tu mensaje para reintentar.');return}accepted=true;var sent=add('user',text);payload.attachments.forEach(function(a,i){var f=files[i],ext=f.name.toLowerCase();if(/\.(jpg|jpeg|png|webp)$/.test(ext)){var img=document.createElement('img');img.className='sent-image';img.alt='Imagen adjunta: '+f.name;img.src='data:'+(ext.endsWith('.png')?'image/png':ext.endsWith('.webp')?'image/webp':'image/jpeg')+';base64,'+a.content_base64;sent.appendChild(img)}else{var note=document.createElement('div');note.className='sent-file';note.textContent='📄 '+f.name;sent.appendChild(note)}});input.value='';selectedFiles=[];fileInput.value='';imageInput.value='';showSelectedAttachments();conversationId=d.conversation_id;ids=ids.filter(function(x){return x.id!==conversationId});ids.unshift({id:conversationId,title:text.slice(0,55),project:activeProject()});saveIds();syncHistory().catch(function(){});var responseNode=add('assistant',d.answer);
-if(Array.isArray(d.web_sources)&&d.web_sources.length){
- var sourcesBox=document.createElement('div');sourcesBox.className='web-sources';
- sourcesBox.style.cssText='margin-top:10px;padding-top:8px;border-top:1px solid var(--edge);font-size:12px;overflow-wrap:anywhere';
- var heading=document.createElement('div');heading.textContent='Fuentes recuperadas (contenido no verificado independientemente):';heading.style.cssText='color:var(--muted);margin-bottom:5px';sourcesBox.append(heading);
- d.web_sources.slice(0,3).forEach(function(source,i){
-  if(!source||typeof source.url!=='string')return;
-  try{var parsed=new URL(source.url);if(parsed.protocol!=='https:')return}
-  catch(_){return}
-  var a=document.createElement('a');a.href=source.url;a.target='_blank';a.rel='noopener noreferrer';
-  a.textContent=(i+1)+'. '+(source.evidence_type==='page_read'?'Página leída: ':'Resumen RSS: ')+(source.title||parsed.hostname);a.style.cssText='display:block;margin:3px 0';
-  sourcesBox.append(a);
- });
- responseNode.append(sourcesBox);
-}
-addResponseTiming(responseNode,performance.now()-requestStartedAt,new Date())}
+var lastMessage=Array.isArray(d.history)?d.history[d.history.length-1]:{};
+addAssistantMetadata(responseNode,lastMessage.web_sources||d.web_sources,
+ Number.isFinite(lastMessage.elapsed_ms)?lastMessage.elapsed_ms:performance.now()-requestStartedAt,
+ lastMessage.completed_at||new Date().toISOString())}
 catch(err){if(waiting.isConnected)waiting.remove();if(accepted){console.error('IAchat display failure after successful send',err);alert('El mensaje se envió, pero hubo un problema al actualizar la pantalla. Recargá la conversación antes de reintentar para evitar duplicados.');return}var reason=err&&err.name==='TypeError'?'No se pudo completar la solicitud HTTP. Puede ser un problema de conexión, proxy o límite de carga.':err&&err.name==='AbortError'?'La solicitud fue interrumpida.':'Error inesperado al preparar o enviar el mensaje.';console.error('IAchat upload failure',stage,err);alert((stage==='reading_files'?'No se pudo leer el archivo. Quitá el adjunto y volvé a seleccionarlo desde Imágenes o Documentos. ':reason)+' El texto sigue disponible para reintentar.')}finally{busy=false}};
 input.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('form').requestSubmit()}});
 init();if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js');
