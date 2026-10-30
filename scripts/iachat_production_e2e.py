@@ -108,7 +108,7 @@ def diagnose_news_feed(query: str) -> None:
             if status != 200:
                 print("RSS_DIAG:", label, "http", status, flush=True)
                 continue
-            root = ET.fromstring(body)
+            root = ET.fromstring(bytes(body))
             items = root.findall(".//channel/item")[:20]
             safe = 0
             relevant = 0
@@ -129,7 +129,7 @@ def diagnose_news_feed(query: str) -> None:
             print("RSS_DIAG:", label, "http", status, "items", len(items),
                   "wrapped", wrappers, "safe_https", safe,
                   "relevant", relevant, flush=True)
-        except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError) as exc:
+        except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError, TypeError) as exc:
             print("RSS_DIAG:", label, "error", type(exc).__name__, flush=True)
 
 
