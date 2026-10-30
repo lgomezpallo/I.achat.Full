@@ -201,7 +201,8 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
 
     The semantic planner can identify a current question whose rewritten
     search query has no temporal words. It explicitly opts into this fallback.
-    At most two public requests, no paid APIs or invented search results.
+    At most three public requests (Google News, Bing News, general RSS),
+    no paid APIs or invented search results.
     """
     query = query.strip()[:300]
     if not query:
@@ -219,7 +220,7 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
     news = (GOOGLE_NEWS_RSS, {
         "q": query, "hl": "es-419", "gl": "AR", "ceid": "AR:es-419",
     })
-    sources = [news, bing_news] if needs_current_information(query) or news_fallback else [bing]
+    sources = [news, bing_news, bing] if needs_current_information(query) or news_fallback else [bing]
     for url, params in sources:
         try:
             results = _fetch_feed(url, params, bounded_timeout)
@@ -237,14 +238,18 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
                 and urlsplit(item["url"]).path.startswith(("/rss/articles/", "/articles/"))
                 for item in results
             ):
-                try:
-                    direct = [
-                        item for item in _fetch_feed(bing_news[0], bing_news[1], bounded_timeout)
-                        if urlsplit(item["url"]).hostname != "news.google.com"
-                        and _relevant_direct_fallback(item, query)
-                    ]
-                except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError):
-                    direct = []
+                direct = []
+                for secondary_url, secondary_params in (bing_news, bing):
+                    try:
+                        direct = [
+                            item for item in _fetch_feed(secondary_url, secondary_params, bounded_timeout)
+                            if urlsplit(item["url"]).hostname != "news.google.com"
+                            and _relevant_direct_fallback(item, query)
+                        ]
+                    except (httpx.HTTPError, ET.ParseError, ValueError, OverflowError):
+                        direct = []
+                    if direct:
+                        break
                 if direct:
                     # Two or more current-news snippets are retained even when
                     # the generic feed offers many results. Distinct publishers
