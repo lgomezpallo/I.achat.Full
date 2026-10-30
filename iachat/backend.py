@@ -91,7 +91,7 @@ class ProviderBackend:
         ("groq", "GROQ_API_KEY", "https://api.groq.com/openai/v1",
          ("openai/gpt-oss-20b", "llama-3.3-70b-versatile")),
         ("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1",
-         ("openai/gpt-oss-20b:free",)),
+         ("dots-studio/dots-3-note-preview:free", "openai/gpt-oss-20b:free")),
         ("nvidia", "NVIDIA_API_KEY", "https://integrate.api.nvidia.com/v1",
          ("meta/llama-3.3-70b-instruct",)),
     )
@@ -101,7 +101,7 @@ class ProviderBackend:
     # a no-credit/no-billing model can be independently verified.
     FREE_MODEL_ALLOWLIST = {
         "groq": frozenset(("openai/gpt-oss-20b", "llama-3.3-70b-versatile")),
-        "openrouter": frozenset(("openai/gpt-oss-20b:free",)),
+        "openrouter": frozenset(("openai/gpt-oss-20b:free", "dots-studio/dots-3-note-preview:free")),
         "nvidia": frozenset(),
     }
 
