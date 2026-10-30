@@ -141,6 +141,7 @@ class MessageOutput(BaseModel):
     answer: str
     history: list[dict[str, str]]
     web_sources: list[dict[str, str]] = Field(default_factory=list)
+    generated_file: dict[str, str] | None = None
 
 def get_backend():
     from .backend import ProviderBackend, RouterFirstBackend
@@ -269,6 +270,32 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         existing_project = store.conversation_project(conversation_id, owner)
         if existing_project is not None and existing_project != message.project.strip():
             raise HTTPException(409, "conversation_project_mismatch")
+    # A normal chat request can invoke the same bounded file generator used
+    # by the explicit Files UI. The model chooses from an allowlist of actions;
+    # it cannot select filesystem paths or another user's file ID.
+    if message.text.strip() and not message.attachments:
+        from .tool_planner import select_file_action
+        action = select_file_action(message.text, file_workspace.list(owner), get_backend())
+        if action.action in ("create", "edit"):
+            generated = generate_workspace_file(
+                FileGenerateInput(instruction=message.text, file_id=action.file_id),
+                request,
+            )
+            answer = (
+                ("Archivo actualizado: " if action.action == "edit" else "Archivo creado: ")
+                + generated["name"]
+                + f". [Descargar archivo](/api/files/{generated['id']}/download)"
+            )
+            updated = [
+                *history,
+                {"role": "user", "content": message.text},
+                {"role": "assistant", "content": answer},
+            ]
+            store.put(conversation_id, updated, owner, message.project.strip())
+            return MessageOutput(
+                conversation_id=conversation_id, answer=answer, history=updated,
+                generated_file={"id": generated["id"], "name": generated["name"]},
+            )
     # Only explicit requests are persisted. Never claim a memory was saved
     # on the basis of an LLM-generated acknowledgment.
     match = re.match(
