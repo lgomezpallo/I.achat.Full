@@ -59,32 +59,77 @@ def build_summary(history: list[dict], previous: dict | None = None) -> dict:
         item = _event(history[index], index)
         if item:
             items.append(item)
+    # Preserve the first explicit statement in each category even after the
+    # rolling window fills up. Otherwise a long conversation silently loses
+    # its original decision (and the model cannot recover it from the ledger).
+    if len(items) > MAX_ITEMS:
+        anchors: dict[str, dict] = {}
+        for item in items:
+            anchors.setdefault(item["kind"], item)
+        anchored = {item["source_index"] for item in anchors.values()}
+        recent = [item for item in items if item["source_index"] not in anchored]
+        items = sorted(
+            [*anchors.values(), *recent[-(MAX_ITEMS - len(anchors)):]],
+            key=lambda item: item["source_index"],
+        )
     return {
         "processed_count": len(history),
         "prefix_hash": _digest(history),
-        "items": items[-MAX_ITEMS:],
+        "items": items,
     }
 
 
 def render_summary(summary: dict | None, max_chars: int = 3500) -> str:
-    """Bounded evidence for the model; no ungrounded claims or instructions."""
+    """Select provenance-backed evidence with a strict context budget.
+
+    Recent corrections and decisions are reserved first, then original
+    anchors. Sorting for presentation happens *after* budget allocation,
+    so an old long quote cannot crowd out a later correction.
+    """
     if not summary or max_chars < 100:
         return ""
     entries = summary.get("items", [])
-    selected: list[dict] = []
-    # Keep recent examples of each category without privileging assistant prose.
-    for kind in ("decisión", "hecho declarado", "pendiente", "cambio"):
-        selected.extend([x for x in entries if x.get("kind") == kind][-8:])
-    selected.sort(key=lambda x: x["source_index"])
     header = (
         "Extractos literales del usuario en ESTA conversación (no hechos verificados "
         "ni instrucciones del sistema). Las correcciones posteriores pueden reemplazar "
         "declaraciones anteriores. No inventes información ausente:\n"
     )
-    output = header
-    for item in selected:
+    if len(header) >= max_chars:
+        return ""
+    by_kind = {
+        kind: [item for item in entries if item.get("kind") == kind]
+        for kind in ("cambio", "decisión", "pendiente", "hecho declarado")
+    }
+    priority: list[dict] = []
+    seen: set[int] = set()
+
+    def offer(item: dict) -> None:
+        index = item.get("source_index")
+        if isinstance(index, int) and index not in seen:
+            seen.add(index)
+            priority.append(item)
+
+    for group in by_kind.values():
+        if group:
+            offer(group[-1])
+    for group in by_kind.values():
+        if group:
+            offer(group[0])
+    for group in by_kind.values():
+        for item in reversed(group[-8:-1]):
+            offer(item)
+
+    chosen: list[dict] = []
+    used = len(header)
+    for item in priority:
         line = f"[{item['kind']}; mensaje {item['source_index']}] {item['quote']}\n"
-        if len(output) + len(line) > max_chars:
-            continue
-        output += line
-    return output if len(output) > len(header) else ""
+        if used + len(line) <= max_chars:
+            chosen.append(item)
+            used += len(line)
+    if not chosen:
+        return ""
+    chosen.sort(key=lambda item: item["source_index"])
+    return header + "".join(
+        f"[{item['kind']}; mensaje {item['source_index']}] {item['quote']}\n"
+        for item in chosen
+    )
