@@ -504,6 +504,8 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
     if web_lookup_performed:
         from .web_research import ground_web_answer_urls
         answer = ground_web_answer_urls(answer, web_sources)
+        from .fresh_event_guard import reject_stale_next_event_answer
+        answer = reject_stale_next_event_answer(message.text, answer)
     # Timings only: no user identity, messages, URLs, credentials or model output.
     logger.info(
         "IACHAT_CHAT_DIAG web=%d sources=%d plan_ms=%d fetch_ms=%d model_ms=%d total_ms=%d",
