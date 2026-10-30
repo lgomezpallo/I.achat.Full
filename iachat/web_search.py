@@ -152,12 +152,15 @@ def search_web(query: str, *, timeout: float = 8.0, news_fallback: bool = False)
         bounded_timeout = min(max(float(timeout), 0.5), 10.0)
     except (TypeError, ValueError):
         bounded_timeout = 8.0
-    sources = [(BING_RSS, {"q": query, "format": "rss"})]
-    if needs_current_information(query) or news_fallback:
-        sources.append((
-            GOOGLE_NEWS_RSS,
-            {"q": query, "hl": "es-419", "gl": "AR", "ceid": "AR:es-419"},
-        ))
+    # For current events, prefer the news feed over generic Bing RSS.
+    # The generic feed can return unrelated dictionary/foreign-language hits
+    # even with HTTP 200, which previously suppressed the relevant fallback.
+    # This is a source-order decision, not a topic-specific language heuristic.
+    bing = (BING_RSS, {"q": query, "format": "rss"})
+    news = (GOOGLE_NEWS_RSS, {
+        "q": query, "hl": "es-419", "gl": "AR", "ceid": "AR:es-419",
+    })
+    sources = [news, bing] if needs_current_information(query) or news_fallback else [bing]
     for url, params in sources:
         try:
             results = _fetch_feed(url, params, bounded_timeout)
