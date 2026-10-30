@@ -7,6 +7,7 @@ still performs inference; this module only supplies evidence.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
@@ -170,3 +171,24 @@ def extracted_source_links(evidence_text: str) -> list[dict[str, str]]:
             else "rss_snippet"
         )})
     return sources
+
+
+def ground_web_answer_urls(answer: str, sources: list[dict[str, str]]) -> str:
+    """Never display a model-invented web citation as a consulted source.
+
+    The original source list is returned separately with actual provenance.
+    This is an exact allowlist, not a claim that any cited fact is true.
+    """
+    allowed = {
+        item["url"] for item in sources
+        if isinstance(item, dict) and isinstance(item.get("url"), str)
+    }
+
+    def replace(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        candidate = raw.rstrip(".,;")
+        if candidate in allowed:
+            return raw
+        return "[enlace omitido: no figura entre las fuentes consultadas]" + raw[len(candidate):]
+
+    return re.sub(r"https?://[^\s)<>]+", replace, answer)
