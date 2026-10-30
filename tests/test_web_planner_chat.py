@@ -113,6 +113,6 @@ def test_chat_exposes_only_actual_https_web_sources(monkeypatch):
     response = client.post("/api/chat", json={"text": "¿Cuándo es el próximo partido?"})
     assert response.status_code == 200
     assert response.json()["web_sources"] == [
-        {"title": "Nota consultada", "url": "https://example.com/noticia"}
+        {"title": "Nota consultada", "url": "https://example.com/noticia", "evidence_type": "rss_snippet"}
     ]
     assert response.json()["answer"] == "Respuesta de prueba"
