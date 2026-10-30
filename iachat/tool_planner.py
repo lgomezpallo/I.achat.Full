@@ -41,15 +41,15 @@ _POLICY = (
 # conversation. These signals ONLY decide whether to ask the model; they
 # never decide whether to create/edit a file. The model remains the planner.
 _FILE_REQUEST_VERB = re.compile(
-    r"(?i)\\b(?:crea|creá|crear|genera|generá|generar|armá|arma|armar|"
+    r"(?i)\b(?:crea|creá|crear|genera|generá|generar|armá|arma|armar|"
     r"prepará|prepara|preparar|hacé|hace|hacer|editá|edita|editar|"
     r"modificá|modifica|modificar|actualizá|actualiza|actualizar|"
     r"convertí|convierte|convertir|exportá|exporta|exportar|"
-    r"guardá|guarda|guardar)\\b"
+    r"guardá|guarda|guardar)\b"
 )
 _FILE_REQUEST_OBJECT = re.compile(
-    r"(?i)\\b(?:archivos?|documentos?|informes?|planillas?|"
-    r"pdf|docx?|xlsx?|excel|word|csv|txt|json|html|markdown)\\b"
+    r"(?i)\b(?:archivos?|documentos?|informes?|planillas?|"
+    r"pdf|docx?|xlsx?|excel|word|csv|txt|json|html|markdown)\b"
 )
 
 
