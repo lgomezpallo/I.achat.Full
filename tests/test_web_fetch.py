@@ -105,7 +105,7 @@ def test_fetches_only_one_https_request_to_pinned_public_ip():
 
 def test_http_rejection_exposes_only_numeric_status_for_safe_diagnostics():
     FakeConnection.response = FakeResponse(status=403)
-    with pytest.raises(wf.PageFetchError, match=r"non-200 status \\(HTTP_403\\)"):
+    with pytest.raises(wf.PageFetchError, match=r"non-200 status \(HTTP_403\)"):
         wf.fetch_page("https://example.com/")
 
 
