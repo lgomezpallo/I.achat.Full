@@ -135,16 +135,15 @@ def test_oracle_diagnostic_only_auto_runs_from_main():
     assert "bash scripts/diagnostico_oracle.sh" in workflow
 
 
-def test_candidate_hash_job_is_unprotected_and_never_receives_ssh_secrets():
-    """Candidate hash comparison has no Oracle credentials or protected environment."""
+def test_oracle_health_job_keeps_credentials_in_protected_environment():
+    """Only the authorized Oracle health job receives SSH credentials."""
     workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "oracle-status.yml").read_text()
-    candidate = workflow.split("\n  candidata:\n", 1)[1].split("\n  estado:\n", 1)[0]
+    assert "\n  candidata:\n" not in workflow  # Obsolete PR #31 comparison removed.
     protected = workflow.split("\n  estado:\n", 1)[1]
-    assert "environment:" not in candidate
-    assert "secrets." not in candidate
-    assert "persist-credentials: false" in candidate
     assert "environment: oracle-production" in protected
     assert "bash scripts/diagnostico_oracle.sh" in protected
+    assert "ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}" in protected
+    assert "iachat/oracle-health" in protected
 
 
 def test_tracked_change_summary_hides_secret_paths_and_never_prints_diff(monkeypatch):
