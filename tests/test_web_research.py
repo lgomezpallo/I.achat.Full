@@ -461,3 +461,25 @@ def test_chat_pasted_current_text_skips_search_and_classifier(monkeypatch):
     assert response.status_code == 200
     assert response.json()["answer"] == "When does River play?"
     assert len(calls) == 1
+
+
+def test_web_answer_never_exposes_unconsulted_model_urls():
+    from iachat.web_research import ground_web_answer_urls
+    sources = [{"url": "https://publisher.example.com/actual", "title": "Nota"}]
+    answer = (
+        "La fuente https://publisher.example.com/actual indica un dato. "
+        "No citar https://other.example.net/inventada, ni "
+        "[otra](https://fake.example.org/nota)."
+    )
+    grounded = ground_web_answer_urls(answer, sources)
+    assert "https://publisher.example.com/actual" in grounded
+    assert "https://other.example.net/inventada" not in grounded
+    assert "https://fake.example.org/nota" not in grounded
+    assert grounded.count("enlace omitido") == 2
+
+
+def test_web_answer_with_no_sources_does_not_invent_citations():
+    from iachat.web_research import ground_web_answer_urls
+    assert "https://" not in ground_web_answer_urls(
+        "Busqué pero no hay datos: https://inventado.example.org/", []
+    )
