@@ -328,7 +328,7 @@ def test_news_fallback_keeps_entity_match_without_temporal_words(monkeypatch):
     assert all("cinema.example.com" not in item["url"] for item in results)
 
 
-def test_irrelevant_direct_fallback_keeps_news_instead_of_padding_sources(monkeypatch):
+def test_irrelevant_news_and_direct_fallback_are_not_presented_as_sources(monkeypatch):
     calls = []
 
     def handler(request):
@@ -346,8 +346,7 @@ def test_irrelevant_direct_fallback_keeps_news_instead_of_padding_sources(monkey
     install_http(monkeypatch, handler)
     results = web_search.search_web("cotización dólar oficial Argentina hoy")
     assert calls == ["news.google.com", "www.bing.com", "www.bing.com"]
-    assert len(results) == 2
-    assert all(item["url"].startswith("https://news.google.com/") for item in results)
+    assert results == []  # neither news nor direct RSS matched the requested facts
 
 
 def test_direct_fallback_relevance_is_general_and_accent_insensitive():
