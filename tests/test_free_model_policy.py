@@ -76,3 +76,29 @@ def test_default_free_models_remain_available(monkeypatch):
     assert backend.ProviderBackend._eligible_models(
         "groq", ("openai/gpt-oss-20b", "llama-3.3-70b-versatile")
     ) == ("openai/gpt-oss-20b", "llama-3.3-70b-versatile")
+
+
+def test_free_openrouter_fallback_after_groq_rate_limits(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "fake-offline-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake-offline-key")
+    attempted = []
+
+    class Reply:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def json(self):
+            return {"choices": [{"message": {"content": "respuesta gratis"}}]}
+
+    def fake_post(url, *, headers, json, timeout):
+        attempted.append((url, json["model"]))
+        return Reply(200 if json["model"] == "dots-studio/dots-3-note-preview:free" else 429)
+
+    monkeypatch.setattr(backend.httpx, "post", fake_post)
+    assert backend.ProviderBackend().answer([{"role": "user", "content": "hola"}]) == "respuesta gratis"
+    assert [model for _, model in attempted] == [
+        "openai/gpt-oss-20b",
+        "llama-3.3-70b-versatile",
+        "dots-studio/dots-3-note-preview:free",
+    ]
+    assert all(":free" in model for url, model in attempted if "openrouter.ai" in url)
