@@ -111,6 +111,12 @@ def child() -> None:
     # All live model requests go through the existing fail-closed free-model allowlist.
     if not ProviderBackend.configured():
         raise AssertionError("free_provider_not_configured")
+    # Model IDs and configured flags only; never print keys or provider responses.
+    for provider_name, env_key, _, defaults in ProviderBackend.PROVIDERS:
+        eligible = ProviderBackend._eligible_models(provider_name, defaults)
+        print("FREE_PROVIDER:", provider_name,
+              "configured=" + str(bool(os.getenv(env_key, "").strip())),
+              "models=" + ",".join(eligible), flush=True)
     db_path = os.getenv("IACHAT_DB", "iachat.db")
     if db_path == ":memory:":
         raise AssertionError("production_database_is_memory_only")
