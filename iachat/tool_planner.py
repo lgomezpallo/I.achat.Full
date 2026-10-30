@@ -56,14 +56,13 @@ _FILE_REQUEST_OBJECT = re.compile(
 # Match only a direct imperative/request to CREATE a concrete file. Do not
 # trigger on questions about HOW to create one or on negative instructions.
 _EXPLICIT_CREATE_START = re.compile(
-    r"(?ix)^\\s*[¿¡]?\\s*"
-    r"(?:(?:por\\s+favor[,\\s]*)|(?:me\\s+)?(?:pod[eé]s|podr[ií]as)\\s+|"
-    r"(?:quiero|necesito)\\s+que\\s+(?:me\\s+)?)*"
+    r"(?ix)^\s*[¿¡]?\s*"
+    r"(?:(?:por\s+favor[,\s]*)|(?:me\s+)?(?:pod[eé]s|podr[ií]as)\s+|"
+    r"(?:quiero|necesito)\s+que\s+(?:me\s+)?)*"
     r"(?:cre[aá](?:me)?|cr[eé]ame|crees|gener[aá](?:me)?|generes|"
     r"arm[aá](?:me)?|armes|hac[eé](?:me)?|hazme|hagas|"
-    r"prepar[aá](?:me)?|prepares|crear|generar|armar|hacer|preparar)\\b"
+    r"prepar[aá](?:me)?|prepares|crear|generar|armar|hacer|preparar)\b"
 )
-
 
 def explicit_file_create_request(message: str) -> bool:
     """Unambiguous creation of a downloadable artifact, not advice about it."""
