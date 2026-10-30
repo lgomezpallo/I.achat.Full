@@ -183,7 +183,7 @@ def test_chat_evergreen_question_does_not_browse(monkeypatch):
     assert client.post("/api/chat", json={"text": "Explicá el ciclo del agua"}).status_code == 200
 
 
-def test_research_uses_free_news_fallback_when_general_rss_fails(monkeypatch):
+def test_research_uses_current_news_first_for_evidence(monkeypatch):
     """End-to-end search-to-evidence path, without real HTTP or model calls."""
     import httpx
     from iachat import web_search
@@ -214,7 +214,7 @@ def test_research_uses_free_news_fallback_when_general_rss_fails(monkeypatch):
         lambda urls, **kwargs: read_urls.extend(urls) or (),
     )
     data = _payload(research.web_evidence_with_pages("¿Cuándo juega River?"))
-    assert calls == ["www.bing.com", "news.google.com"]
+    assert calls == ["news.google.com"]
     assert read_urls == ["https://example.com/noticia"]
     assert data == [{
         "title": "Noticia",
