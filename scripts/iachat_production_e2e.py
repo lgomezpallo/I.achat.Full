@@ -651,6 +651,19 @@ def child() -> None:
                     raise AssertionError("structured_add_failed")
                 summed = data_chat(client, "¿cuánto gasté en transporte?")
                 if "40000" not in summed["answer"]:
+                    # Synthetic test only: flags and counts, never model text.
+                    from iachat.structured_data import StructuredStore
+                    test_collections = StructuredStore(db_path).collections(username)
+                    test_rows = (StructuredStore(db_path).records(username, test_collections[0]["id"])
+                                 if test_collections else [])
+                    print("STRUCTURED_SUM_DIAG:",
+                          "collections=" + str(len(test_collections)),
+                          "rows=" + str(len(test_rows)),
+                          "stored_40000=" + str(any(40000 in r["values"].values() for r in test_rows)),
+                          "answer_chars=" + str(len(summed.get("answer", ""))),
+                          "answer_no_match=" + str("Sin coincidencias" in summed.get("answer", "")),
+                          "answer_zero=" + str("**0**" in summed.get("answer", "")),
+                          flush=True)
                     raise AssertionError("structured_sum_failed")
                 corrected = data_chat(client, "corregí el importe a 45000")
                 if "45000" not in corrected["answer"]:
