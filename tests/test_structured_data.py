@@ -179,3 +179,67 @@ def test_semantic_query_rejects_invented_record_ids(tmp_path):
 
     answer = handle("sumá kilómetros", "alice", InventedIds(), data, files)
     assert "No se modificaron datos" in answer["answer"]
+
+
+def test_explicit_add_retries_free_model_none(tmp_path):
+    """An explicit record write must not silently fall through to chat."""
+    from iachat.structured_data import handle
+    db = str(tmp_path / "retry-add.db")
+    data = StructuredStore(db)
+    files = FileWorkspace(db)
+    collection = data.create("alice", "inventario", [
+        {"name": "Producto", "type": "text"},
+        {"name": "Cantidad", "type": "number"},
+    ])
+
+    class UnsteadyPlanner:
+        calls = 0
+
+        def answer(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return '{"action":"none"}'
+            return json.dumps({
+                "action": "add", "collection_id": collection["id"],
+                "values": {"Producto": "tornillos", "Cantidad": 12},
+            })
+
+    planner = UnsteadyPlanner()
+    result = handle("anotá 12 tornillos", "alice", planner, data, files)
+    assert "Registrado" in result["answer"]
+    assert planner.calls == 2
+    assert data.records("alice", collection["id"])[0]["values"]["Cantidad"] == 12
+
+
+def test_semantic_query_retries_empty_selection_without_inventing_ids(tmp_path):
+    """Only known record IDs may be returned after a transient empty answer."""
+    from iachat.structured_data import handle
+    db = str(tmp_path / "retry-query.db")
+    data = StructuredStore(db)
+    files = FileWorkspace(db)
+    collection = data.create("alice", "flota", [
+        {"name": "Unidad", "type": "text"},
+        {"name": "Kilómetros", "type": "number"},
+    ])
+    data.add("alice", collection["id"], {"Unidad": "Fiorino", "Kilómetros": 120})
+
+    class UnsteadyPlanner:
+        semantic_calls = 0
+
+        def answer(self, messages):
+            payload = json.loads(messages[-1]["content"])
+            if "records" in payload:
+                self.semantic_calls += 1
+                if self.semantic_calls == 1:
+                    return '{"record_ids":[]}'
+                return json.dumps({"record_ids": [payload["records"][0]["id"]]})
+            return json.dumps({
+                "action": "query", "collection_id": collection["id"],
+                "filters": {"Unidad": "vehículo utilitario"},
+                "aggregate": "sum", "field": "Kilómetros",
+            })
+
+    planner = UnsteadyPlanner()
+    result = handle("¿cuántos kilómetros del vehículo utilitario?", "alice", planner, data, files)
+    assert "120" in result["answer"]
+    assert planner.semantic_calls == 2
