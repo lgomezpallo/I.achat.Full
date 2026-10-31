@@ -98,6 +98,12 @@ def main() -> None:
                     if item["role"] == "user"
                 )
                 assert '"horas": 6' not in str(requests[0]["conversation"])
+                assert any(
+                    '"categorias_confirmadas"' in item["content"]
+                    and '"version": 2' in item["content"]
+                    and '"unidad": "h"' in item["content"]
+                    for item in requests[0]["conversation"] if item["role"] == "user"
+                ), "scoped chat needs confirmed metadata before proposing records"
                 assert "NO modifica registros oficiales" in requests[0]["context"]
 
                 followup = client.post("/api/chat", json={
