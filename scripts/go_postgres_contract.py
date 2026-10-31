@@ -29,7 +29,8 @@ def main() -> None:
     with psycopg.connect(admin_dsn, autocommit=True) as conn:
         for name in ("001_initial.sql", "002_passkeys.sql",
                      "003_attachments.sql", "004_chat_history.sql",
-                     "005_flexible_records.sql", "006_flexible_chat_refs.sql"):
+                     "005_flexible_records.sql", "006_flexible_chat_refs.sql",
+                     "007_flexible_actor_scope.sql"):
             conn.execute((migrations / name).read_text(encoding="utf-8"))
         conn.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
         conn.execute("REVOKE CREATE ON DATABASE go_contract FROM PUBLIC")
