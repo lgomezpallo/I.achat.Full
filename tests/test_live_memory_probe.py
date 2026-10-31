@@ -48,7 +48,7 @@ def test_live_probe_uses_authenticated_http_and_actual_context(tmp_path, monkeyp
             context = "\n".join(item["content"] for item in messages)
             match = re.search(r"LUCERO[0-9A-F]{8}", context)
             assert match, "evicted middle fact did not reach the model input"
-            return "Elegimos PostgreSQL, motor " + match.group() + " y respaldo diario."
+            return __import__("json").dumps({"base_de_datos": "PostgreSQL", "motor_violeta": match.group(), "respaldo": "diario"})
 
     monkeypatch.setattr(module, "get_backend", lambda: FakeBackend())
     client = TestClient(module.app, base_url="https://testserver")
