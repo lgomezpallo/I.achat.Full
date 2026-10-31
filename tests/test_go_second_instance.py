@@ -114,3 +114,31 @@ def test_work_profile_requires_explicit_isolated_db_and_session_secret(tmp_path)
     with pytest.raises(RuntimeError, match="dedicated_auth_secret"):
         validate("go-ute", str(tmp_path / "work.db"), "short")
     validate("go-ute", str(tmp_path / "work.db"), "s" * 32)
+
+
+def test_work_google_login_requires_explicit_subject_approval(monkeypatch, tmp_path):
+    """Google verification alone must never enroll an arbitrary labor user."""
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.delenv("IACHAT_GOOGLE_ALLOWED_SUBS", raising=False)
+    monkeypatch.setattr(app_module, "store", ConversationStore(str(tmp_path / "go-google.db")))
+    monkeypatch.setattr(app_module.google_oidc, "complete", lambda *args: "google-sub-123")
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        denied = client.get("/auth/google/callback?code=test&state=test", follow_redirects=False)
+        assert denied.status_code == 403
+        assert denied.json()["detail"] == "google_account_not_authorized"
+        assert app_module.store.list_users() == []
+        monkeypatch.setenv("IACHAT_GOOGLE_ALLOWED_SUBS", "another-sub, google-sub-123")
+        allowed = client.get("/auth/google/callback?code=test&state=test", follow_redirects=False)
+        assert allowed.status_code == 303
+        assert len(app_module.store.list_users()) == 1
+
+
+def test_personal_google_enrollment_policy_unchanged(monkeypatch):
+    monkeypatch.setenv("IACHAT_PROFILE", "personal")
+    monkeypatch.delenv("IACHAT_GOOGLE_ALLOWED_SUBS", raising=False)
+    assert app_module._work_google_subject_allowed("new-personal-google-sub")
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    assert not app_module._work_google_subject_allowed("new-personal-google-sub")
+    monkeypatch.setenv("IACHAT_GOOGLE_ALLOWED_SUBS", "approved-sub")
+    assert app_module._work_google_subject_allowed("approved-sub")
+    assert not app_module._work_google_subject_allowed("other-sub")
