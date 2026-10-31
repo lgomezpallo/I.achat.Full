@@ -47,10 +47,10 @@ def _ledger():
     return flexible
 
 
-def _safe_decision(ledger, proposal_id: str, approved: bool) -> str:
+def _safe_decision(ledger, proposal_id: str, approved: bool, *, actor: str, conversation_id: str) -> str:
     """Never expose database exceptions or imply a successful official write."""
     try:
-        result = ledger.decide(proposal_id, approved)
+        result = ledger.decide(proposal_id, approved, actor=actor, conversation_id=conversation_id)
         reply = result["reply"]
         if not isinstance(reply, str) or not reply.strip():
             raise ValueError("empty_approval_reply")
@@ -59,7 +59,7 @@ def _safe_decision(ledger, proposal_id: str, approved: bool) -> str:
         raise RuntimeError("go_work_approval_unavailable") from exc
 
 
-def decide_in_conversation(message: str, history: list[dict]) -> str | None:
+def decide_in_conversation(message: str, history: list[dict], *, actor: str, conversation_id: str) -> str | None:
     """Resolve only the immediately preceding, server-owned proposal.
 
     A UUID supplied by another user, conversation, or an older turn is not
@@ -86,7 +86,7 @@ def decide_in_conversation(message: str, history: list[dict]) -> str | None:
             proposal_id = str(UUID(proposal_id))
         except (ValueError, TypeError, AttributeError):
             return None
-        return _safe_decision(_ledger(), proposal_id, bool(short_yes))
+        return _safe_decision(_ledger(), proposal_id, bool(short_yes), actor=actor, conversation_id=conversation_id)
     ledger = _ledger()
     decision = ledger.decision_from_message(message)
     if decision is None:
@@ -94,9 +94,10 @@ def decide_in_conversation(message: str, history: list[dict]) -> str | None:
     proposal_id, approved = decision
     if not isinstance(last, dict) or last.get("role") != "assistant" or last.get("go_proposal_id") != proposal_id:
         return "Esa propuesta no está pendiente en esta conversación. No se modificaron registros."
-    return _safe_decision(ledger, proposal_id, approved)
+    return _safe_decision(ledger, proposal_id, approved, actor=actor, conversation_id=conversation_id)
 
-def interpret_model_answer(raw: str, message: str, *, attachments: bool = False) -> tuple[str, str | None]:
+def interpret_model_answer(raw: str, message: str, *, actor: str, conversation_id: str,
+                           attachments: bool = False) -> tuple[str, str | None]:
     """Use the *same* IAchat model response to propose, never to commit.
 
     Plain text and malformed JSON remain conversation, not database actions.
@@ -121,7 +122,7 @@ def interpret_model_answer(raw: str, message: str, *, attachments: bool = False)
         return "Analicé el adjunto, pero su asociación o registro requiere una confirmación documental específica; no modifiqué registros.", None
     ledger = _ledger()
     try:
-        result = ledger.stage(parsed, message)
+        result = ledger.stage(parsed, message, actor=actor, conversation_id=conversation_id)
     except ledger.InvalidProposal as exc:
         return str(exc) + " No se modificaron registros oficiales.", None
     except Exception as exc:
