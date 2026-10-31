@@ -36,7 +36,12 @@ def test_postdeploy_checks_public_readiness_without_exposing_router_status():
     deploy = Path(__file__).resolve().parents[1] / "scripts" / "deploy_oracle.sh"
     script = deploy.read_text(encoding="utf-8")
     assert 'code, status = probe("/ready")' in script
-    assert 'status.get("mode") == "integrated"' in script
+    assert 'status.get("mode") == os.environ["IACHAT_EXPECTED_BACKEND_MODE"]' in script
+    assert 'backend_mode="$("$app/.venv/bin/python"' in script
+    assert 'if sudo -n test -e "$dropin"; then' in script
+    assert 'dropin_changed=1' in script
+    assert '[[ "$backend_mode" == "integrated" ]]' in script
+    assert 'IACHAT_EXPECTED_BACKEND_MODE="$backend_mode"' in script
     assert 'status.get("status") == "ready"' in script
     assert 'code, _ = probe("/api/router/status")' in script
     assert 'code, _ = probe("/api/conversations")' in script
@@ -59,5 +64,29 @@ def test_postdeploy_endpoint_contract_with_integrated_backend(monkeypatch):
     assert ready.status_code == 200
     assert ready.json()["mode"] == "integrated"
     assert ready.json()["status"] == "ready"
+    assert client.get("/api/router/status").status_code == 401
+    assert client.get("/api/conversations").status_code == 401
+
+
+def test_oracle_deploy_script_syntax_offline():
+    import subprocess
+    deploy = Path(__file__).resolve().parents[1] / "scripts" / "deploy_oracle.sh"
+    subprocess.run(["bash", "-n", str(deploy)], check=True, capture_output=True, text=True)
+
+
+def test_router_mode_readiness_does_not_require_integrated_provider_credentials(monkeypatch):
+    from fastapi.testclient import TestClient
+    from iachat import app as app_module
+    from iachat.backend import ProviderBackend
+
+    monkeypatch.setenv("IACHAT_BACKEND", "router")
+    monkeypatch.setenv("ROUTER_URL", "http://127.0.0.1:8010")
+    monkeypatch.setenv("ROUTER_TOKEN", "synthetic-only")
+    monkeypatch.setattr(ProviderBackend, "configured", classmethod(lambda cls: False))
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: None)
+    client = TestClient(app_module.app, base_url="https://testserver")
+    ready = client.get("/ready")
+    assert ready.status_code == 200
+    assert ready.json()["mode"] == "router"
     assert client.get("/api/router/status").status_code == 401
     assert client.get("/api/conversations").status_code == 401
