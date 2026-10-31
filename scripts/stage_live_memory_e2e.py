@@ -244,7 +244,8 @@ def child(private: Path) -> None:
             restored = client.get("/api/conversations/" + conversation_id)
             if restored.status_code != 200 or len(restored.json().get("history", [])) != 482:
                 raise AssertionError("restart_lost_conversation")
-            if transcript_fingerprint(restored.json()["history"], 482) != first_hash:
+            if not verify_snapshot(db_path, owner, other, conversation_id, marker,
+                                   482, expected_prefix_hash, first_hash):
                 raise AssertionError("restart_modified_transcript")
             followup = client.post("/api/chat", json={
                 "conversation_id": conversation_id, "project": "Atlas",
