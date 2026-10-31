@@ -78,7 +78,7 @@ def test_unlabeled_api_credentials_and_one_time_codes_are_not_retrieved():
 
 
 def test_long_multiline_turn_recovers_safe_fact_without_private_lines():
-    filler = ("Texto de relleno sin relación con la pregunta.\\n" * 210).replace("\\n", "\n")
+    filler = "Texto de relleno sin relación con la pregunta.\n" * 210
     history = [{
         "role": "user",
         "content": (
