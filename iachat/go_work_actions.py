@@ -47,6 +47,18 @@ def _ledger():
     return flexible
 
 
+def _safe_decision(ledger, proposal_id: str, approved: bool) -> str:
+    """Never expose database exceptions or imply a successful official write."""
+    try:
+        result = ledger.decide(proposal_id, approved)
+        reply = result["reply"]
+        if not isinstance(reply, str) or not reply.strip():
+            raise ValueError("empty_approval_reply")
+        return reply
+    except Exception as exc:
+        raise RuntimeError("go_work_approval_unavailable") from exc
+
+
 def decide_in_conversation(message: str, history: list[dict]) -> str | None:
     """Resolve only the immediately preceding, server-owned proposal.
 
@@ -74,7 +86,7 @@ def decide_in_conversation(message: str, history: list[dict]) -> str | None:
             proposal_id = str(UUID(proposal_id))
         except (ValueError, TypeError, AttributeError):
             return None
-        return _ledger().decide(proposal_id, bool(short_yes))["reply"]
+        return _safe_decision(_ledger(), proposal_id, bool(short_yes))
     ledger = _ledger()
     decision = ledger.decision_from_message(message)
     if decision is None:
@@ -82,7 +94,7 @@ def decide_in_conversation(message: str, history: list[dict]) -> str | None:
     proposal_id, approved = decision
     if not isinstance(last, dict) or last.get("role") != "assistant" or last.get("go_proposal_id") != proposal_id:
         return "Esa propuesta no está pendiente en esta conversación. No se modificaron registros."
-    return ledger.decide(proposal_id, approved)["reply"]
+    return _safe_decision(ledger, proposal_id, approved)
 
 def interpret_model_answer(raw: str, message: str, *, attachments: bool = False) -> tuple[str, str | None]:
     """Use the *same* IAchat model response to propose, never to commit.
@@ -112,6 +124,10 @@ def interpret_model_answer(raw: str, message: str, *, attachments: bool = False)
         result = ledger.stage(parsed, message)
     except ledger.InvalidProposal as exc:
         return str(exc) + " No se modificaron registros oficiales.", None
+    except Exception as exc:
+        # A database outage must be a controlled 503, never a raw traceback or
+        # a misleading claim that the proposed event was persisted.
+        raise RuntimeError("go_work_approval_unavailable") from exc
     if result.get("phase") != "flexible_pending":
         return "No se pudo preparar la propuesta; no se modificaron registros.", None
     identifier = result.get("proposal_id")
