@@ -159,7 +159,12 @@ def child(private: Path) -> None:
             cmd, cwd=ROOT, env=os.environ.copy(),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        wait_http(base, proc)
+        try:
+            wait_http(base, proc)
+        except BaseException:
+            # A failed readiness probe must not leave an orphan staging server.
+            stop(proc)
+            raise
         return proc
 
     def stop(proc: subprocess.Popen) -> None:
