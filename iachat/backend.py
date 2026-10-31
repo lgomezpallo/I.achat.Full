@@ -60,6 +60,8 @@ class RouterFirstBackend:
                         # Router decides automatically whether decomposition is useful.
                     },
                     timeout=max(self.timeout_s, 90.0) if attempt == 0 else self.timeout_s,
+                    follow_redirects=False,
+                    trust_env=profile != "go-ute",
                 )
             except httpx.TimeoutException as exc:
                 raise RuntimeError("router_transport_timeout") from exc
@@ -74,7 +76,8 @@ class RouterFirstBackend:
             # Wake the upstream without submitting the user message twice
             # until an explicit gateway error has already been received.
             try:
-                httpx.get(url + "/health", timeout=65.0)
+                httpx.get(url + "/health", timeout=65.0, follow_redirects=False,
+                          trust_env=profile != "go-ute")
             except httpx.RequestError:
                 pass
         if response.status_code in (401, 403):
