@@ -55,20 +55,34 @@ def decide_in_conversation(message: str, history: list[dict]) -> str | None:
     """
     if not enabled():
         return None
-    from uuid import UUID
     import re
-    if not re.match(r"^\s*(?:confirmo|confirmar|descarto|descartar)\b", message, re.I):
+
+    # Natural confirmations are safe only for the immediate pending proposal
+    # in the authenticated, server-loaded conversation. Never consult the
+    # G.O. ledger's global last-turn fallback (it is not user-scoped).
+    short_yes = re.fullmatch(r"\s*(?:s[ií]|dale|ok(?:ay)?|confirmo|confirm[aá]r?)\s*[.!]?\s*", message, re.I)
+    short_no = re.fullmatch(r"\s*(?:no|descarto|descart[aá]r?|cancel[aá]r?)\s*[.!]?\s*", message, re.I)
+    explicit = re.match(r"^\s*(?:confirmo|confirmar|descarto|descartar)\s+propuesta\b", message, re.I)
+    if not (short_yes or short_no or explicit):
         return None
+    last = history[-1] if history else None
+    if short_yes or short_no:
+        if not isinstance(last, dict) or last.get("role") != "assistant":
+            return None
+        proposal_id = last.get("go_proposal_id")
+        try:
+            proposal_id = str(UUID(proposal_id))
+        except (ValueError, TypeError, AttributeError):
+            return None
+        return _ledger().decide(proposal_id, bool(short_yes))["reply"]
     ledger = _ledger()
     decision = ledger.decision_from_message(message)
     if decision is None:
         return "Para decidir, indicá 'Confirmo propuesta <UUID>' o 'Descarto propuesta <UUID>'."
     proposal_id, approved = decision
-    last = history[-1] if history else None
     if not isinstance(last, dict) or last.get("role") != "assistant" or last.get("go_proposal_id") != proposal_id:
         return "Esa propuesta no está pendiente en esta conversación. No se modificaron registros."
     return ledger.decide(proposal_id, approved)["reply"]
-
 
 def interpret_model_answer(raw: str, message: str, *, attachments: bool = False) -> tuple[str, str | None]:
     """Use the *same* IAchat model response to propose, never to commit.
