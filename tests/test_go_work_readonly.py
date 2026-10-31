@@ -460,6 +460,43 @@ def test_public_web_policy_requires_explicit_operator_request_for_work():
     )
 
 
+
+def test_old_labor_context_never_reopens_automatic_public_search():
+    history = [{"role": "user", "content": "¿Qué pasó en obra 1093?"}]
+    history.extend([
+        {"role": "assistant", "content": "Entendido."},
+        {"role": "user", "content": "Gracias."},
+    ] * 15)
+    assert not work.public_web_allowed(
+        "¿Y mañana?", work_profile=True, official_evidence=False,
+        history=history,
+    )
+
+
+def test_explicit_public_search_never_sends_labor_history_to_planner(monkeypatch, tmp_path):
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.setattr(work, "official_context", lambda *args, **kwargs: None)
+    app_module.store.put(
+        "labor-history", [
+            {"role": "user", "content": "¿Qué pasó en la obra 1093?"},
+            {"role": "assistant", "content": "Pendiente de consultar."},
+        ], "worker", "",
+    )
+    observed = []
+    def plan(message, history, selected_backend):
+        observed.append((message, history))
+        return SimpleNamespace(action="none")
+    monkeypatch.setattr("iachat.web_planner.plan_web_lookup_semantic", plan)
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.post("/api/chat", json={
+            "conversation_id": "labor-history",
+            "text": "Buscá en internet las últimas noticias de River",
+        })
+    assert response.status_code == 200, response.text
+    assert observed == [("Buscá en internet las últimas noticias de River", [])]
+    assert len(backend.messages) == 1
+
+
 def test_unrecognized_work_address_does_not_reach_public_web_planner(monkeypatch, tmp_path):
     """No budget/SQL match must not imply permission to search public web."""
     backend = _prepare_chat(monkeypatch, tmp_path)
