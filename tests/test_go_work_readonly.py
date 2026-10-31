@@ -308,3 +308,26 @@ def test_followup_without_clear_reference_does_not_query_or_guess(monkeypatch):
     monkeypatch.delenv("GO_WORK_READONLY_DSN", raising=False)
     history = [{"role": "user", "content": "obra 1093"}]
     assert work.official_context("¿Qué hora es?", history=history) is None
+
+
+def test_unresolved_work_reference_does_not_infer_from_assistant(monkeypatch):
+    """A vague work follow-up must not guess a budget from assistant output."""
+    monkeypatch.delenv("GO_WORK_READONLY_DSN", raising=False)
+    history = [{"role": "assistant", "content": "La obra 1093 existe."}]
+    with pytest.raises(work.WorkContextUnavailable, match="go_work_missing_budget"):
+        work.official_context("¿Qué pasó en esa obra?", history=history)
+    with pytest.raises(work.WorkContextUnavailable, match="go_work_missing_budget"):
+        work.official_context("¿Y ese presupuesto?", history=[])
+    # A casual locative phrase is not by itself a work reference.
+    assert work.official_context("¿Cómo estás ahí?", history=[]) is None
+
+
+def test_http_unresolved_work_reference_never_calls_model(monkeypatch, tmp_path):
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.delenv("GO_WORK_READONLY_DSN", raising=False)
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.post("/api/chat", json={"text": "¿Qué pasó en esa obra?"})
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "go_work_missing_budget"
+    assert backend.messages == []
+    assert app_module.store.list_conversations("worker") == []
