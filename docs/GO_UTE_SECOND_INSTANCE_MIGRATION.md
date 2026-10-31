@@ -34,7 +34,9 @@ La instancia personal conserva su servicio, SQLite, credenciales y dominio. La i
 
 ## Barreras de arranque verificables
 
-En el perfil `go-ute`, el proceso falla antes de abrir SQLite si falta `IACHAT_DB` con **ruta absoluta explícita** o si `IACHAT_AUTH_SECRET` tiene menos de 32 caracteres. La instancia personal conserva sus valores existentes. La ruta absoluta y la longitud del secreto **no demuestran por sí mismas** que sean distintos de los de IAchat personal: comparar destinos y secretos sin imprimirlos antes de arrancar en Oracle. No usar la misma ruta, el mismo volumen ni el mismo secreto. Una memoria persistente no puede sustituir las instrucciones de no escribir datos oficiales sin aprobación.
+En el perfil `go-ute`, el proceso falla antes de abrir SQLite si falta `IACHAT_DB` con **ruta absoluta explícita** o si `IACHAT_AUTH_SECRET` tiene menos de 32 caracteres. La instancia personal conserva sus valores existentes. La ruta absoluta y la longitud del secreto **no demuestran por sí mismas** que sean distintos de los de IAchat personal: comparar destinos y secretos sin imprimirlos antes de arrancar en Oracle.
+
+**Autorización Google laboral:** el callback OIDC de G.O. exige `IACHAT_GOOGLE_ALLOWED_SUBS`, una lista explícita de identificadores `sub` verificados de Google, separados por comas. Sin lista o si el `sub` no figura, devuelve 403 **antes** de crear usuarios. No usar correos electrónicos como identidad ni reutilizar una lista personal. El perfil IAchat personal conserva su comportamiento anterior. Esta barrera es código candidato y aún no constituye prueba de OIDC en Oracle. No usar la misma ruta, el mismo volumen ni el mismo secreto. Una memoria persistente no puede sustituir las instrucciones de no escribir datos oficiales sin aprobación.
 
 ## Secuencia mínima, sin tocar producción antes de tiempo
 
