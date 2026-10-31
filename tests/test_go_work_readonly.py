@@ -426,3 +426,58 @@ def test_go_general_question_keeps_shared_web_planner(monkeypatch, tmp_path):
     assert response.status_code == 200, response.text
     assert planned == ["¿Cuándo es el próximo eclipse?"]
     assert len(backend.messages) == 1
+
+
+def test_public_web_policy_requires_explicit_operator_request_for_work():
+    assert not work.public_web_allowed(
+        "¿Qué novedades hay en Montevideo y Corrientes?",
+        work_profile=True, official_evidence=False,
+    )
+    assert not work.public_web_allowed(
+        "Registrá lo que hizo la cuadrilla hoy en Uriburu",
+        work_profile=True, official_evidence=False,
+    )
+    assert work.public_web_allowed(
+        "Buscá en internet las últimas noticias de River",
+        work_profile=True, official_evidence=False,
+    )
+    assert not work.public_web_allowed(
+        "Buscá en internet información sobre obra 1093",
+        work_profile=True, official_evidence=True,
+    )
+    assert work.public_web_allowed(
+        "¿Qué novedades hay en Montevideo?",
+        work_profile=False, official_evidence=False,
+    )
+
+
+def test_unrecognized_work_address_does_not_reach_public_web_planner(monkeypatch, tmp_path):
+    """No budget/SQL match must not imply permission to search public web."""
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.setattr(work, "official_context", lambda *args, **kwargs: None)
+    def forbidden_planner(*args, **kwargs):
+        raise AssertionError("Labor details must not reach the public web planner")
+    monkeypatch.setattr("iachat.web_planner.plan_web_lookup_semantic", forbidden_planner)
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.post("/api/chat", json={
+            "text": "¿Qué pasó hoy en Montevideo y Corrientes?"
+        })
+    assert response.status_code == 200, response.text
+    assert len(backend.messages) == 1
+
+
+def test_explicit_public_web_request_remains_available_in_work_profile(monkeypatch, tmp_path):
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.setattr(work, "official_context", lambda *args, **kwargs: None)
+    planned = []
+    def plan(message, *args, **kwargs):
+        planned.append(message)
+        return SimpleNamespace(action="none")
+    monkeypatch.setattr("iachat.web_planner.plan_web_lookup_semantic", plan)
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.post("/api/chat", json={
+            "text": "Buscá en internet las últimas noticias de River"
+        })
+    assert response.status_code == 200, response.text
+    assert planned == ["Buscá en internet las últimas noticias de River"]
+    assert len(backend.messages) == 1
