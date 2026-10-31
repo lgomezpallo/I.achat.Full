@@ -25,6 +25,13 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+# Oracle launches this file by absolute path under sudo. Python then puts
+# scripts/ (not the staged repository root) on sys.path. Resolve the copied
+# package explicitly before loading the probe; never import the installed
+# production iachat package or depend on sudo preserving PYTHONPATH.
+if not (ROOT / "iachat" / "__init__.py").is_file():
+    raise RuntimeError("staged_iachat_package_missing")
+sys.path.insert(0, str(ROOT))
 ALLOWED_ENV = (
     "GROQ_API_KEY", "GROQ_MODELS", "OPENROUTER_API_KEY",
     "OPENROUTER_MODELS",

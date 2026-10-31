@@ -240,3 +240,28 @@ def test_isolated_rollback_rejects_wrong_paths_and_live_sqlite_sidecars(tmp_path
         {"role": "user", "content": "Decidimos conservar esto."}
     ]
     reopened._db.close()
+
+
+def test_oracle_direct_script_imports_staged_package_without_pythonpath(tmp_path):
+    """Reproduce sudo's script-path sys.path under a clean, isolated Python."""
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        [sys.executable, "-I", str(ROOT / "scripts" / "stage_live_memory_e2e.py"),
+         "--invalid", str(tmp_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    # The script must reach its own safe argument guard. A missing iachat
+    # import would instead produce a traceback before any launcher runs.
+    assert result.returncode == 1
+    assert "STAGE_LIVE_MEMORY_FAILURE: RuntimeError usage:" in result.stdout
+    assert "ModuleNotFoundError" not in result.stderr
