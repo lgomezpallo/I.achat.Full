@@ -30,6 +30,8 @@ def main() -> None:
             "IACHAT_BACKEND": "router",
             "ROUTER_URL": "http://127.0.0.1:8010",
             "ROUTER_TOKEN": "ci-only-router-token",
+            "GO_WORK_WRITE_ENABLED": "1",
+            "GO_DATABASE_URL": os.environ["GO_CONTRACT_ADMIN_DSN"],
         })
         # No direct-provider credentials are needed or used in this test.
         for key in ("GROQ_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY"):
@@ -47,9 +49,16 @@ def main() -> None:
             assert json["required_capabilities"] == ["chat"]
             assert json["images"] == []
             requests.append(json)
+            last = json["conversation"][-1]["content"]
+            if "Registrá 15 horas ejecutadas en obra 1093" in last:
+                model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":15}}'
+            elif "Registrá 99 horas en obra 1093" in last:
+                model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1190","values":{"horas":99}}'
+            else:
+                model_text = "Respuesta de Router simulado; no hay escritura oficial."
             return httpx.Response(
                 200,
-                json={"ok": True, "text": "Respuesta de Router simulado; no hay escritura oficial."},
+                json={"ok": True, "text": model_text},
                 request=httpx.Request("POST", url),
             )
 
@@ -110,6 +119,54 @@ def main() -> None:
                 assert proposed.status_code == 200, proposed.text
                 assert events_count() == 2, "chat must never silently write official events"
 
+                # The SAME IAchat HTTP chat can stage a proposal through the
+                # existing G.O. ledger; no event is written before approval.
+                staged = client.post("/api/chat", json={
+                    "conversation_id": conversation_id,
+                    "text": "Registrá 15 horas ejecutadas en obra 1093",
+                })
+                assert staged.status_code == 200, staged.text
+                proposal_id = staged.json()["history"][-1]["go_proposal_id"]
+                assert "No está confirmado" in staged.json()["answer"]
+                assert events_count() == 2
+
+                # A UUID from another conversation cannot authorize a write.
+                forged = client.post("/api/chat", json={
+                    "text": "Confirmo propuesta " + proposal_id,
+                })
+                assert forged.status_code == 200, forged.text
+                assert "no está pendiente en esta conversación" in forged.json()["answer"]
+                assert events_count() == 2
+
+                approved = client.post("/api/chat", json={
+                    "conversation_id": conversation_id,
+                    "text": "Confirmo propuesta " + proposal_id,
+                })
+                assert approved.status_code == 200, approved.text
+                assert "confirmada" in approved.json()["answer"]
+                assert events_count() == 3
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    assert conn.execute(
+                        "SELECT datos FROM go_record_events WHERE propuesta_id=%s",
+                        (proposal_id,),
+                    ).fetchone() == ({"horas": 15},)
+
+                # A repeated confirmation is not authorization for a second write.
+                repeated = client.post("/api/chat", json={
+                    "conversation_id": conversation_id,
+                    "text": "Confirmo propuesta " + proposal_id,
+                })
+                assert repeated.status_code == 200, repeated.text
+                assert events_count() == 3
+
+                # Reject model-selected identity conflicting with the operator.
+                mismatch = client.post("/api/chat", json={
+                    "text": "Registrá 99 horas en obra 1093",
+                })
+                assert mismatch.status_code == 200, mismatch.text
+                assert "no coincide" in mismatch.json()["answer"]
+                assert events_count() == 3
+
                 categories = client.post("/api/chat", json={
                     "text": "¿Qué categorías de registros están confirmadas?",
                 })
@@ -121,7 +178,7 @@ def main() -> None:
                     for item in requests[-1]["conversation"]
                     if item["role"] == "user"
                 )
-                assert events_count() == 2
+                assert events_count() == 3
 
                 # Natural follow-up: the operator replies with only the budget
                 # after the server asks which work, never from model inference.
@@ -140,17 +197,17 @@ def main() -> None:
                     '"presupuesto": "1093"' in item["content"]
                     for item in requests[-1]["conversation"] if item["role"] == "user"
                 )
-                assert events_count() == 2
+                assert events_count() == 3
 
             # Reopen the same isolated work SQLite with the authenticated cookie.
             with TestClient(app_module.app, base_url="https://go.test") as reopened:
                 reopened.cookies.set("iachat_session", cookie)
                 saved = reopened.get("/api/conversations/" + conversation_id)
                 assert saved.status_code == 200, saved.text
-                assert len(saved.json()["history"]) == 6
-                assert events_count() == 2
+                assert len(saved.json()["history"]) == 12
+                assert events_count() == 3
 
-    print("GO_HTTP_POSTGRES_CONTRACT=passed_real_postgres16_simulated_router_no_oracle_no_inference")
+    print("GO_HTTP_POSTGRES_CONTRACT=passed_real_postgres16_staging_approval_isolated_simulated_router_no_oracle_no_inference")
 
 
 if __name__ == "__main__":
