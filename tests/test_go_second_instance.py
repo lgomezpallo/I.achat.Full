@@ -220,10 +220,51 @@ def test_session_signatures_are_profile_bound_even_if_secret_is_reused(monkeypat
     monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
     assert app_module._signed_user(personal_cookie) is None
     work_cookie = token_for_current_profile()
-    assert app_module._signed_user(work_cookie) == "same-user"
+    # A local/password-only account cannot authenticate in the labor profile,
+    # even with a valid profile-specific signature.
+    assert app_module._signed_user(work_cookie) is None
 
     monkeypatch.setenv("IACHAT_PROFILE", "personal")
     assert app_module._signed_user(work_cookie) is None
+
+
+def test_work_google_session_revocation_is_immediate(monkeypatch, tmp_path):
+    """Removing a subject from the allowlist invalidates existing cookies."""
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("IACHAT_AUTH_SECRET", "isolated-work-test-secret-at-least-32-characters")
+    monkeypatch.setenv("IACHAT_GOOGLE_ALLOWED_SUBS", "approved-google-sub")
+    monkeypatch.setattr(app_module, "store", ConversationStore(str(tmp_path / "work-revoke.db")))
+    monkeypatch.setattr(app_module.google_oidc, "complete", lambda *args: "approved-google-sub")
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        login = client.get("/auth/google/callback?code=test&state=test", follow_redirects=False)
+        assert login.status_code == 303
+        cookie = login.cookies.get("iachat_session", "")
+        assert app_module._signed_user(cookie) is not None
+        assert client.get("/auth/status").json()["authenticated"] is True
+        monkeypatch.setenv("IACHAT_GOOGLE_ALLOWED_SUBS", "different-google-sub")
+        assert app_module._signed_user(cookie) is None
+        assert client.get("/auth/status").json()["authenticated"] is False
+        denied = client.get("/api/conversations")
+        assert denied.status_code == 401
+        monkeypatch.setenv("IACHAT_GOOGLE_ALLOWED_SUBS", "approved-google-sub")
+        assert app_module._signed_user(cookie) is not None
+
+
+def test_work_cookie_requires_oidc_binding_not_just_valid_signature(monkeypatch, tmp_path):
+    """No signed legacy account can bypass labor Google identity binding."""
+    import hashlib
+    import hmac
+    import time
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    secret = "isolated-work-test-secret-at-least-32-characters"
+    monkeypatch.setenv("IACHAT_AUTH_SECRET", secret)
+    monkeypatch.setenv("IACHAT_GOOGLE_ALLOWED_SUBS", "approved-google-sub")
+    monkeypatch.setattr(app_module, "store", ConversationStore(str(tmp_path / "legacy.db")))
+    assert app_module.store.create_user("legacy", "test-only-password")
+    expiry = str(int(time.time()) + 3600)
+    payload = app_module._session_mac_payload("legacy", expiry)
+    signature = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+    assert app_module._signed_user("legacy." + expiry + "." + signature) is None
 
 
 def test_work_google_callback_issues_work_bound_cookie(monkeypatch, tmp_path):
