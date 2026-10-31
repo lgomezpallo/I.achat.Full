@@ -1,5 +1,5 @@
 # G.O. delivery: deploy main after CI; never enables Router or paid models.
-# 2026-10-29: trigger delivery of G.O. main 8ee4e862 (explicit work evidence guard, 150 tests).
+# 2026-10-30: trigger delivery of G.O. main c2820efe (multiwork query, 156 tests).
 name: G.O. desplegar acceso con huella
 on:
   workflow_dispatch:
