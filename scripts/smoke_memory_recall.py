@@ -38,6 +38,9 @@ def main() -> None:
                 "UPDATE conversation_index SET updated_at=updated_at-21*86400 WHERE id=?",
                 ("conversation",),
             )
+            # SQLite online backup must start after the write transaction
+            # commits; otherwise source.backup() can wait on its own lock.
+            db.commit()
             backup_path = str(Path(directory) / "restored.sqlite3")
             with sqlite3.connect(backup_path) as backup:
                 db.backup(backup)
