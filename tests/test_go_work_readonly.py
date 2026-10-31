@@ -203,7 +203,7 @@ def test_http_chat_uses_real_read_adapter_for_official_work_status(monkeypatch, 
     original = work.official_context
     monkeypatch.setattr(
         work, "official_context",
-        lambda message: original(message, connect=lambda *args, **kwargs: connection),
+        lambda message, **kwargs: original(message, history=kwargs.get("history"), connect=lambda *args, **kwargs: connection),
     )
     with TestClient(app_module.app, base_url="https://go.test") as client:
         response = client.post("/api/chat", json={"text": "¿Cuál es el estado de obra 1093?"})
