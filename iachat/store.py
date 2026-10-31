@@ -272,7 +272,30 @@ class ConversationStore:
                     "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
                     (owner, conversation_id),
                 ).fetchone()
-            previous = json.loads(row[1]) if row else None
+            # A malformed current cursor must never block appending durable
+            # messages. Reconstruct from the authoritative transcript; the
+            # immutable historical checkpoint remains available for audit.
+            try:
+                previous = json.loads(row[1]) if row else None
+                if previous is not None and (
+                    not isinstance(previous, dict)
+                    or (previous.get("format_version") == 2 and (
+                        type(previous.get("processed_count")) is not int
+                        or previous["processed_count"] < 0
+                        or not isinstance(previous.get("prefix_hash"), str)
+                        or not isinstance(previous.get("items"), list)
+                        or any(
+                            not isinstance(item, dict)
+                            or type(item.get("source_index")) is not int
+                            or not isinstance(item.get("kind"), str)
+                            or not isinstance(item.get("quote"), str)
+                            for item in previous["items"]
+                        )
+                    ))
+                ):
+                    previous = None
+            except (TypeError, ValueError):
+                previous = None
             summary = build_summary(history, previous)
             payload = json.dumps(history, ensure_ascii=False)
             self._db.execute(
@@ -293,6 +316,7 @@ class ConversationStore:
             # 120-item ledger on every turn while retaining incremental scans.
             evidence_changed = (
                 row is None
+                or previous is None
                 or summary.get("format_version") != previous.get("format_version")
                 or summary["items"] != previous["items"]
             )
@@ -327,7 +351,12 @@ class ConversationStore:
                 )
 
     def get_summary(self, conversation_id: str, owner: str = "admin") -> dict | None:
-        """Latest owner-scoped summary; older versions remain auditable."""
+        """Return only evidence consistent with the authoritative transcript.
+
+        A stale, malformed or tampered cursor must not inject invented memories
+        into the next model prompt. Rebuild in memory without rewriting audit
+        checkpoints; the next append will persist a corrected state/version.
+        """
         with self._lock:
             row = self._db.execute(
                 "SELECT version,summary_json FROM conversation_summary_state "
@@ -340,7 +369,26 @@ class ConversationStore:
                     "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
                     (owner, conversation_id),
                 ).fetchone()
-        return {"version": row[0], **json.loads(row[1])} if row else None
+            transcript = self._db.execute(
+                "SELECT history FROM conversations WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            ).fetchone()
+        if not row or not transcript:
+            return None
+        # Comparing the complete extractive ledger (not just its prefix hash)
+        # detects both changed transcripts and fabricated/omitted summary items.
+        history = json.loads(transcript[0])
+        canonical = build_summary(history)
+        try:
+            stored = json.loads(row[1])
+        except (TypeError, ValueError):
+            stored = None
+        if not isinstance(stored, dict) or any(
+            stored.get(key) != canonical[key]
+            for key in ("format_version", "processed_count", "prefix_hash", "items")
+        ):
+            return {"version": row[0], **canonical, "integrity_rebuilt": True}
+        return {"version": row[0], **stored}
 
     def conversation_project(self, conversation_id: str, owner: str = "admin") -> str | None:
         with self._lock:
