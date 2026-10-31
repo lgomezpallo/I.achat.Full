@@ -256,3 +256,74 @@ def test_legacy_summary_rebuilds_from_full_transcript_to_restore_early_anchor():
     assert migrated["items"][0]["source_index"] == 0
     assert "decisión más antigua" in render_summary(migrated)
     assert build_summary(history, migrated) == migrated
+
+
+def test_unclassified_turns_do_not_explode_summary_versions(tmp_path):
+    """Years of ordinary chat must not duplicate a 120-item ledger per turn."""
+    path = str(tmp_path / "bounded-versions.db")
+    store = ConversationStore(path)
+    history = [
+        {"role": "user", "content": "Decidimos usar SQLite para el historial."},
+        {"role": "assistant", "content": "Entendido."},
+    ]
+    store.put("long", history, "alice", "IAchat")
+    assert store.get_summary("long", "alice")["version"] == 1
+
+    for index in range(80):
+        history.extend([
+            {"role": "user", "content": f"Conversación común {index}."},
+            {"role": "assistant", "content": "Continuamos."},
+        ])
+        store.put("long", history, "alice", "IAchat")
+
+    latest = store.get_summary("long", "alice")
+    assert latest["version"] == 1
+    assert latest["processed_count"] == len(history)
+    assert latest["items"][0]["source_index"] == 0
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM conversation_summary_versions "
+            "WHERE owner='alice' AND conversation_id='long'"
+        ).fetchone()[0] == 1
+
+    # Reopening must retain the cursor and still discover a new explicit fact.
+    reopened = ConversationStore(path)
+    history.append({"role": "user", "content": "Falta verificar el respaldo semanal."})
+    reopened.put("long", history, "alice", "IAchat")
+    summary = reopened.get_summary("long", "alice")
+    assert summary["version"] == 2
+    assert summary["processed_count"] == len(history)
+    assert [item["source_index"] for item in summary["items"]] == [0, 162]
+    assert len(reopened.get("long", "alice")) == 163
+    with sqlite3.connect(path) as db:
+        rows = db.execute(
+            "SELECT version,summary_json FROM conversation_summary_versions "
+            "WHERE owner='alice' AND conversation_id='long' ORDER BY version"
+        ).fetchall()
+    assert [row[0] for row in rows] == [1, 2]
+    assert [item["quote"] for item in __import__("json").loads(rows[0][1])["items"]] == [
+        "Decidimos usar SQLite para el historial."
+    ]
+
+
+def test_version_cursor_advance_preserves_owner_and_backup(tmp_path):
+    """A SQLite backup must restore both the full chat and its latest cursor."""
+    path = str(tmp_path / "original.db")
+    store = ConversationStore(path)
+    history = [{"role": "user", "content": "Tengo una bicicleta azul."}]
+    store.put("c", history, "alice", "Bicicletas")
+    history.append({"role": "assistant", "content": "Anotado."})
+    store.put("c", history, "alice", "Bicicletas")
+    assert store.get_summary("c", "alice")["version"] == 1
+
+    backup_path = str(tmp_path / "restored.db")
+    with sqlite3.connect(path) as source, sqlite3.connect(backup_path) as backup:
+        source.backup(backup)
+    restored = ConversationStore(backup_path)
+    assert restored.get("c", "alice") == history
+    assert restored.get_summary("c", "alice")["processed_count"] == 2
+    assert restored.get_summary("c", "bob") is None
+    history.append({"role": "user", "content": "Corrijo: la bicicleta ahora es verde."})
+    restored.put("c", history, "alice", "Bicicletas")
+    assert restored.get_summary("c", "alice")["version"] == 2
+    assert "verde" in restored.get_summary("c", "alice")["items"][-1]["quote"]
