@@ -145,6 +145,12 @@ def main() -> None:
                 assert forged.status_code == 200, forged.text
                 assert "no está pendiente en esta conversación" in forged.json()["answer"]
                 assert events_count() == 2
+                # Even a direct ledger call without the authenticated actor
+                # cannot approve a labor-chat proposal. The DB row itself
+                # enforces both identity and server-owned conversation.
+                from go_ute import flexible
+                assert flexible.decide(proposal_id, True)["phase"] == "unauthorized"
+                assert events_count() == 2
 
                 approved = client.post("/api/chat", json={
                     "conversation_id": conversation_id,
@@ -158,6 +164,13 @@ def main() -> None:
                         "SELECT datos FROM go_record_events WHERE propuesta_id=%s",
                         (proposal_id,),
                     ).fetchone() == ({"horas": 15},)
+                    creator, scoped_conversation, decider = conn.execute(
+                        "SELECT creado_por,origen_conversacion,decidido_por "
+                        "FROM go_record_proposals WHERE id=%s", (proposal_id,),
+                    ).fetchone()
+                    assert creator and creator.startswith("g_")
+                    assert scoped_conversation == conversation_id
+                    assert decider == creator, "official change must be attributed to logged-in worker"
 
                 # A short rejection must discard only the latest proposal
                 # from this same authenticated conversation, with no event.
