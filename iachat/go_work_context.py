@@ -11,7 +11,6 @@ import os
 import re
 
 _WORK = re.compile(r"(?<!\w)(?:presupuesto|obra|pto\.?|p)\s*(?:n(?:ro|úmero|º|°)?\.?\s*)?(\d{3,6})(?!\d)", re.I)
-_TABLES = ("obras", "go_record_types", "go_record_proposals", "go_record_events", "go_chat_turns")
 # Evidence retrieval only; IAchat still interprets the natural-language request.
 _OVERVIEW = re.compile(r"\b(?:obras|presupuestos)\b", re.I)
 
@@ -102,15 +101,33 @@ def official_context(message: str, *, connect=None) -> str | None:
             conn.execute("SET TRANSACTION READ ONLY")
             if conn.execute("SHOW transaction_read_only").fetchone()[0] != "on":
                 raise WorkContextUnavailable("go_work_transaction_not_readonly")
-            # A read-only transaction alone is insufficient: reject a writer
-            # account, even if SET TRANSACTION READ ONLY succeeded.
-            for table in _TABLES:
-                for permission in ("INSERT", "UPDATE", "DELETE"):
-                    if conn.execute(
-                        "SELECT has_table_privilege(current_user, %s, %s)",
-                        (table, permission),
-                    ).fetchone()[0]:
-                        raise WorkContextUnavailable("go_work_role_has_write_privileges")
+            # SET TRANSACTION READ ONLY alone is not a sufficient grant policy:
+            # reject roles able to write to ANY non-system relation, including
+            # legacy tables not named by this adapter, and roles able to create
+            # new relations. Catalog OIDs avoid dynamic SQL or table-name guesses.
+            if conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname NOT IN ('pg_catalog','information_schema') "
+                "AND n.nspname NOT LIKE 'pg_toast%' "
+                "AND n.nspname NOT LIKE 'pg_temp_%' "
+                "AND c.relkind IN ('r','p','v','m','f') "
+                "AND (has_table_privilege(current_user,c.oid,'INSERT') "
+                "OR has_table_privilege(current_user,c.oid,'UPDATE') "
+                "OR has_table_privilege(current_user,c.oid,'DELETE') "
+                "OR has_table_privilege(current_user,c.oid,'TRUNCATE') "
+                "OR has_table_privilege(current_user,c.oid,'REFERENCES') "
+                "OR has_table_privilege(current_user,c.oid,'TRIGGER')))"
+            ).fetchone()[0]:
+                raise WorkContextUnavailable("go_work_role_has_write_privileges")
+            if conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_namespace n "
+                "WHERE n.nspname NOT IN ('pg_catalog','information_schema') "
+                "AND n.nspname NOT LIKE 'pg_toast%' "
+                "AND n.nspname NOT LIKE 'pg_temp_%' "
+                "AND has_schema_privilege(current_user,n.oid,'CREATE'))"
+            ).fetchone()[0]:
+                raise WorkContextUnavailable("go_work_role_has_write_privileges")
             if overview:
                 # Only official works, not inferred permits or movements.
                 # Counts cover the entire table; the displayed sample is bounded.
