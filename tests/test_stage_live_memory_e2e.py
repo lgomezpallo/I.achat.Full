@@ -18,6 +18,7 @@ probe = run_path(str(ROOT / "scripts" / "live_memory_probe.py"))
 backup = run_path(str(ROOT / "scripts" / "backup_iachat_db.py"))
 ALLOWED_ENV = stage["ALLOWED_ENV"]
 recall_flags = stage["recall_flags"]
+recall_marker = stage["recall_marker"]
 verify_snapshot = stage["verify_snapshot"]
 transcript_fingerprint = stage["transcript_fingerprint"]
 seed_memory_probe = probe["seed_memory_probe"]
@@ -26,13 +27,35 @@ backup_database = backup["backup_database"]
 
 def test_stage_checks_three_independent_answer_facts():
     marker = "LUCERO12AB34CD"
-    assert recall_flags(
-        "Base PostgreSQL; motor LUCERO12AB34CD; respaldo diario.", marker
-    ) == (True, True, True)
-    assert recall_flags(
-        "Base PostgreSQL; motor desconocido; respaldo diario.", marker
-    ) == (True, False, True)
+    correct = json.dumps({
+        "base_de_datos": "PostgreSQL", "motor_violeta": marker, "respaldo": "diario",
+    })
+    assert recall_flags(correct, marker) == (True, True, True)
+    assert recall_flags(json.dumps({
+        "base_de_datos": "PostgreSQL", "motor_violeta": None, "respaldo": "diario",
+    }), marker) == (True, False, True)
     assert recall_flags("No recuerdo los datos.", marker) == (False, False, False)
+    assert recall_marker(json.dumps({"motor_violeta": marker}), marker)
+    assert not recall_marker("No sé si era " + marker, marker)
+
+
+def test_stage_rejects_negations_quotes_and_partial_evidence():
+    marker = "LUCERO12AB34CD"
+    # The old substring-based gate would have falsely accepted these replies.
+    for answer in (
+        f"No elegimos PostgreSQL; no sé si el motor era {marker}; el respaldo no es diario.",
+        json.dumps({"base_de_datos": "No PostgreSQL",
+                    "motor_violeta": "No " + marker, "respaldo": "no diario"}),
+        json.dumps({"base_de_datos": "PostgreSQL",
+                    "motor_violeta": marker, "respaldo": None}),
+        '{"base_de_datos":"PostgreSQL","motor_violeta":"'+marker+'","respaldo":"diario"} extra',
+    ):
+        assert not all(recall_flags(answer, marker))
+    fence = chr(96) * 3
+    assert recall_flags(
+        fence + "json\n" + json.dumps({"base_de_datos": "PostgreSQL",
+        "motor_violeta": marker, "respaldo": "diario"}) + "\n" + fence, marker
+    ) == (True, True, True)
 
 
 def test_stage_reopens_and_restores_full_480_turn_history(tmp_path):
