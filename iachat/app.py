@@ -479,7 +479,19 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 # Do not infer official facts from memory or model guesses when
                 # the work ledger cannot be read safely.
                 code = str(exc)
-                if code not in {"go_work_ambiguous_budget", "go_work_too_many_budgets", "go_work_missing_budget"}:
+                if code == "go_work_missing_budget":
+                    # A work-specific anaphora without an operator-provided
+                    # identifier is a clarification, not a database outage.
+                    # Persist the exchange in the isolated labor conversation
+                    # without calling a model or writing official PostgreSQL.
+                    answer = "¿A qué obra te referís? Indicame el presupuesto para consultar los datos oficiales."
+                    updated = [*history, {"role": "user", "content": message.text},
+                               {"role": "assistant", "content": answer}]
+                    store.put(conversation_id, updated, owner, message.project.strip())
+                    return MessageOutput(
+                        conversation_id=conversation_id, answer=answer, history=updated,
+                    )
+                if code not in {"go_work_ambiguous_budget", "go_work_too_many_budgets"}:
                     code = "go_work_readonly_unavailable"
                 raise HTTPException(409 if code != "go_work_readonly_unavailable" else 503, code) from exc
             if work_evidence:
