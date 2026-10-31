@@ -82,3 +82,26 @@ def test_raw_reader_does_not_create_missing_database(tmp_path):
     with pytest.raises(sqlite3.OperationalError):
         raw_transcript(missing, "alice", "none")
     assert not missing.exists()
+
+
+def test_conversation_index_never_leaks_other_owner_metadata(tmp_path):
+    path = tmp_path / "owners.sqlite3"
+    store = ConversationStore(str(path))
+    store.put("c", [
+        {"role": "user", "content": "Decidimos usar SQLite para Atlas."},
+    ], "alice", "Atlas")
+    # Simulate a legacy/inconsistent index row whose owner differs from the
+    # authoritative conversation. A join by ID alone exposed its title/project.
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "UPDATE conversation_index SET owner='bob', title='BOB_PRIVATE_TITLE', "
+            "project='BOB_PRIVATE_PROJECT' WHERE id='c'"
+        )
+    alice = store.list_conversations("alice")
+    assert len(alice) == 1
+    assert alice[0]["title"] == "Conversación"
+    assert alice[0]["project"] == ""
+    assert store.search_conversations("BOB_PRIVATE_TITLE", "alice") == []
+    assert store.list_conversations("bob") == []
+    assert store.get("c", "alice")[0]["content"].startswith("Decidimos")
+    assert store.get_summary("c", "alice") is not None
