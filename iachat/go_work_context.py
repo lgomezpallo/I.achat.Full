@@ -31,6 +31,14 @@ _WORK_ANAPHORA = re.compile(
     r"\b(?:esa obra|esta obra|la misma obra|esa misma obra|"
     r"ese presupuesto|este presupuesto)\b", re.I
 )
+# Only a short answer to this exact server-issued clarification may supply a
+# bare work number. A number in unrelated conversation is not work evidence.
+WORK_CLARIFICATION_PROMPT = (
+    "¿A qué obra te referís? Indicame el presupuesto para consultar los datos oficiales."
+)
+_BARE_CLARIFICATION_REPLY = re.compile(
+    r"^\s*(?:(?:es|el|la)\s+)?(\d{3,6})\s*[.!]?\s*$", re.I
+)
 
 
 class WorkContextUnavailable(RuntimeError):
@@ -61,6 +69,20 @@ def contextual_budgets(message: str, history: list[dict] | None = None) -> list[
     messages as a source of work identity.
     """
     budgets = explicit_budgets(message)
+    if not budgets and history and len(history) >= 2:
+        bare = _BARE_CLARIFICATION_REPLY.fullmatch(message)
+        previous_user, previous_answer = history[-2:]
+        if (
+            bare
+            and isinstance(previous_user, dict)
+            and isinstance(previous_answer, dict)
+            and previous_user.get("role") == "user"
+            and isinstance(previous_user.get("content"), str)
+            and _WORK_ANAPHORA.search(previous_user["content"])
+            and previous_answer.get("role") == "assistant"
+            and previous_answer.get("content") == WORK_CLARIFICATION_PROMPT
+        ):
+            return [bare.group(1)]
     if budgets or not _FOLLOWUP.search(message):
         return budgets
     if not history:
