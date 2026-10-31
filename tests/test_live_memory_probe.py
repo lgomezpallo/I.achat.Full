@@ -11,7 +11,11 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from iachat.store import ConversationStore
-from scripts.live_memory_probe import run_live_memory_probe, seed_memory_probe
+from runpy import run_path
+from pathlib import Path
+probe = run_path(str(Path(__file__).resolve().parent.parent / "scripts" / "live_memory_probe.py"))
+run_live_memory_probe = probe["run_live_memory_probe"]
+seed_memory_probe = probe["seed_memory_probe"]
 
 
 def test_live_probe_seed_requires_archived_middle(tmp_path):
