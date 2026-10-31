@@ -143,7 +143,7 @@ def main() -> None:
                     "text": "Confirmo propuesta " + proposal_id,
                 })
                 assert approved.status_code == 200, approved.text
-                assert "confirmada" in approved.json()["answer"]
+                assert "confirmada" in approved.json()["answer"], approved.json()["answer"]
                 assert events_count() == 3
                 with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
                     assert conn.execute(
