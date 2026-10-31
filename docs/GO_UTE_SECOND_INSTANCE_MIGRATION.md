@@ -52,3 +52,13 @@ En el perfil `go-ute`, el proceso falla antes de abrir SQLite si falta `IACHAT_D
 - No se verificó que las cuentas y modelos del minirouter sean gratuitos sin posibilidad de cargo. **No hay autorización para inferencia externa ni para promover Router PR #87**.
 - La UI y autenticación IAchat no equivalen automáticamente a las passkeys actuales de G.O.; preservar acceso y usuarios durante el piloto, no hacer reemplazo silencioso.
 - Este PR sólo incorpora el aislamiento del camino de escritura SQLite y pruebas offline. **No es una entrega E2E ni una migración productiva.**
+
+## Adaptador mínimo de lectura oficial (31/10, candidato sin despliegue)
+
+Se añadió `iachat/go_work_context.py` al **mismo** motor IAchat, sin copiar el backend de G.O. ni crear tablas. Para una sola obra identificada explícitamente (por ejemplo `obra 1093`), consulta `obras` y hasta ocho eventos oficiales vigentes de `go_record_events`, excluyendo correcciones reemplazadas. La consulta usa parámetros SQL y una transacción `READ ONLY`. Los datos se incluyen como evidencia de herramienta, **nunca como instrucciones del sistema**. Con varias obras explícitas devuelve ambigüedad en vez de elegir una.
+
+La conexión requiere `GO_WORK_READONLY_DSN` **diferente de** `GO_DATABASE_URL`, correspondiente a un rol PostgreSQL con SELECT y **sin** INSERT/UPDATE/DELETE sobre `obras`, `go_record_types`, `go_record_proposals`, `go_record_events` y `go_chat_turns`. La aplicación rechaza incluso un rol escritor aunque la transacción haya sido marcada READ ONLY. No imprimir la DSN ni compartirla con la instancia personal. La configuración de rol se hará sólo tras auditar PostgreSQL real y sus permisos; este cambio no crea roles, no ejecuta DDL y no modifica Oracle.
+
+Si se menciona una obra y falta la conexión, hay error 503 antes de inferencia: **no** se presenta una conjetura como dato oficial. La conversación general sin presupuesto explícito sigue usando el motor de IAchat. Esta lectura **no** implementa propuestas ni confirmaciones: para eso sigue siendo necesario conectar de forma autenticada la lógica transaccional existente de G.O. sin duplicar esquemas.
+
+Pruebas nuevas offline: SELECT parametrizado, transacción de solo lectura, rechazo de rol escritor, obra ambigua, ausencia de DSN, evidencia aislada del rol system y bloqueo de inferencia ante falla de PostgreSQL. **No equivalen a una prueba real de Oracle ni a conversación con proveedor gratuito.** No desplegar antes de comprobar tablas, rol, aislamiento y rollback.
