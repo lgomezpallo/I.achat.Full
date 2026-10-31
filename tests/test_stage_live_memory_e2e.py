@@ -113,3 +113,19 @@ def test_stage_never_inherits_router_or_billing_configuration():
     assert "STRIPE_SECRET_KEY" not in ALLOWED_ENV
     assert "GROQ_API_KEY" in ALLOWED_ENV
     assert "OPENROUTER_API_KEY" in ALLOWED_ENV
+
+
+def test_oracle_stage_preflight_is_unprivileged_and_branch_triggered():
+    workflow = (ROOT / ".github/workflows/iachat-memory-live-stage.yml").read_text()
+    assert '"test/memory-stage-*"' in workflow
+    assert '"test/isolated-live-memory-stage-*"' in workflow
+    preflight = workflow.split("  preflight:\n", 1)[1].split(
+        "  isolated-live-memory:\n", 1
+    )[0]
+    protected = workflow.split("  isolated-live-memory:\n", 1)[1]
+    assert "pytest -q tests/test_stage_live_memory_e2e.py" in preflight
+    assert "environment:" not in preflight
+    assert "secrets." not in preflight
+    assert "needs: preflight" in protected
+    assert "environment: oracle-production" in protected
+    assert "secrets.ORACLE_SSH_KEY" in protected
