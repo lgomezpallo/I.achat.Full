@@ -21,6 +21,12 @@ class RouterFirstBackend:
         token = (self.token if self.token is not None else os.getenv("ROUTER_TOKEN", "")).strip()
         if not url or not token:
             raise RuntimeError("router_not_configured")
+        profile = os.getenv("IACHAT_PROFILE", "personal").strip().lower()
+        if profile == "go-ute" and url not in (
+            "http://127.0.0.1:8010", "http://localhost:8010"
+        ):
+            # Never send a labor-instance bearer or work context off Oracle.
+            raise RuntimeError("go_router_requires_local_endpoint")
         # Keep the user-facing language stable even when Router changes models.
         # This is guidance, not a guarantee: end-to-end tests still need to verify output.
         language_guidance = (
@@ -50,7 +56,7 @@ class RouterFirstBackend:
                         "conversation": conversation,
                         "required_capabilities": ["chat", "vision"] if images else ["chat"],
                         "images": images or [],
-                        "application_name": "iachat",
+                        "application_name": "go-ute" if profile == "go-ute" else "iachat",
                         # Router decides automatically whether decomposition is useful.
                     },
                     timeout=max(self.timeout_s, 90.0) if attempt == 0 else self.timeout_s,
