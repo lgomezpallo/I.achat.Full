@@ -329,6 +329,17 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         owner, message.project.strip(),
         image_attachments=list(zip(image_names, images)),
     )
+    # Automatic preference memory must not depend on provider success or a
+    # post-response background task. The authoritative user turn is already
+    # committed; capture its conservative, owner/project-scoped preference
+    # before any planner or inference can fail. Never fail the chat solely
+    # because the optional preference index is temporarily unavailable.
+    if not message.attachments:
+        from .auto_memory import learn
+        try:
+            learn(store, owner, message.text, message.project.strip())
+        except Exception:
+            logger.warning("IACHAT_AUTO_MEMORY_LEARN_FAILED")
     # Structured records persist per authenticated user across conversations.
     # This path precedes one-off file generation; explicit downloadable-file
     # requests continue through the existing file tool unchanged.
@@ -578,9 +589,6 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
     }
     updated = [*history, {"role": "user", "content": visible_text}, assistant_record]
     _save_chat_history(conversation_id, updated, owner, message.project.strip())
-    if not message.attachments:
-        from .auto_memory import learn
-        background_tasks.add_task(learn, store, owner, message.text, message.project.strip())
     return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated, web_sources=web_sources)
 
 
