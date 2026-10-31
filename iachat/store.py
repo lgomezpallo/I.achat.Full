@@ -128,7 +128,13 @@ class ConversationStore:
             self._db.commit()
 
     def exists(self, conversation_id: str, owner: str = "admin") -> bool:
-        row = self._db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()
+        # Do not expose a conversation created in an uncommitted transaction
+        # on this shared SQLite connection.
+        with self._lock:
+            row = self._db.execute(
+                "SELECT 1 FROM conversations WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            ).fetchone()
         return row is not None
 
     def get(self, conversation_id: str, owner: str = "admin") -> list[dict[str, object]] | None:
@@ -173,9 +179,36 @@ class ConversationStore:
         return [{"message_index": r[0], "filename": r[1], "data_url": r[2]} for r in rows]
 
     def save_images(self, conversation_id: str, owner: str, message_index: int, images: list[str], names: list[str]) -> None:
-        with self._lock:
-            self._db.executemany("INSERT INTO image_attachments(conversation_id,owner,message_index,filename,data_url) VALUES(?,?,?,?,?)", [(conversation_id,owner,message_index,name,image) for name,image in zip(names,images)])
-            self._db.commit()
+        """Attach images only to an existing, committed user turn.
+
+        The chat endpoint normally uses put(..., image_attachments=...) to
+        commit the turn and images together. Guard this legacy method too:
+        silently zipping mismatched lists or inserting orphan images would
+        make a later backup incomplete or attach files to the wrong owner.
+        """
+        if len(images) != len(names):
+            raise ValueError("image_attachment_count_mismatch")
+        if not images:
+            return
+        if type(message_index) is not int or message_index < 0:
+            raise ValueError("invalid_image_message_index")
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            row = self._db.execute(
+                "SELECT history FROM conversations WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            ).fetchone()
+            if row is None:
+                raise ValueError("image_conversation_not_found")
+            history = json.loads(row[0])
+            if message_index >= len(history) or history[message_index].get("role") != "user":
+                raise ValueError("image_attachments_require_user_turn")
+            self._db.executemany(
+                "INSERT INTO image_attachments(conversation_id,owner,message_index,filename,data_url) "
+                "VALUES(?,?,?,?,?)",
+                [(conversation_id, owner, message_index, name, image)
+                 for name, image in zip(names, images)],
+            )
 
     def list_conversations(self, owner: str = "admin", project: str | None = None) -> list[dict]:
         with self._lock:
@@ -299,13 +332,30 @@ class ConversationStore:
             return cursor.rowcount > 0
 
     def delete(self, conversation_id: str, owner: str = "admin") -> bool:
-        with self._lock:
-            cursor = self._db.execute("DELETE FROM conversations WHERE id=? AND owner=?", (conversation_id, owner))
-            self._db.execute("DELETE FROM conversation_index WHERE id=? AND owner=?", (conversation_id, owner))
-            self._db.execute("DELETE FROM image_attachments WHERE conversation_id=? AND owner=?", (conversation_id, owner))
-            self._db.execute("DELETE FROM conversation_summary_versions WHERE conversation_id=? AND owner=?", (conversation_id, owner))
-            self._db.commit()
-        return cursor.rowcount > 0
+        """Delete all conversation records atomically, never a partial history.
+
+        A failing attachment/summary cleanup must roll back the transcript
+        deletion as well, including when another SQLite connection is active.
+        """
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            cursor = self._db.execute(
+                "DELETE FROM conversations WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            self._db.execute(
+                "DELETE FROM conversation_index WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            self._db.execute(
+                "DELETE FROM image_attachments WHERE conversation_id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            self._db.execute(
+                "DELETE FROM conversation_summary_versions WHERE conversation_id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            return cursor.rowcount > 0
 
     def search_conversations(self, query: str, owner: str = "admin", limit: int = 25, project: str | None = None) -> list[dict]:
         """Owner-scoped literal text search; never sends conversation content to a model."""
