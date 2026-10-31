@@ -51,6 +51,11 @@ def main() -> None:
             "VALUES (%s,%s,%s)",
             ("medicion", 1, Jsonb({"horas": {"tipo": "numero"}})),
         )
+        conn.execute(
+            "INSERT INTO go_record_types (nombre,version,esquema) "
+            "VALUES (%s,%s,%s)",
+            ("medicion", 2, Jsonb({"horas": {"tipo": "numero", "unidad": "h", "obligatorio": True}})),
+        )
         original_id, corrected_id = uuid.uuid4(), uuid.uuid4()
         for action, proposal_id, event_id, replaces, hours in (
             ("record", uuid.uuid4(), original_id, None, 6),
@@ -70,6 +75,14 @@ def main() -> None:
                 (event_id, proposal_id, "medicion", 1, first,
                  Jsonb({"horas": hours}), replaces),
             )
+
+    categories = payload("¿Qué categorías de registros están confirmadas?")
+    assert categories["consulta"] == "categorias_confirmadas"
+    assert len(categories["categorias"]) == 1
+    assert categories["categorias"][0]["nombre"] == "medicion"
+    assert categories["categorias"][0]["version"] == 2
+    assert categories["categorias"][0]["atributos"]["horas"]["unidad"] == "h"
+    assert categories["sin_cambios_oficiales"] is True
 
     scoped = payload("¿Qué se registró en la obra 1093?")
     assert scoped["presupuesto"] == "1093" and scoped["estado"] == "en_ejecucion"
