@@ -43,6 +43,16 @@ file_workspace = FileWorkspace(os.getenv("IACHAT_DB", "iachat.db"))
 from .structured_data import StructuredStore, handle as handle_structured_chat
 structured_store = StructuredStore(os.getenv("IACHAT_DB", "iachat.db"))
 
+def _session_mac_payload(username: str, expiry: str) -> bytes:
+    """Keep personal cookies compatible; bind labor cookies to the labor profile.
+
+    Host-only cookies and distinct secrets are still required. This extra
+    domain separation prevents cross-instance session replay even if an
+    operator accidentally configures the same secret and username.
+    """
+    namespace = "go-ute:" if os.getenv("IACHAT_PROFILE", "personal").strip().lower() == "go-ute" else ""
+    return (namespace + username + "." + expiry).encode()
+
 def _signed_user(value: str) -> str | None:
     secret = os.getenv("IACHAT_AUTH_SECRET", "")
     if not secret or not value or value.count(".") != 2:
@@ -50,7 +60,7 @@ def _signed_user(value: str) -> str | None:
     username, expiry, signature = value.split(".", 2)
     if not expiry.isdigit() or int(expiry) < int(time.time()):
         return None
-    expected = hmac.new(secret.encode(), (username + "." + expiry).encode(), hashlib.sha256).hexdigest()
+    expected = hmac.new(secret.encode(), _session_mac_payload(username, expiry), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected):
         return None
     account = store.get_user(username)
@@ -101,7 +111,7 @@ def login(payload: LoginInput, response: Response):
     if not secret:
         raise HTTPException(503, "auth_not_configured")
     expiry = str(int(time.time()) + 60 * 60 * 24 * 30)
-    signature = hmac.new(secret.encode(), (username + "." + expiry).encode(), hashlib.sha256).hexdigest()
+    signature = hmac.new(secret.encode(), _session_mac_payload(username, expiry), hashlib.sha256).hexdigest()
     response.set_cookie("iachat_session", username + "." + expiry + "." + signature, httponly=True, secure=True, samesite="lax", max_age=2592000)
     return {"ok": True, "username": username}
 
@@ -147,7 +157,7 @@ def google_callback(request: Request, code: str = "", state: str = "", error: st
         raise HTTPException(403, "google_account_disabled")
     secret = os.getenv("IACHAT_AUTH_SECRET", "")
     expiry = str(int(time.time()) + 2592000)
-    signature = hmac.new(secret.encode(), (username + "." + expiry).encode(), hashlib.sha256).hexdigest()
+    signature = hmac.new(secret.encode(), _session_mac_payload(username, expiry), hashlib.sha256).hexdigest()
     response = RedirectResponse("/", status_code=303)
     response.set_cookie("iachat_session", username + "." + expiry + "." + signature,
                         httponly=True, secure=True, samesite="lax", max_age=2592000)
