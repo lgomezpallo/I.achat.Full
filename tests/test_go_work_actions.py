@@ -8,6 +8,19 @@ import pytest
 from iachat import go_work_actions as actions
 
 
+def _interpret(raw, message, *, attachments=False):
+    return actions.interpret_model_answer(
+        raw, message, actor="g_test_user", conversation_id="ci-conversation",
+        attachments=attachments,
+    )
+
+
+def _decide(message, history):
+    return actions.decide_in_conversation(
+        message, history, actor="g_test_user", conversation_id="ci-conversation",
+    )
+
+
 def _work(monkeypatch):
     monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
     monkeypatch.setenv("GO_WORK_WRITE_ENABLED", "1")
@@ -20,8 +33,8 @@ def test_personal_profile_never_interprets_or_decides(monkeypatch):
     monkeypatch.setenv("GO_WORK_WRITE_ENABLED", "1")
     assert actions.instruction() is None
     raw = '{"go_intent":"v1","intent":"record"}'
-    assert actions.interpret_model_answer(raw, "Registrá") == (raw, None)
-    assert actions.decide_in_conversation("Confirmo propuesta " + str(uuid.uuid4()), []) is None
+    assert _interpret(raw, "Registrá") == (raw, None)
+    assert _decide("Confirmo propuesta " + str(uuid.uuid4()), []) is None
 
 
 def test_work_gate_off_by_default(monkeypatch):
@@ -33,8 +46,8 @@ def test_work_gate_off_by_default(monkeypatch):
 
 def test_strict_json_only_and_document_never_stage(monkeypatch):
     _work(monkeypatch)
-    assert actions.interpret_model_answer("texto normal", "novedad") == ("texto normal", None)
-    answer, ref = actions.interpret_model_answer(
+    assert _interpret("texto normal", "novedad") == ("texto normal", None)
+    answer, ref = _interpret(
         '{"go_intent":"v1","intent":"record","record_type":"medicion"}',
         "Registrá medición", attachments=True,
     )
@@ -50,27 +63,27 @@ def test_proposal_uses_existing_ledger_and_requires_same_conversation(monkeypatc
         pass
     ledger = SimpleNamespace(
         InvalidProposal=InvalidProposal,
-        stage=lambda data, text: (stages.append((data, text)) or
+        stage=lambda data, text, **kwargs: (stages.append((data, text, kwargs)) or
                                   {"phase": "flexible_pending", "proposal_id": proposal, "reply": "Pendiente"}),
         decision_from_message=lambda text: (proposal, True),
-        decide=lambda ref, approved: (decisions.append((ref, approved)) or
+        decide=lambda ref, approved, **kwargs: (decisions.append((ref, approved, kwargs)) or
                                       {"reply": "Confirmada"}),
     )
     monkeypatch.setattr(actions, "_ledger", lambda: ledger)
     raw = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
-    answer, ref = actions.interpret_model_answer(raw, "Registrá 3 horas para obra 1093")
+    answer, ref = _interpret(raw, "Registrá 3 horas para obra 1093")
     assert (answer, ref) == ("Pendiente", proposal)
     assert len(stages) == 1 and decisions == []
     command = "Confirmo propuesta " + proposal
-    assert "no está pendiente" in actions.decide_in_conversation(command, [])
+    assert "no está pendiente" in _decide(command, [])
     assert decisions == []
     other_history = [{"role": "assistant", "go_proposal_id": str(uuid.uuid4())}]
-    assert "no está pendiente" in actions.decide_in_conversation(command, other_history)
+    assert "no está pendiente" in _decide(command, other_history)
     assert decisions == []
     own_history = [{"role": "user", "content": "registrá"},
                    {"role": "assistant", "content": answer, "go_proposal_id": proposal}]
-    assert actions.decide_in_conversation(command, own_history) == "Confirmada"
-    assert decisions == [(proposal, True)]
+    assert _decide(command, own_history) == "Confirmada"
+    assert decisions == [(proposal, True, {"actor": "g_test_user", "conversation_id": "ci-conversation"})]
 
 
 def test_invalid_model_proposal_does_not_commit(monkeypatch):
@@ -82,7 +95,7 @@ def test_invalid_model_proposal_does_not_commit(monkeypatch):
     monkeypatch.setattr(actions, "_ledger", lambda: SimpleNamespace(
         InvalidProposal=InvalidProposal, stage=stage,
     ))
-    reply, ref = actions.interpret_model_answer(
+    reply, ref = _interpret(
         '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}',
         "Registrá en obra 1190",
     )
@@ -100,12 +113,12 @@ def test_short_confirmation_scoped_to_immediate_pending_assistant(monkeypatch):
     monkeypatch.setattr(actions, "_ledger", lambda: ledger)
     own = [{"role": "user", "content": "Registrá una novedad"},
            {"role": "assistant", "content": "Propuesta pendiente", "go_proposal_id": proposal}]
-    assert actions.decide_in_conversation("dale", own) == "Confirmada"
-    assert actions.decide_in_conversation("sí", own) == "Confirmada"
-    assert actions.decide_in_conversation("descartala", own) is None
-    assert actions.decide_in_conversation("descartá", own) == "Descartada"
-    assert actions.decide_in_conversation("no", own) == "Descartada"
-    assert decisions == [(proposal, True), (proposal, True), (proposal, False), (proposal, False)]
+    assert _decide("dale", own) == "Confirmada"
+    assert _decide("sí", own) == "Confirmada"
+    assert _decide("descartala", own) is None
+    assert _decide("descartá", own) == "Descartada"
+    assert _decide("no", own) == "Descartada"
+    assert decisions == [(proposal, approved, {"actor": "g_test_user", "conversation_id": "ci-conversation"}) for approved in (True, True, False, False)]
 
 
 def test_short_confirmation_never_uses_another_conversation_or_stale_turn(monkeypatch):
@@ -114,17 +127,17 @@ def test_short_confirmation_never_uses_another_conversation_or_stale_turn(monkey
     monkeypatch.setattr(actions, "_ledger", lambda: (_ for _ in ()).throw(
         AssertionError("No database access without immediate pending proposal")
     ))
-    assert actions.decide_in_conversation("dale", []) is None
-    assert actions.decide_in_conversation("ok", [{"role": "assistant", "content": "Normal"}]) is None
-    assert actions.decide_in_conversation("sí", [
+    assert _decide("dale", []) is None
+    assert _decide("ok", [{"role": "assistant", "content": "Normal"}]) is None
+    assert _decide("sí", [
         {"role": "assistant", "content": "Pending", "go_proposal_id": proposal},
         {"role": "user", "content": "Otra consulta"},
         {"role": "assistant", "content": "Respuesta normal"},
     ]) is None
-    assert actions.decide_in_conversation("no", [
+    assert _decide("no", [
         {"role": "assistant", "content": "Pending", "go_proposal_id": "not-a-uuid"}
     ]) is None
-    assert actions.decide_in_conversation("dale, cambiá también la obra", [
+    assert _decide("dale, cambiá también la obra", [
         {"role": "assistant", "content": "Pending", "go_proposal_id": proposal}
     ]) is None
 
@@ -144,7 +157,7 @@ def test_postgres_failure_in_stage_returns_controlled_error(monkeypatch):
     ))
     raw = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
     with pytest.raises(RuntimeError, match="^go_work_approval_unavailable$") as error:
-        actions.interpret_model_answer(raw, "Registrá en obra 1093")
+        _interpret(raw, "Registrá en obra 1093")
     assert "private-dsn" not in str(error.value)
 
 
@@ -163,5 +176,5 @@ def test_postgres_failure_in_decision_returns_controlled_error(monkeypatch, mess
     ))
     history = [{"role": "assistant", "content": "Pendiente", "go_proposal_id": proposal}]
     with pytest.raises(RuntimeError, match="^go_work_approval_unavailable$") as error:
-        actions.decide_in_conversation(message.format(id=proposal), history)
+        _decide(message.format(id=proposal), history)
     assert "private-dsn" not in str(error.value)
