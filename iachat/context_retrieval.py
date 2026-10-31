@@ -75,17 +75,17 @@ def related_excerpts(history: list[dict[str, str]], question: str,
             # Apply the same privacy checks to the exact fragment that will
             # be returned to the model, not just to the original message.
             if (_PRIVATE.search(fragment) or _SECRET_VALUE.search(fragment)
-                    or re.search(r"https?://|\\b\\d{8,}\\b", fragment, re.I)
+                    or re.search(r"https?://|\b\d{8,}\b", fragment, re.I)
                     or "adjuntos:" in fragment.casefold()):
                 continue
-            words = {_concept(w) for w in re.findall(r"[^\\W\\d_]{4,}", fragment.casefold(), re.UNICODE)}
+            words = {_concept(w) for w in re.findall(r"[^\W\d_]{4,}", fragment.casefold(), re.UNICODE)}
             score = len(terms & words)
             if len(terms) >= 4 and score < 2:
                 continue
             if score:
                 correction = bool(re.match(
-                    r"^\\s*(?:corrijo\\b|correcci[oó]n\\s*:|rectifico\\b|"
-                    r"en realidad\\b|cambiamos\\b|cambi[eé]\\b)", fragment, re.I
+                    r"^\s*(?:corrijo\b|correcci[oó]n\s*:|rectifico\b|"
+                    r"en realidad\b|cambiamos\b|cambi[eé]\b)", fragment, re.I
                 ))
                 matches.append((score + (2 if correction else 0), i, part, fragment))
     matches.sort(key=lambda item: (-item[0], -item[1], -item[2]))
