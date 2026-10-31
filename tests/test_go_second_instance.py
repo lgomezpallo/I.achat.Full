@@ -4,6 +4,8 @@ These tests never connect to Oracle, Router, PostgreSQL or a provider account.
 """
 from types import SimpleNamespace
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 import iachat.app as app_module
@@ -99,3 +101,16 @@ def test_two_sqlite_instances_do_not_share_users_memories_or_conversations(tmp_p
     assert work.list_memories("alice") == []
     assert work.verify_user("alice", "another-test-password")
     assert not work.verify_user("alice", "test-only-password")
+
+
+def test_work_profile_requires_explicit_isolated_db_and_session_secret(tmp_path):
+    validate = app_module._validate_work_instance_config
+    # The personal instance retains its current configuration contract.
+    validate("personal", "", "")
+    with pytest.raises(RuntimeError, match="explicit_absolute_iachat_db"):
+        validate("go-ute", "", "s" * 32)
+    with pytest.raises(RuntimeError, match="explicit_absolute_iachat_db"):
+        validate("go-ute", "iachat.db", "s" * 32)
+    with pytest.raises(RuntimeError, match="dedicated_auth_secret"):
+        validate("go-ute", str(tmp_path / "work.db"), "short")
+    validate("go-ute", str(tmp_path / "work.db"), "s" * 32)
