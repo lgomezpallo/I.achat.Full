@@ -89,6 +89,12 @@ def main() -> None:
     assert len(scoped["registros"]) == 1
     assert scoped["registros"][0]["datos"]["horas"] == 8
     assert scoped["registros"][0]["id"] == str(corrected_id)
+    # The same scoped evidence includes confirmed metadata, allowing the
+    # shared chat model to propose an existing type without guessing fields.
+    assert scoped["categorias_confirmadas"][0]["nombre"] == "medicion"
+    assert scoped["categorias_confirmadas"][0]["version"] == 2
+    assert scoped["categorias_confirmadas"][0]["atributos"]["horas"]["unidad"] == "h"
+    assert scoped["categorias_limitadas"] is False
     overview = payload("¿Cuántas obras hay?")
     assert overview["total_obras"] == 2
     assert sum(x["cantidad"] for x in overview["por_estado"]) == 2
@@ -96,6 +102,7 @@ def main() -> None:
     assert len(comparison["obras"]) == 2
     assert comparison["obras"][1]["presupuesto"] == "1190"
     assert comparison["obras"][1]["registros"] == []
+    assert comparison["categorias_confirmadas"][0]["version"] == 2
 
     # The reader is genuinely read-only even outside the adapter's transaction.
     with psycopg.connect(reader_dsn) as conn:
