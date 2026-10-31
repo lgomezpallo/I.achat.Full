@@ -1,0 +1,83 @@
+name: IAchat memoria E2E real aislada (Oracle)
+on:
+  push:
+    branches:
+      - "test/isolated-live-memory-stage-*"
+      - "test/memory-stage-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iachat-memory-stage-oracle
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - name: Verificar integridad del E2E y política de proveedores
+        run: |
+          python -m py_compile scripts/stage_live_memory_e2e.py
+          pytest -q tests/test_stage_live_memory_e2e.py
+
+  isolated-live-memory:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    environment: oracle-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validar sintaxis y políticas de proveedor
+        run: |
+          python -m py_compile scripts/stage_live_memory_e2e.py
+          grep -q 'IACHAT_BACKEND.*integrated' scripts/stage_live_memory_e2e.py
+      - name: Verificar identidad SSH de Oracle
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts
+          actual="$(ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 ~/.ssh/known_hosts
+      - name: Ejecutar dos inferencias reales sin modificar servicios ni datos productivos
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+        run: |
+          set -euo pipefail
+          tar --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+              --exclude='.pytest_cache' -czf /tmp/iachat-memory-stage.tar.gz .
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15"
+          scp $SSH_OPTS /tmp/iachat-memory-stage.tar.gz \
+              "$ORACLE_USER@$ORACLE_HOST:/tmp/iachat-memory-stage-${GITHUB_RUN_ID}.tar.gz"
+          ssh $SSH_OPTS "$ORACLE_USER@$ORACLE_HOST" "bash -s -- ${GITHUB_RUN_ID}" <<'REMOTE'
+          set -euo pipefail
+          id="$1"
+          archive="/tmp/iachat-memory-stage-${id}.tar.gz"
+          stage="$(mktemp -d /tmp/iachat-memory-stage.XXXXXXXX)"
+          trap 'sudo -n rm -rf -- "$stage"; rm -f -- "$archive"' EXIT
+          tar -xzf "$archive" -C "$stage" --no-same-owner
+          sudo -n /usr/bin/python3 "$stage/scripts/stage_live_memory_e2e.py" --launch "$stage"
+          REMOTE
+      - name: Eliminar material SSH temporal
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts /tmp/iachat-memory-stage.tar.gz

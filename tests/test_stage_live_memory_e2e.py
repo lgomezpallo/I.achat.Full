@@ -1,0 +1,267 @@
+"""Offline regressions for the isolated *real-provider* Oracle stage runner.
+
+These checks do not substitute for the actual live stage workflow.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+import json
+import sqlite3
+from runpy import run_path
+import stat
+
+from iachat.store import ConversationStore
+
+ROOT = Path(__file__).resolve().parent.parent
+stage = run_path(str(ROOT / "scripts" / "stage_live_memory_e2e.py"))
+probe = run_path(str(ROOT / "scripts" / "live_memory_probe.py"))
+backup = run_path(str(ROOT / "scripts" / "backup_iachat_db.py"))
+ALLOWED_ENV = stage["ALLOWED_ENV"]
+recall_flags = stage["recall_flags"]
+recall_marker = stage["recall_marker"]
+verify_snapshot = stage["verify_snapshot"]
+transcript_fingerprint = stage["transcript_fingerprint"]
+seed_memory_probe = probe["seed_memory_probe"]
+backup_database = backup["backup_database"]
+
+
+def test_stage_checks_three_independent_answer_facts():
+    marker = "LUCERO12AB34CD"
+    correct = json.dumps({
+        "base_de_datos": "PostgreSQL", "motor_violeta": marker, "respaldo": "diario",
+    })
+    assert recall_flags(correct, marker) == (True, True, True)
+    assert recall_flags(json.dumps({
+        "base_de_datos": "PostgreSQL", "motor_violeta": None, "respaldo": "diario",
+    }), marker) == (True, False, True)
+    assert recall_flags("No recuerdo los datos.", marker) == (False, False, False)
+    assert recall_marker(json.dumps({"motor_violeta": marker}), marker)
+    assert not recall_marker("No sé si era " + marker, marker)
+
+
+def test_stage_rejects_negations_quotes_and_partial_evidence():
+    marker = "LUCERO12AB34CD"
+    # The old substring-based gate would have falsely accepted these replies.
+    for answer in (
+        f"No elegimos PostgreSQL; no sé si el motor era {marker}; el respaldo no es diario.",
+        json.dumps({"base_de_datos": "No PostgreSQL",
+                    "motor_violeta": "No " + marker, "respaldo": "no diario"}),
+        json.dumps({"base_de_datos": "PostgreSQL",
+                    "motor_violeta": marker, "respaldo": None}),
+        '{"base_de_datos":"PostgreSQL","motor_violeta":"'+marker+'","respaldo":"diario"} extra',
+    ):
+        assert not all(recall_flags(answer, marker))
+    fence = chr(96) * 3
+    assert recall_flags(
+        fence + "json\n" + json.dumps({"base_de_datos": "PostgreSQL",
+        "motor_violeta": marker, "respaldo": "diario"}) + "\n" + fence, marker
+    ) == (True, True, True)
+
+
+def test_stage_reopens_and_restores_full_480_turn_history(tmp_path):
+    path = tmp_path / "isolated.sqlite3"
+    marker = "LUCERO12AB34CD"
+    store = ConversationStore(str(path))
+    seed_memory_probe(store, "alice", "c", marker)
+    baseline = transcript_fingerprint(store.get("c", "alice"))
+    store._db.close()
+    assert verify_snapshot(path, "alice", "bob", "c", marker, 480, baseline)
+    assert not verify_snapshot(path, "bob", "alice", "c", marker, 480)
+    assert not verify_snapshot(path, "alice", "bob", "c", "WRONGMARKER", 480)
+
+    reopened = ConversationStore(str(path))
+    history = reopened.get("c", "alice")
+    history.extend([
+        {"role": "user", "content": "¿Cuál es la decisión final?"},
+        {"role": "assistant", "content": "La respuesta se conservó."},
+    ])
+    reopened.put("c", history, "alice", "Atlas")
+    full_hash = transcript_fingerprint(reopened.get("c", "alice"), 482)
+    reopened._db.close()
+    assert verify_snapshot(path, "alice", "bob", "c", marker, 482, baseline, full_hash)
+
+    restored = tmp_path / "restored.sqlite3"
+    backup_database(path, restored)
+    assert stat.S_IMODE(restored.stat().st_mode) == 0o600
+    assert verify_snapshot(restored, "alice", "bob", "c", marker, 482, baseline, full_hash)
+
+    # A three-anchor check alone would miss silent corruption at message 99.
+    # Corrupt the restored copy, not the original, to prove full-prefix
+    # fingerprinting detects an otherwise plausible transcript.
+    with sqlite3.connect(restored) as db:
+        history = json.loads(db.execute(
+            "SELECT history FROM conversations WHERE id='c'"
+        ).fetchone()[0])
+        history[99]["content"] = "Contenido alterado sin tocar los tres anclajes"
+        db.execute("UPDATE conversations SET history=? WHERE id='c'",
+                   (json.dumps(history, ensure_ascii=False),))
+    assert not verify_snapshot(restored, "alice", "bob", "c", marker, 482, baseline)
+    assert verify_snapshot(path, "alice", "bob", "c", marker, 482, baseline, full_hash)
+
+    # A complete digest must also detect corruption of the newly appended answer.
+    restored_tail = tmp_path / "restored_tail.sqlite3"
+    backup_database(path, restored_tail)
+    with sqlite3.connect(restored_tail) as db:
+        tail = json.loads(db.execute(
+            "SELECT history FROM conversations WHERE id='c'"
+        ).fetchone()[0])
+        tail[481]["content"] = "Respuesta alterada tras la inferencia"
+        db.execute("UPDATE conversations SET history=? WHERE id='c'",
+                   (json.dumps(tail, ensure_ascii=False),))
+    assert verify_snapshot(restored_tail, "alice", "bob", "c", marker, 482, baseline)
+    assert not verify_snapshot(restored_tail, "alice", "bob", "c", marker, 482,
+                               baseline, full_hash)
+
+
+def test_fingerprint_covers_metadata_and_message_order():
+    messages = [
+        {"role": "user", "content": "inicio", "attachments": [{"name": "plano.pdf"}]},
+        {"role": "assistant", "content": "recibido", "model": "free-model"},
+    ]
+    original = transcript_fingerprint(messages, 2)
+    import copy
+    changed = copy.deepcopy(messages)
+    changed[0]["attachments"][0]["name"] = "otro.pdf"
+    assert transcript_fingerprint(changed, 2) != original
+    changed = copy.deepcopy(messages)
+    changed[1]["model"] = "different-model"
+    assert transcript_fingerprint(changed, 2) != original
+    assert transcript_fingerprint(list(reversed(messages)), 2) != original
+
+
+def test_stage_never_inherits_router_or_billing_configuration():
+    assert "ROUTER_TOKEN" not in ALLOWED_ENV
+    assert "ROUTER_URL" not in ALLOWED_ENV
+    assert "OPENAI_API_KEY" not in ALLOWED_ENV
+    assert "STRIPE_SECRET_KEY" not in ALLOWED_ENV
+    assert "GROQ_API_KEY" in ALLOWED_ENV
+    assert "OPENROUTER_API_KEY" in ALLOWED_ENV
+
+
+def test_oracle_stage_preflight_is_unprivileged_and_branch_triggered():
+    workflow = (ROOT / ".github/workflows/iachat-memory-live-stage.yml").read_text()
+    assert '"test/memory-stage-*"' in workflow
+    assert '"test/isolated-live-memory-stage-*"' in workflow
+    preflight = workflow.split("  preflight:\n", 1)[1].split(
+        "  isolated-live-memory:\n", 1
+    )[0]
+    protected = workflow.split("  isolated-live-memory:\n", 1)[1]
+    assert "pytest -q tests/test_stage_live_memory_e2e.py" in preflight
+    assert "environment:" not in preflight
+    assert "secrets." not in preflight
+    assert "needs: preflight" in protected
+    assert "environment: oracle-production" in protected
+    assert "secrets.ORACLE_SSH_KEY" in protected
+
+
+def test_isolated_rollback_restores_full_history_images_and_memory(tmp_path):
+    """Exercise the same atomic file restore used by the real-provider stage."""
+    private = tmp_path / ".memory-stage-offline"
+    private.mkdir(mode=0o700)
+    live = private / "isolated.sqlite3"
+    snapshot = private / "restored.sqlite3"
+    store = ConversationStore(str(live))
+    marker = "LUCERO12AB34CD"
+    seed_memory_probe(store, "alice", "long", marker)
+    store.save_automatic_memory("stable", "Prefiero respuestas breves", "alice", "Atlas")
+    store.save_images(
+        "long", "alice", 0, ["data:image/png;base64,AA=="], ["plano.png"]
+    )
+    original = stage["raw_transcript"](live, "alice", "long")
+    original_hash = transcript_fingerprint(original)
+    original_summary = store.get_summary("long", "alice")
+    original_events = store.list_automatic_memory_log("alice")
+    store._db.close()
+
+    backup_database(live, snapshot)
+    changed = ConversationStore(str(live))
+    changed.put("long", [
+        *changed.get("long", "alice"),
+        {"role": "user", "content": "Corrijo: cambio temporal."},
+        {"role": "assistant", "content": "Entendido."},
+    ], "alice", "Atlas")
+    changed.save_memory("temporary", "Preferencia temporal", "alice", "Atlas")
+    changed.save_images(
+        "long", "alice", 480, ["data:image/png;base64,BB=="], ["temporal.png"]
+    )
+    assert len(changed.get("long", "alice")) == 482
+    changed._db.close()
+
+    stage["restore_disposable_snapshot"](live, snapshot)
+    assert not snapshot.exists()
+    assert stat.S_IMODE(live.stat().st_mode) == 0o600
+    reopened = ConversationStore(str(live))
+    assert stage["raw_transcript"](live, "alice", "long") == original
+    assert transcript_fingerprint(stage["raw_transcript"](live, "alice", "long")) == original_hash
+    assert reopened.get_summary("long", "alice") == original_summary
+    assert reopened.list_automatic_memory_log("alice") == original_events
+    remembered = reopened.list_memories("alice", "Atlas")
+    assert len(remembered) == 1
+    assert remembered[0]["id"] == "stable"
+    assert remembered[0]["content"] == "Prefiero respuestas breves"
+    assert remembered[0]["project"] == "Atlas"
+    assert reopened.list_memories("bob") == []
+    assert [row["filename"] for row in reopened.images_for_conversation("long", "alice")] == [
+        "plano.png"
+    ]
+    assert reopened.get("long", "bob") is None
+    reopened._db.close()
+
+
+def test_isolated_rollback_rejects_wrong_paths_and_live_sqlite_sidecars(tmp_path):
+    private = tmp_path / ".memory-stage-safe"
+    private.mkdir()
+    live = private / "isolated.sqlite3"
+    snapshot = private / "restored.sqlite3"
+    store = ConversationStore(str(live))
+    store.put("c", [{"role": "user", "content": "Decidimos conservar esto."}], "alice")
+    store._db.close()
+    backup_database(live, snapshot)
+    restore = stage["restore_disposable_snapshot"]
+
+    # No production or arbitrary path can be replaced by the test helper.
+    import pytest
+    with pytest.raises(RuntimeError, match="rollback_not_disposable_stage"):
+        restore(tmp_path / "production.sqlite3", snapshot)
+    with pytest.raises(RuntimeError, match="rollback_not_disposable_stage"):
+        restore(live, tmp_path / "unrelated.sqlite3")
+    wal = Path(str(live) + "-wal")
+    wal.write_bytes(b"uncheckpointed")
+    with pytest.raises(RuntimeError, match="rollback_database_still_active"):
+        restore(live, snapshot)
+    wal.unlink()
+    link = private / "link.sqlite3"
+    link.symlink_to(live)
+    with pytest.raises(RuntimeError, match="rollback_symlink_refused"):
+        restore(link, snapshot)
+    assert snapshot.exists()
+    reopened = ConversationStore(str(live))
+    assert reopened.get("c", "alice") == [
+        {"role": "user", "content": "Decidimos conservar esto."}
+    ]
+    reopened._db.close()
+
+
+def test_oracle_direct_script_imports_staged_package_without_pythonpath(tmp_path):
+    """Reproduce sudo's script-path sys.path under a clean, isolated Python."""
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        [sys.executable, "-I", str(ROOT / "scripts" / "stage_live_memory_e2e.py"),
+         "--invalid", str(tmp_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    # The script must reach its own safe argument guard. A missing iachat
+    # import would instead produce a traceback before any launcher runs.
+    assert result.returncode == 1
+    assert "STAGE_LIVE_MEMORY_FAILURE: RuntimeError usage:" in result.stdout
+    assert "ModuleNotFoundError" not in result.stderr
