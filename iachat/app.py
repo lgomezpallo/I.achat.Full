@@ -320,8 +320,11 @@ def ready():
     if _is_go_profile() and os.getenv("IACHAT_BACKEND", "integrated").strip().lower() != "router":
         raise HTTPException(503, "go_router_only_until_free_models_verified")
     if os.getenv("IACHAT_BACKEND", "integrated").strip().lower() == "router":
-        if not os.getenv("ROUTER_URL", "").strip() or not os.getenv("ROUTER_TOKEN", "").strip():
+        url = os.getenv("ROUTER_URL", "").strip().rstrip("/")
+        if not url or not os.getenv("ROUTER_TOKEN", "").strip():
             raise HTTPException(503, "router_not_configured")
+        if _is_go_profile() and url not in ("http://127.0.0.1:8010", "http://localhost:8010"):
+            raise HTTPException(503, "go_router_requires_local_endpoint")
         return {"status": "ready", "component": "iachat", "mode": "router"}
     if not ProviderBackend.configured():
         raise HTTPException(503, "providers_not_configured")
@@ -343,8 +346,12 @@ def router_status():
     token = os.getenv("ROUTER_TOKEN", "").strip()
     if not url or not token:
         return {"configured": False, "reachable": False, "routing_verified": False, "reason": "router_not_configured"}
+    if _is_go_profile() and url not in ("http://127.0.0.1:8010", "http://localhost:8010"):
+        return {"configured": False, "reachable": False, "routing_verified": False,
+                "reason": "go_router_requires_local_endpoint"}
     try:
-        response = httpx.get(url + "/health", timeout=8.0, follow_redirects=False)
+        response = httpx.get(url + "/health", timeout=8.0, follow_redirects=False,
+                             trust_env=not _is_go_profile())
         if response.status_code != 200 or response.json().get("status") != "ok":
             return {"configured": True, "reachable": False, "routing_verified": False, "reason": "router_health_failed"}
     except (httpx.RequestError, ValueError, TypeError):
