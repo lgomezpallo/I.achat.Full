@@ -479,7 +479,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 # Do not infer official facts from memory or model guesses when
                 # the work ledger cannot be read safely.
                 code = str(exc)
-                if code not in {"go_work_ambiguous_budget", "go_work_too_many_budgets"}:
+                if code not in {"go_work_ambiguous_budget", "go_work_too_many_budgets", "go_work_missing_budget"}:
                     code = "go_work_readonly_unavailable"
                 raise HTTPException(409 if code != "go_work_readonly_unavailable" else 503, code) from exc
             if work_evidence:
