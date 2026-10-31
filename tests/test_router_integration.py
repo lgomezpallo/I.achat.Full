@@ -113,7 +113,9 @@ def test_router_auth_failure_does_not_corrupt_stored_chat(monkeypatch, tmp_path)
     )
     assert response.status_code == 503
     assert response.json()["detail"] == "router_auth_rejected"
-    assert module.store.get("existing", "admin") == before
+    assert module.store.get("existing", "admin") == [
+        *before, {"role": "user", "content": "¿De qué color es?"}
+    ]
 
 
 def test_router_invalid_success_payload_does_not_persist_fake_answer(monkeypatch, tmp_path):
@@ -136,4 +138,6 @@ def test_router_invalid_success_payload_does_not_persist_fake_answer(monkeypatch
     })
     assert result.status_code == 503
     assert result.json()["detail"] == "router_failed"
-    assert module.store.get("existing", "admin") == history
+    assert module.store.get("existing", "admin") == [
+        *history, {"role": "user", "content": "¿Cómo se llama el perro?"}
+    ]

@@ -76,7 +76,11 @@ def test_router_failure_does_not_create_fake_answer(monkeypatch):
     response = client.post("/api/chat", json={"text": "Hola"})
     assert response.status_code == 503
     assert response.json()["detail"] == "providers_unavailable"
-    assert module.store._db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
+    # The provider failed, but the user input must be durable and no fake
+    # assistant answer may be created.
+    assert module.store._db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0] == 1
+    cid = module.store.list_conversations("admin")[0]["id"]
+    assert module.store.get(cid, "admin") == [{"role": "user", "content": "Hola"}]
 
 
 def test_readiness_requires_router_credentials(monkeypatch):

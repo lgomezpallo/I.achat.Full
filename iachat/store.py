@@ -178,7 +178,7 @@ class ConversationStore:
             ).fetchall()
         return [{"id": r[0], "title": r[1], "updated_at": r[2], "project": r[3]} for r in rows if project is None or r[3] == project]
 
-    def put(self, conversation_id: str, history: list[dict[str, str]], owner: str = "admin", project: str = "") -> None:
+    def put(self, conversation_id: str, history: list[dict[str, str]], owner: str = "admin", project: str = "", image_attachments: list[tuple[str, str]] | None = None) -> None:
         """Append-only message text, plus atomic versioned extractive summary.
 
         Reject stale concurrent writers rather than silently losing conversation
@@ -245,6 +245,17 @@ class ConversationStore:
                     "UPDATE conversation_summary_versions SET summary_json=? "
                     "WHERE owner=? AND conversation_id=? AND version=?",
                     (json.dumps(summary, ensure_ascii=False), owner, conversation_id, row[0]),
+                )
+            # Keep image bytes and the corresponding user turn in the SAME
+            # transaction. A provider error must not orphan an attachment.
+            if image_attachments:
+                if not history or history[-1].get("role") != "user":
+                    raise ValueError("image_attachments_require_user_turn")
+                self._db.executemany(
+                    "INSERT INTO image_attachments(conversation_id,owner,message_index,filename,data_url) "
+                    "VALUES(?,?,?,?,?)",
+                    [(conversation_id, owner, len(history) - 1, name, data_url)
+                     for name, data_url in image_attachments],
                 )
 
     def get_summary(self, conversation_id: str, owner: str = "admin") -> dict | None:

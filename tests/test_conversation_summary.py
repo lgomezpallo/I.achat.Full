@@ -168,7 +168,7 @@ def test_stale_writer_from_second_process_cannot_erase_turns(tmp_path):
     assert first.get_summary("shared", "alice")["version"] == 2
 
 
-def test_provider_failure_does_not_advance_summary_or_history(monkeypatch, tmp_path):
+def test_provider_failure_preserves_pending_user_turn_and_summary(monkeypatch, tmp_path):
     module.store = ConversationStore(str(tmp_path / "failed.db"))
     module.store.put("c", [
         {"role": "user", "content": "Decidimos usar memoria duradera."},
@@ -190,8 +190,12 @@ def test_provider_failure_does_not_advance_summary_or_history(monkeypatch, tmp_p
         json={"conversation_id": "c", "project": "IAchat", "text": "Falta verificar el backup."},
     )
     assert response.status_code == 503
-    assert module.store.get_summary("c", "alice")["version"] == 1
-    assert len(module.store.get("c", "alice")) == 2
+    # Provider failure must not discard a user message or its evidence.
+    assert module.store.get_summary("c", "alice")["version"] == 2
+    assert module.store.get_summary("c", "alice")["processed_count"] == 3
+    assert module.store.get("c", "alice")[-1] == {
+        "role": "user", "content": "Falta verificar el backup."
+    }
 
 
 def test_long_ledger_keeps_original_decision_and_latest_change():
