@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 import uuid
+import pytest
 
 from iachat import go_work_actions as actions
 
@@ -126,3 +127,41 @@ def test_short_confirmation_never_uses_another_conversation_or_stale_turn(monkey
     assert actions.decide_in_conversation("dale, cambiá también la obra", [
         {"role": "assistant", "content": "Pending", "go_proposal_id": proposal}
     ]) is None
+
+
+def test_postgres_failure_in_stage_returns_controlled_error(monkeypatch):
+    """A broken ledger must not produce a false 'pending' confirmation."""
+    _work(monkeypatch)
+
+    class InvalidProposal(ValueError):
+        pass
+
+    def broken_stage(*args):
+        raise OSError("private-dsn-and-database-details")
+
+    monkeypatch.setattr(actions, "_ledger", lambda: SimpleNamespace(
+        InvalidProposal=InvalidProposal, stage=broken_stage,
+    ))
+    raw = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
+    with pytest.raises(RuntimeError, match="^go_work_approval_unavailable$") as error:
+        actions.interpret_model_answer(raw, "Registrá en obra 1093")
+    assert "private-dsn" not in str(error.value)
+
+
+@pytest.mark.parametrize("message", ["dale", "Confirmo propuesta {id}"])
+def test_postgres_failure_in_decision_returns_controlled_error(monkeypatch, message):
+    """Both natural and explicit approvals fail closed on database errors."""
+    _work(monkeypatch)
+    proposal = str(uuid.uuid4())
+
+    def broken_decide(*args):
+        raise OSError("private-dsn-and-database-details")
+
+    monkeypatch.setattr(actions, "_ledger", lambda: SimpleNamespace(
+        decide=broken_decide,
+        decision_from_message=lambda _: (proposal, True),
+    ))
+    history = [{"role": "assistant", "content": "Pendiente", "go_proposal_id": proposal}]
+    with pytest.raises(RuntimeError, match="^go_work_approval_unavailable$") as error:
+        actions.decide_in_conversation(message.format(id=proposal), history)
+    assert "private-dsn" not in str(error.value)
