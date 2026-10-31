@@ -546,7 +546,12 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
             from .web_planner import plan_web_lookup_semantic, split_independent_search_questions
             from .web_research import web_evidence_with_pages, extracted_source_links
             plan_started = time.monotonic()
-            lookup = plan_web_lookup_semantic(message.text, history, get_backend())
+            # The public search planner is an external inference boundary. Even an
+            # explicitly authorized public lookup must not forward the labor
+            # conversation's private history to a provider.
+            lookup = plan_web_lookup_semantic(
+                message.text, [] if _is_go_profile() else history, get_backend()
+            )
             web_plan_ms = int((time.monotonic() - plan_started) * 1000)
             if lookup.action == "search":
                 web_lookup_performed = True
