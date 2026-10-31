@@ -19,8 +19,16 @@ _RULES = (
 _PRIVATE = re.compile(
     r"\b(?:contrase[nñ]a|password|api[_ -]?key|token|secreto|clave privada|"
     r"tarjeta|cbu|cvu|dni|domicilio|direcci[oó]n|tel[eé]fono|"
-    r"diagn[oó]stico|medicaci[oó]n|historia cl[ií]nica)\b",
+    r"diagn[oó]stico|medicaci[oó]n|historia cl[ií]nica|"
+    r"clave de acceso|clave de recuperaci[oó]n|c[oó]digo de verificaci[oó]n|"
+    r"pin|otp|private key|begin openssh private key|begin rsa private key)\b",
     re.I,
+)
+# Known credential-shaped values must not enter prompts even if the user did
+# not label them as a password or token. Keep this conservative and explicit.
+_SECRET_VALUE = re.compile(
+    r"\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|"
+    r"AIza[A-Za-z0-9_-]{20,})\b"
 )
 MAX_ITEMS = 120
 
@@ -39,7 +47,8 @@ def _event(message: dict, index: int) -> dict | None:
     text = text.strip()
     if not 12 <= len(text) <= 280 or "\n" in text or "adjuntos:" in text.casefold():
         return None
-    if _PRIVATE.search(text) or re.search(r"https?://|\b\d{8,}\b", text, re.I):
+    if (_PRIVATE.search(text) or _SECRET_VALUE.search(text)
+            or re.search(r"https?://|\b\d{8,}\b", text, re.I)):
         return None
     for kind, pattern in _RULES:
         if pattern.search(text):
