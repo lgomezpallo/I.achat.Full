@@ -22,9 +22,10 @@ class Result:
 
 
 class FakeReadOnlyConnection:
-    def __init__(self, *, writable=False):
+    def __init__(self, *, writable=False, can_create_schema=False):
         self.statements = []
         self.writable = writable
+        self.can_create_schema = can_create_schema
 
     def __enter__(self):
         return self
@@ -36,8 +37,10 @@ class FakeReadOnlyConnection:
         self.statements.append((sql, params))
         if sql.startswith("SHOW transaction_read_only"):
             return Result(("on",))
-        if "has_table_privilege" in sql:
+        if "FROM pg_class c" in sql:
             return Result((self.writable,))
+        if "has_schema_privilege" in sql:
+            return Result((self.can_create_schema,))
         if sql == "SELECT COUNT(*) FROM obras":
             return Result((3,))
         if sql.startswith("SELECT estado,COUNT(*) FROM obras"):
@@ -132,6 +135,8 @@ def test_readonly_adapter_refuses_writer_account_and_unbounded_comparison(monkey
     monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
     with pytest.raises(work.WorkContextUnavailable, match="go_work_role_has_write_privileges"):
         work.official_context("obra 1093", connect=lambda *args, **kwargs: FakeReadOnlyConnection(writable=True))
+    with pytest.raises(work.WorkContextUnavailable, match="go_work_role_has_write_privileges"):
+        work.official_context("obra 1093", connect=lambda *args, **kwargs: FakeReadOnlyConnection(can_create_schema=True))
     with pytest.raises(work.WorkContextUnavailable, match="go_work_too_many_budgets"):
         work.official_context(
             " ".join(f"obra {n}" for n in range(1000, 1009)),
