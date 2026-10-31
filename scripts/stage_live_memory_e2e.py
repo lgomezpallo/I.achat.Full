@@ -83,6 +83,10 @@ def launcher(stage: Path) -> None:
                 source_env[name] = value.decode("utf-8", "surrogateescape")
     if not any(source_env.get(key) for key in ("GROQ_API_KEY", "OPENROUTER_API_KEY")):
         raise RuntimeError("no_configured_free_provider_keys")
+    # The SSH account and IAchat service account may differ. Give only the
+    # unprivileged service UID access to this disposable staging tree.
+    os.chown(stage, uid, account.pw_gid)
+    os.chmod(stage, 0o700)
     private = Path(tempfile.mkdtemp(prefix=".memory-stage-", dir=stage))
     os.chown(private, uid, account.pw_gid)
     os.chmod(private, 0o700)
