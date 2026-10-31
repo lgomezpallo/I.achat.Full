@@ -132,7 +132,10 @@ class ConversationStore:
         return row is not None
 
     def get(self, conversation_id: str, owner: str = "admin") -> list[dict[str, object]] | None:
-        row = self._db.execute("SELECT history FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()
+        # Serialize reads with writers sharing this SQLite connection, so a
+        # concurrent request cannot observe an uncommitted transcript.
+        with self._lock:
+            row = self._db.execute("SELECT history FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()
         if not row:
             return None
         data = json.loads(row[0])
@@ -165,7 +168,8 @@ class ConversationStore:
         return history
 
     def images_for_conversation(self, conversation_id: str, owner: str = "admin") -> list[dict]:
-        rows = self._db.execute("SELECT message_index, filename, data_url FROM image_attachments WHERE conversation_id=? AND owner=? ORDER BY message_index,id", (conversation_id, owner)).fetchall()
+        with self._lock:
+            rows = self._db.execute("SELECT message_index, filename, data_url FROM image_attachments WHERE conversation_id=? AND owner=? ORDER BY message_index,id", (conversation_id, owner)).fetchall()
         return [{"message_index": r[0], "filename": r[1], "data_url": r[2]} for r in rows]
 
     def save_images(self, conversation_id: str, owner: str, message_index: int, images: list[str], names: list[str]) -> None:
@@ -273,10 +277,11 @@ class ConversationStore:
         return {"version": row[0], **json.loads(row[1])} if row else None
 
     def conversation_project(self, conversation_id: str, owner: str = "admin") -> str | None:
-        row = self._db.execute(
-            "SELECT i.project FROM conversation_index i JOIN conversations c ON c.id=i.id "
-            "WHERE i.id=? AND c.owner=? AND i.owner=?", (conversation_id, owner, owner)
-        ).fetchone()
+        with self._lock:
+            row = self._db.execute(
+                "SELECT i.project FROM conversation_index i JOIN conversations c ON c.id=i.id "
+                "WHERE i.id=? AND c.owner=? AND i.owner=?", (conversation_id, owner, owner)
+            ).fetchone()
         return row[0] if row else None
 
     def move_conversation(self, conversation_id: str, project: str, owner: str = "admin") -> bool:
