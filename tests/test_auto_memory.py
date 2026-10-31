@@ -90,3 +90,35 @@ def test_same_preference_different_project_is_allowed():
     assert learn(store, "admin", "Me gustan las películas de misterio.", "A")
     assert learn(store, "admin", "No me gustan las películas de misterio.", "B")
     assert len(store.list_memories("admin")) == 2
+
+
+def test_multiple_preference_reversals_preserve_latest_audit_and_undo_order():
+    store = ConversationStore(":memory:")
+    assert learn(store, "alice", "Me gustan las películas de misterio.", "Cine")
+    assert learn(store, "alice", "No me gustan las películas de misterio.", "Cine")
+    assert learn(store, "alice", "Me gustan las películas de misterio.", "Cine")
+    events = store.list_automatic_memory_log("alice")
+    assert len(events) == 3
+    assert store.list_memories("alice", "Cine")[0]["content"] == "Me gustan las películas de misterio"
+
+    # The oldest event has the same text as the newest event, but cannot
+    # delete a preference with two newer audited corrections.
+    assert not store.undo_automatic_memory(events[2]["id"], "alice")
+    assert store.list_memories("alice", "Cine")
+    assert store.undo_automatic_memory(events[0]["id"], "alice")
+    assert store.list_memories("alice", "Cine")[0]["content"] == "No me gustan las películas de misterio"
+    assert store.undo_automatic_memory(events[1]["id"], "alice")
+    assert store.list_memories("alice", "Cine")[0]["content"] == "Me gustan las películas de misterio"
+    assert store.undo_automatic_memory(events[2]["id"], "alice")
+    assert store.list_memories("alice", "Cine") == []
+
+
+def test_manual_edit_after_correction_cannot_be_overwritten_by_automatic_reversal():
+    store = ConversationStore(":memory:")
+    assert learn(store, "alice", "Me gustan las películas de misterio.", "Cine")
+    assert learn(store, "alice", "No me gustan las películas de misterio.", "Cine")
+    memory = store.list_memories("alice", "Cine")[0]
+    store.save_memory(memory["id"], "Me gustan las películas de misterio", "alice", "Cine")
+    assert not learn(store, "alice", "No me gustan las películas de misterio.", "Cine")
+    assert store.list_memories("alice", "Cine")[0]["content"] == "Me gustan las películas de misterio"
+    assert len(store.list_automatic_memory_log("alice")) == 2

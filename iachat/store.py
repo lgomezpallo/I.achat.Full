@@ -334,7 +334,10 @@ class ConversationStore:
 
     def save_automatic_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> None:
         """Atomically save a new automatically learned memory and its audit entry."""
-        with self._lock:
+        # The memory and its provenance must commit together. A failed audit
+        # insert must not leave an unaudited memory or an open transaction.
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
             self._db.execute(
                 "INSERT INTO memories(id,content,updated_at,owner,project) VALUES(?,?,?,?,?)",
                 (memory_id, content, int(time.time()), owner, project))
@@ -342,22 +345,25 @@ class ConversationStore:
                 "INSERT INTO automatic_memory_log(id,memory_id,owner,project,content,created_at) "
                 "VALUES(?,?,?,?,?,?)",
                 (memory_id, memory_id, owner, project, content, int(time.time())))
-            self._db.commit()
 
     def replace_automatic_memory(self, memory_id: str, old: str, new: str, owner: str, project: str) -> bool:
         """Compare-and-swap an automatic memory, preserving a reversible event."""
-        with self._lock:
+        with self._lock, self._db:
+            # Serialize compare-and-swap with writers in other processes.
+            self._db.execute("BEGIN IMMEDIATE")
             row = self._db.execute(
                 "SELECT content,project FROM memories WHERE id=? AND owner=?",
                 (memory_id, owner)).fetchone()
             if not row or row[0] != old or row[1] != project:
                 return False
-            # Never overwrite user-edited entries: require a matching original auto-save.
-            origin = self._db.execute(
-                "SELECT 1 FROM automatic_memory_log WHERE memory_id=? AND owner=? "
-                "AND previous_content IS NULL AND content=? LIMIT 1",
-                (memory_id, owner, old)).fetchone()
-            if not origin:
+            # A preference may be corrected more than once. Only replace the
+            # latest *active* audited value, never an intervening manual edit.
+            latest = self._db.execute(
+                "SELECT content,project FROM automatic_memory_log "
+                "WHERE memory_id=? AND owner=? AND undone=0 "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                (memory_id, owner)).fetchone()
+            if latest != (old, project):
                 return False
             self._db.execute(
                 "UPDATE memories SET content=?,updated_at=? WHERE id=? AND owner=? AND project=?",
@@ -366,7 +372,6 @@ class ConversationStore:
                 "INSERT INTO automatic_memory_log(id,memory_id,owner,project,content,created_at,previous_content) "
                 "VALUES(?,?,?,?,?,?,?)",
                 (secrets.token_hex(16), memory_id, owner, project, new, int(time.time()), old))
-            self._db.commit()
             return True
 
     def list_automatic_memory_log(self, owner: str = "admin", limit: int = 50) -> list[dict]:
@@ -380,7 +385,10 @@ class ConversationStore:
 
     def undo_automatic_memory(self, event_id: str, owner: str = "admin") -> bool:
         """Undo only if the remembered text is unchanged; never delete a user's edit."""
-        with self._lock:
+        with self._lock, self._db:
+            # Do not delete/revert a memory unless its audit event can also
+            # be marked undone in the same committed transaction.
+            self._db.execute("BEGIN IMMEDIATE")
             row = self._db.execute(
                 "SELECT memory_id,content FROM automatic_memory_log "
                 "WHERE id=? AND owner=? AND undone=0", (event_id, owner)).fetchone()
@@ -393,6 +401,16 @@ class ConversationStore:
                 (event_id, owner)).fetchone()
             if current is None or event is None or current != (event[0], event[2]):
                 return False
+            # Undo only the newest active event. An older event can contain
+            # identical text after A -> B -> A corrections; undoing it would
+            # otherwise erase a newer preference and corrupt the audit chain.
+            latest = self._db.execute(
+                "SELECT id FROM automatic_memory_log "
+                "WHERE memory_id=? AND owner=? AND undone=0 "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                (row[0], owner)).fetchone()
+            if latest is None or latest[0] != event_id:
+                return False
             if event[1] is None:
                 self._db.execute("DELETE FROM memories WHERE id=? AND owner=?", (row[0], owner))
             else:
@@ -400,7 +418,6 @@ class ConversationStore:
                     "UPDATE memories SET content=?,updated_at=? WHERE id=? AND owner=?",
                     (event[1], int(time.time()), row[0], owner))
             self._db.execute("UPDATE automatic_memory_log SET undone=1 WHERE id=? AND owner=?", (event_id, owner))
-            self._db.commit()
             return True
 
     def delete_memory(self, memory_id: str, owner: str = "admin") -> bool:
