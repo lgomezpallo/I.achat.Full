@@ -150,6 +150,16 @@ class ConversationStore:
                 completed = item.get("completed_at")
                 if isinstance(completed, str) and len(completed) <= 40 and "T" in completed:
                     record["completed_at"] = completed
+                # G.O. approval capability is scoped to the server-owned
+                # conversation; retain only a canonical UUID across reloads.
+                proposal = item.get("go_proposal_id")
+                if isinstance(proposal, str):
+                    from uuid import UUID
+                    try:
+                        if str(UUID(proposal)) == proposal:
+                            record["go_proposal_id"] = proposal
+                    except ValueError:
+                        pass
             history.append(record)
         return history
 
