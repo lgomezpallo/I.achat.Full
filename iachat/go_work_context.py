@@ -25,6 +25,13 @@ _FOLLOWUP = re.compile(
     r"ese presupuesto|este presupuesto|ahí|allí)\b", re.I
 )
 
+# A reference explicitly naming a work cannot be answered from model guesses
+# when no operator-supplied budget exists in the persisted conversation.
+_WORK_ANAPHORA = re.compile(
+    r"\b(?:esa obra|esta obra|la misma obra|esa misma obra|"
+    r"ese presupuesto|este presupuesto)\b", re.I
+)
+
 
 class WorkContextUnavailable(RuntimeError):
     """No official data can be asserted when the read-only connection fails."""
@@ -54,7 +61,11 @@ def contextual_budgets(message: str, history: list[dict] | None = None) -> list[
     messages as a source of work identity.
     """
     budgets = explicit_budgets(message)
-    if budgets or not history or not _FOLLOWUP.search(message):
+    if budgets or not _FOLLOWUP.search(message):
+        return budgets
+    if not history:
+        if _WORK_ANAPHORA.search(message):
+            raise WorkContextUnavailable("go_work_missing_budget")
         return budgets
     for turn in reversed(history[-24:]):
         if not isinstance(turn, dict) or turn.get("role") != "user":
@@ -67,6 +78,8 @@ def contextual_budgets(message: str, history: list[dict] | None = None) -> list[
             if len(found) != 1:
                 raise WorkContextUnavailable("go_work_ambiguous_budget")
             return found
+    if _WORK_ANAPHORA.search(message):
+        raise WorkContextUnavailable("go_work_missing_budget")
     return []
 
 
