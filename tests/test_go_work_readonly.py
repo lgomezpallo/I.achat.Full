@@ -195,6 +195,31 @@ def test_work_chat_includes_official_data_as_untrusted_tool_evidence(monkeypatch
     assert messages[-1]["content"] == "¿Qué pasó en la obra 1093?"
 
 
+def test_http_chat_uses_real_read_adapter_for_official_work_status(monkeypatch, tmp_path):
+    """HTTP -> SQL adapter -> model context, without any external inference."""
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    original = work.official_context
+    monkeypatch.setattr(
+        work, "official_context",
+        lambda message: original(message, connect=lambda *args, **kwargs: connection),
+    )
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.post("/api/chat", json={"text": "¿Cuál es el estado de obra 1093?"})
+    assert response.status_code == 200, response.text
+    assert len(backend.messages) == 1
+    assert any(
+        m["role"] == "user" and '"estado": "pendiente"' in m["content"]
+        and '"presupuesto": "1093"' in m["content"]
+        for m in backend.messages[0]
+    )
+    assert all(
+        sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
+        for sql, _ in connection.statements
+    )
+
+
 def test_general_work_question_injects_official_overview_not_model_guess(monkeypatch, tmp_path):
     backend = _prepare_chat(monkeypatch, tmp_path)
     monkeypatch.setattr(work, "official_context", lambda text: (
