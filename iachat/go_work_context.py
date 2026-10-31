@@ -93,8 +93,10 @@ def public_web_allowed(
         return True
     if _may_contain_work_context(message):
         return False
+    # The planner can otherwise receive old work context after the 12-turn
+    # window. Inspect the entire server-owned conversation, not just its tail.
     if history:
-        for turn in history[-12:]:
+        for turn in history:
             if isinstance(turn, dict) and turn.get("role") == "user":
                 content = turn.get("content")
                 if isinstance(content, str) and _may_contain_work_context(content):
