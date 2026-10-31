@@ -60,6 +60,13 @@ elif phase == "http":
     from iachat.store import ConversationStore
 
     module.store = ConversationStore(db_path)
+    import time
+    with sqlite3.connect(db_path) as connection:
+        previous = connection.execute(
+            "SELECT updated_at FROM conversation_index WHERE id=? AND owner=?",
+            ("long-chat", "alice")
+        ).fetchone()[0]
+    assert time.time() - previous >= 20 * 86400
     web_planner.plan_web_lookup_semantic = lambda *a, **kw: SimpleNamespace(
         action="none", reason="offline_test", query=""
     )
@@ -148,6 +155,33 @@ elif phase == "restore":
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     print("RESTART=PASS BACKUP_RESTORE=PASS MEMORY_RECALL=PASS "
           "SQLITE_INTEGRITY=PASS PROVIDER_LIVE=NOT_RUN ORACLE=NOT_RUN")
+elif phase == "restored_http":
+    from fastapi.testclient import TestClient
+    import iachat.app as module
+    from iachat.store import ConversationStore
+    from iachat.conversation_summary import render_summary, render_archived_evidence
+    module.store = ConversationStore(backup_path)
+    client = TestClient(module.app, base_url="https://testserver")
+    assert client.post("/auth/login", json={
+        "username": "alice", "password": "test-only-alice-password"
+    }).status_code == 200
+    response = client.get("/api/conversations/long-chat")
+    assert response.status_code == 200
+    history = response.json()["history"]
+    assert len(history) == 483
+    assert history[-1] == {"role": "user", "content": "FALLA_SIMULADA"}
+    summary = module.store.get_summary("long-chat", "alice")
+    context = render_summary(summary, question="¿Qué motor elegimos para Violeta?") + (
+        render_archived_evidence(history, summary, "¿Qué motor elegimos para Violeta?")
+    )
+    assert "motor Orión para el proyecto Violeta" in context
+    other = TestClient(module.app, base_url="https://testserver")
+    assert other.post("/auth/login", json={
+        "username": "bob", "password": "test-only-bob-password"
+    }).status_code == 200
+    assert other.get("/api/conversations/long-chat").status_code == 404
+    print("RESTORED_AUTHENTICATED_HTTP=PASS FULL_HISTORY=PASS "
+          "MIDDLE_RECALL=PASS PENDING_TURN=PASS OWNER_ISOLATION=PASS")
 else:
     raise AssertionError("unknown_test_phase")
 '''
@@ -162,7 +196,7 @@ def test_authenticated_memory_survives_process_restart_provider_failure_and_back
         "IACHAT_AUTH_SECRET": "local-test-only-signing-secret",
         "IACHAT_BACKEND": "integrated",
     }
-    for phase in ("seed", "http", "restore"):
+    for phase in ("seed", "http", "restore", "restored_http"):
         result = subprocess.run(
             [sys.executable, "-c", textwrap.dedent(CHILD),
              phase, str(db_path), str(backup_path)],
