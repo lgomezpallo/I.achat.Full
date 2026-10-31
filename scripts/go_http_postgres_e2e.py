@@ -50,7 +50,9 @@ def main() -> None:
             assert json["images"] == []
             requests.append(json)
             last = json["task"]
-            if "Registrá 15 horas ejecutadas en obra 1093" in last:
+            if "Registrá 16 horas ejecutadas en obra 1093" in last:
+                model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":16}}'
+            elif "Registrá 15 horas ejecutadas en obra 1093" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":15}}'
             elif "Registrá 99 horas en obra 1093" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1190","values":{"horas":99}}'
@@ -146,7 +148,7 @@ def main() -> None:
 
                 approved = client.post("/api/chat", json={
                     "conversation_id": conversation_id,
-                    "text": "Confirmo propuesta " + proposal_id,
+                    "text": "dale",
                 })
                 assert approved.status_code == 200, approved.text
                 assert "confirmada" in approved.json()["answer"], approved.json()["answer"]
@@ -156,6 +158,22 @@ def main() -> None:
                         "SELECT datos FROM go_record_events WHERE propuesta_id=%s",
                         (proposal_id,),
                     ).fetchone() == ({"horas": 15},)
+
+                # A short rejection must discard only the latest proposal
+                # from this same authenticated conversation, with no event.
+                pending_discard = client.post("/api/chat", json={
+                    "conversation_id": conversation_id,
+                    "text": "Registrá 16 horas ejecutadas en obra 1093",
+                })
+                assert pending_discard.status_code == 200, pending_discard.text
+                assert "go_proposal_id" in pending_discard.json()["history"][-1]
+                discarded = client.post("/api/chat", json={
+                    "conversation_id": conversation_id,
+                    "text": "no",
+                })
+                assert discarded.status_code == 200, discarded.text
+                assert "descartada" in discarded.json()["answer"].lower()
+                assert events_count() == 3
 
                 # A repeated confirmation is not authorization for a second write.
                 repeated = client.post("/api/chat", json={
@@ -210,7 +228,7 @@ def main() -> None:
                 reopened.cookies.set("iachat_session", cookie)
                 saved = reopened.get("/api/conversations/" + conversation_id)
                 assert saved.status_code == 200, saved.text
-                assert len(saved.json()["history"]) == 12
+                assert len(saved.json()["history"]) == 16
                 assert events_count() == 3
 
     print("GO_HTTP_POSTGRES_CONTRACT=passed_real_postgres16_staging_approval_isolated_simulated_router_no_oracle_no_inference")
