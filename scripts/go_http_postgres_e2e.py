@@ -1,0 +1,125 @@
+"""Real PostgreSQL + HTTP chat + Router-transport contract, entirely offline.
+
+Uses the original G.O. migrations in the disposable CI PostgreSQL service.
+The Router HTTP response is deliberately simulated: this is NOT real inference,
+not an Oracle E2E, and never sends work data to a provider.
+"""
+from __future__ import annotations
+
+import os
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import httpx
+import psycopg
+from fastapi.testclient import TestClient
+
+from go_postgres_contract import main as check_postgres_contract
+
+
+def main() -> None:
+    # First verify real migrations, corrections, role grants and read-only SQL.
+    check_postgres_contract()
+    with tempfile.TemporaryDirectory(prefix="go-chat-contract-") as temp:
+        os.environ.update({
+            "IACHAT_PROFILE": "go-ute",
+            "IACHAT_DB": os.path.join(temp, "labor-chat.sqlite"),
+            "IACHAT_AUTH_SECRET": "ci-only-work-session-secret-longer-than-32",
+            "IACHAT_GOOGLE_ALLOWED_SUBS": "ci-allowed-google-sub",
+            "IACHAT_BACKEND": "router",
+            "ROUTER_URL": "http://127.0.0.1:8010",
+            "ROUTER_TOKEN": "ci-only-router-token",
+        })
+        # No direct-provider credentials are needed or used in this test.
+        for key in ("GROQ_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY"):
+            os.environ.pop(key, None)
+
+        import iachat.app as app_module
+
+        requests = []
+
+        def fake_router_post(url, *, headers, json, timeout, follow_redirects, trust_env):
+            assert url == "http://127.0.0.1:8010/route"
+            assert headers == {"Authorization": "Bearer ci-only-router-token"}
+            assert not follow_redirects and trust_env is False
+            assert json["application_name"] == "go-ute"
+            assert json["required_capabilities"] == ["chat"]
+            assert json["images"] == []
+            requests.append(json)
+            return httpx.Response(
+                200,
+                json={"ok": True, "text": "Respuesta de Router simulado; no hay escritura oficial."},
+                request=httpx.Request("POST", url),
+            )
+
+        def events_count():
+            with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                return conn.execute("SELECT COUNT(*) FROM go_record_events").fetchone()[0]
+
+        assert events_count() == 2
+        with (
+            patch.object(app_module.google_oidc, "complete", return_value="ci-allowed-google-sub"),
+            patch("iachat.web_planner.plan_web_lookup_semantic", return_value=SimpleNamespace(action="none")),
+            patch("iachat.tool_planner.is_file_action_candidate", return_value=False),
+            patch("iachat.auto_memory.learn", return_value=None),
+            patch("iachat.backend.httpx.post", side_effect=fake_router_post),
+        ):
+            with TestClient(app_module.app, base_url="https://go.test") as client:
+                unauthorized = client.post("/api/chat", json={"text": "obra 1093"})
+                assert unauthorized.status_code == 401, unauthorized.text
+
+                login = client.get(
+                    "/auth/google/callback?code=ci&state=ci",
+                    follow_redirects=False,
+                )
+                assert login.status_code == 303, login.text
+                cookie = login.cookies.get("iachat_session")
+                assert cookie
+
+                first = client.post("/api/chat", json={
+                    "text": "¿Qué se registró en la obra 1093?",
+                })
+                assert first.status_code == 200, first.text
+                conversation_id = first.json()["conversation_id"]
+                assert len(requests) == 1
+                assert any(
+                    '"horas": 8' in item["content"] and '"presupuesto": "1093"' in item["content"]
+                    for item in requests[0]["conversation"]
+                    if item["role"] == "user"
+                )
+                assert '"horas": 6' not in str(requests[0]["conversation"])
+                assert "NO modifica registros oficiales" in requests[0]["context"]
+
+                followup = client.post("/api/chat", json={
+                    "conversation_id": conversation_id,
+                    "text": "¿Y qué se registró en esa obra?",
+                })
+                assert followup.status_code == 200, followup.text
+                assert len(requests) == 2
+                assert any(
+                    '"presupuesto": "1093"' in item["content"]
+                    for item in requests[1]["conversation"]
+                    if item["role"] == "user"
+                )
+
+                proposed = client.post("/api/chat", json={
+                    "conversation_id": conversation_id,
+                    "text": "Registrá 10 horas ejecutadas para la obra 1093",
+                })
+                assert proposed.status_code == 200, proposed.text
+                assert events_count() == 2, "chat must never silently write official events"
+
+            # Reopen the same isolated work SQLite with the authenticated cookie.
+            with TestClient(app_module.app, base_url="https://go.test") as reopened:
+                reopened.cookies.set("iachat_session", cookie)
+                saved = reopened.get("/api/conversations/" + conversation_id)
+                assert saved.status_code == 200, saved.text
+                assert len(saved.json()["history"]) == 6
+                assert events_count() == 2
+
+    print("GO_HTTP_POSTGRES_CONTRACT=passed_real_postgres16_simulated_router_no_oracle_no_inference")
+
+
+if __name__ == "__main__":
+    main()
