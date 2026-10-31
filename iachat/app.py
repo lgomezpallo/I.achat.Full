@@ -64,7 +64,15 @@ def _signed_user(value: str) -> str | None:
     if not hmac.compare_digest(signature, expected):
         return None
     account = store.get_user(username)
-    return username if account and account["enabled"] else None
+    if not account or not account["enabled"]:
+        return None
+    if _is_go_profile():
+        # A revoked Google subject must lose access immediately, even if its
+        # 30-day signed cookie has not expired. Legacy local users cannot enter.
+        subject = store.google_subject_for_user(username)
+        if not subject or not _work_google_subject_allowed(subject):
+            return None
+    return username
 
 def _user(request: Request) -> str:
     username = getattr(request.state, "username", None)
