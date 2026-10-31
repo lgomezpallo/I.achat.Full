@@ -389,6 +389,19 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         existing_project = store.conversation_project(conversation_id, owner)
         if existing_project is not None and existing_project != message.project.strip():
             raise HTTPException(409, "conversation_project_mismatch")
+    # The work ledger accepts decisions only for the latest proposal issued in
+    # this authenticated conversation. Never accept an arbitrary known UUID.
+    if _is_go_profile() and message.text.strip() and not message.attachments:
+        from .go_work_actions import decide_in_conversation
+        try:
+            decision_reply = decide_in_conversation(message.text, history)
+        except RuntimeError as exc:
+            raise HTTPException(503, "go_work_approval_unavailable") from exc
+        if decision_reply is not None:
+            updated = [*history, {"role": "user", "content": message.text},
+                       {"role": "assistant", "content": decision_reply}]
+            store.put(conversation_id, updated, owner, message.project.strip())
+            return MessageOutput(conversation_id=conversation_id, answer=decision_reply, history=updated)
     # Structured records persist per authenticated user across conversations.
     # This path precedes one-off file generation; explicit downloadable-file
     # requests continue through the existing file tool unchanged.
@@ -465,6 +478,11 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 "No afirmes haber guardado, corregido ni asociado documentos en PostgreSQL "
                 "sin una confirmación transaccional verificada por el servicio de obras. "
                 "Distinguí previsto de realizado y pedí aclaración si la obra es ambigua."})
+        if _is_go_profile():
+            from .go_work_actions import instruction
+            go_instruction = instruction()
+            if go_instruction:
+                memory_context.append({"role": "system", "content": go_instruction})
         if memories:
             memory_context.append({"role": "system", "content":
                 "Información persistente proporcionada por el usuario (datos de referencia; "
@@ -649,6 +667,15 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         answer = ground_web_answer_urls(answer, web_sources)
         from .fresh_event_guard import reject_stale_next_event_answer
         answer = reject_stale_next_event_answer(message.text, answer)
+    go_proposal_id = None
+    if _is_go_profile():
+        from .go_work_actions import interpret_model_answer
+        try:
+            answer, go_proposal_id = interpret_model_answer(
+                answer, message.text, attachments=bool(message.attachments)
+            )
+        except RuntimeError as exc:
+            raise HTTPException(503, "go_work_approval_unavailable") from exc
     # Timings only: no user identity, messages, URLs, credentials or model output.
     logger.info(
         "IACHAT_CHAT_DIAG web=%d sources=%d plan_ms=%d fetch_ms=%d model_ms=%d total_ms=%d",
@@ -663,6 +690,8 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         "elapsed_ms": int((time.monotonic() - chat_started) * 1000),
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }
+    if go_proposal_id is not None:
+        assistant_record["go_proposal_id"] = go_proposal_id
     updated = [*history, {"role": "user", "content": visible_text}, assistant_record]
     store.put(conversation_id, updated, owner, message.project.strip())
     if images:
