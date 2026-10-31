@@ -49,7 +49,7 @@ def test_go_profile_reuses_chat_without_automatic_sqlite_work_writes(monkeypatch
     monkeypatch.setattr("iachat.auto_memory.learn", lambda *args: None)
     # This test isolates the chat engine; PostgreSQL access is covered by
     # test_go_work_readonly.py and must never contact Oracle in CI.
-    monkeypatch.setattr("iachat.go_work_context.official_context", lambda _: "datos oficiales simulados")
+    monkeypatch.setattr("iachat.go_work_context.official_context", lambda _, **kwargs: "datos oficiales simulados")
 
     with TestClient(app_module.app, base_url="https://go.test") as first:
         result = first.post("/api/chat", json={
