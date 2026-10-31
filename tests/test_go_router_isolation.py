@@ -26,6 +26,8 @@ def test_go_profile_routes_with_labor_identity_on_oracle_loopback(monkeypatch):
     assert url == "http://127.0.0.1:8010/route"
     assert kwargs["json"]["application_name"] == "go-ute"
     assert kwargs["json"]["task"] == "Hola G.O."
+    assert kwargs["trust_env"] is False
+    assert kwargs["follow_redirects"] is False
 
 
 @pytest.mark.parametrize("url", [
@@ -58,10 +60,10 @@ def test_personal_profile_preserves_router_application_identity(monkeypatch):
             return {"ok": True, "text": "respuesta personal"}
 
     def post(url, **kwargs):
-        calls.append(kwargs["json"]["application_name"])
+        calls.append((kwargs["json"]["application_name"], kwargs["trust_env"]))
         return Response()
 
     monkeypatch.setattr("iachat.backend.httpx.post", post)
     backend = RouterFirstBackend(url="https://router.example.test", token="test-only")
     assert backend.answer([{"role": "user", "content": "Hola"}]) == "respuesta personal"
-    assert calls == ["iachat"]
+    assert calls == [("iachat", True)]
