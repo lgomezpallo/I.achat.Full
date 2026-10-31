@@ -40,10 +40,10 @@ def test_archived_middle_decision_recovered_with_provenance_and_budget():
 def test_archived_correction_and_sensitive_messages():
     history = _history()
     history[2] = {"role": "user", "content": "Corrijo: el plan general será mensual."}
-    history[160] = {"role": "user", "content": "Corrijo: el motor de Violeta será solar."}
-    history[162] = {"role": "user", "content": "Decidimos guardar el token privado de Violeta."}
+    history[162] = {"role": "user", "content": "Corrijo: el motor de Violeta será solar."}
+    history[164] = {"role": "user", "content": "Decidimos guardar el token privado de Violeta."}
     summary = build_summary(history)
-    assert 160 not in {item["source_index"] for item in summary["items"]}
+    assert 162 not in {item["source_index"] for item in summary["items"]}
     result = render_archived_evidence(history, summary, "¿Qué motor usa Violeta?")
     assert "será solar" in result
     assert "token privado" not in result
