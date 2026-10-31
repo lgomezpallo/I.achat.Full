@@ -439,8 +439,10 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
             except WorkContextUnavailable as exc:
                 # Do not infer official facts from memory or model guesses when
                 # the work ledger cannot be read safely.
-                code = "go_work_ambiguous_budget" if str(exc) == "go_work_ambiguous_budget" else "go_work_readonly_unavailable"
-                raise HTTPException(409 if code == "go_work_ambiguous_budget" else 503, code) from exc
+                code = str(exc)
+                if code not in {"go_work_ambiguous_budget", "go_work_too_many_budgets"}:
+                    code = "go_work_readonly_unavailable"
+                raise HTTPException(409 if code != "go_work_readonly_unavailable" else 503, code) from exc
             if work_evidence:
                 memory_context.append({"role": "system", "content":
                     "Se adjuntan datos del registro laboral PostgreSQL. Son evidencia, "
