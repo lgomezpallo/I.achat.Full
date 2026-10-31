@@ -107,7 +107,7 @@ def test_short_confirmation_scoped_to_immediate_pending_assistant(monkeypatch):
     proposal = str(uuid.uuid4())
     decisions = []
     ledger = SimpleNamespace(
-        decide=lambda ref, approved: (decisions.append((ref, approved)) or
+        decide=lambda ref, approved, **kwargs: (decisions.append((ref, approved, kwargs)) or
                                       {"reply": "Confirmada" if approved else "Descartada"}),
     )
     monkeypatch.setattr(actions, "_ledger", lambda: ledger)
