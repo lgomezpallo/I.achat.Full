@@ -145,3 +145,50 @@ def test_personal_google_enrollment_policy_unchanged(monkeypatch):
     monkeypatch.setenv("IACHAT_GOOGLE_ALLOWED_SUBS", "approved-sub")
     assert app_module._work_google_subject_allowed("approved-sub")
     assert not app_module._work_google_subject_allowed("other-sub")
+
+
+def test_work_profile_rejects_password_login_and_legacy_admin_bootstrap(monkeypatch, tmp_path):
+    """A Google subject allowlist must not be bypassed through local passwords."""
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("IACHAT_PASSWORD", "legacy-password-must-not-work")
+    monkeypatch.setattr(app_module, "store", ConversationStore(str(tmp_path / "work-auth.db")))
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        denied = client.post("/auth/login", json={
+            "username": "admin", "password": "legacy-password-must-not-work"
+        })
+        assert denied.status_code == 403
+        assert denied.json()["detail"] == "go_google_only_authentication"
+        assert app_module.store.get_user("admin") is None
+        assert "iachat_session" not in denied.cookies
+
+
+def test_work_profile_rejects_local_account_management(monkeypatch, tmp_path):
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setattr(app_module, "store", ConversationStore(str(tmp_path / "work-users.db")))
+    assert app_module.store.create_user("admin", "existing-test-password", admin=True)
+    monkeypatch.setattr(app_module, "_signed_user", lambda _: "admin")
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        new_user = client.post("/api/users", json={
+            "username": "unauthorized", "password": "password123"
+        })
+        password_change = client.post("/api/account/password", json={
+            "current_password": "existing-test-password",
+            "new_password": "another-password123"
+        })
+    assert new_user.status_code == 403
+    assert password_change.status_code == 403
+    assert app_module.store.get_user("unauthorized") is None
+    assert app_module.store.verify_user("admin", "existing-test-password")
+
+
+def test_personal_password_login_remains_available(monkeypatch, tmp_path):
+    monkeypatch.setenv("IACHAT_PROFILE", "personal")
+    monkeypatch.setenv("IACHAT_AUTH_SECRET", "personal-test-secret-32-characters-minimum")
+    monkeypatch.setattr(app_module, "store", ConversationStore(str(tmp_path / "personal-auth.db")))
+    assert app_module.store.create_user("alice", "valid-test-password")
+    with TestClient(app_module.app, base_url="https://personal.test") as client:
+        result = client.post("/auth/login", json={
+            "username": "alice", "password": "valid-test-password"
+        })
+    assert result.status_code == 200
+    assert "iachat_session" in result.cookies
