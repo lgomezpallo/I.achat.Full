@@ -4,14 +4,21 @@ These checks do not substitute for the actual live stage workflow.
 """
 from __future__ import annotations
 
+from pathlib import Path
+from runpy import run_path
 import stat
 
 from iachat.store import ConversationStore
-from scripts.backup_iachat_db import backup_database
-from scripts.live_memory_probe import seed_memory_probe
-from scripts.stage_live_memory_e2e import (
-    ALLOWED_ENV, recall_flags, verify_snapshot,
-)
+
+ROOT = Path(__file__).resolve().parent.parent
+stage = run_path(str(ROOT / "scripts" / "stage_live_memory_e2e.py"))
+probe = run_path(str(ROOT / "scripts" / "live_memory_probe.py"))
+backup = run_path(str(ROOT / "scripts" / "backup_iachat_db.py"))
+ALLOWED_ENV = stage["ALLOWED_ENV"]
+recall_flags = stage["recall_flags"]
+verify_snapshot = stage["verify_snapshot"]
+seed_memory_probe = probe["seed_memory_probe"]
+backup_database = backup["backup_database"]
 
 
 def test_stage_checks_three_independent_answer_facts():
