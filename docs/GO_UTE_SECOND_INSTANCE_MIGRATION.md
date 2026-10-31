@@ -32,6 +32,10 @@ Estos campos orientan consultas y propuestas, no justifican copiar filas, genera
 
 La instancia personal conserva su servicio, SQLite, credenciales y dominio. La instancia laboral deberá usar **otro** proceso, dominio, `IACHAT_DB` persistente, secreto de sesión, usuarios/OIDC y configuración de proveedores; su PostgreSQL laboral sigue separado. No montar el volumen SQLite personal en G.O., no copiar el fichero de usuarios ni usar un proxy que comparta cookies entre hosts. Los archivos y memorias de trabajo residen en el SQLite laboral hasta que se defina, con evidencia, si conviene moverlos a PostgreSQL. **No afirmar que ya están migrados.**
 
+## Barreras de arranque verificables
+
+En el perfil `go-ute`, el proceso falla antes de abrir SQLite si falta `IACHAT_DB` con **ruta absoluta explícita** o si `IACHAT_AUTH_SECRET` tiene menos de 32 caracteres. La instancia personal conserva sus valores existentes. La ruta absoluta y la longitud del secreto **no demuestran por sí mismas** que sean distintos de los de IAchat personal: comparar destinos y secretos sin imprimirlos antes de arrancar en Oracle. No usar la misma ruta, el mismo volumen ni el mismo secreto. Una memoria persistente no puede sustituir las instrucciones de no escribir datos oficiales sin aprobación.
+
 ## Secuencia mínima, sin tocar producción antes de tiempo
 
 1. Inspeccionar en Oracle, sólo lectura y sin imprimir secretos: rutas reales de servicios, SHA de ambos despliegues, discos/volúmenes, esquema y recuentos de tablas PostgreSQL existentes; inventariar backup y restauración. Confirmar separación de orígenes, cookies, OIDC y WebAuthn. Este repositorio no demuestra esos hechos.
