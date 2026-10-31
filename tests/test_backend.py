@@ -13,7 +13,7 @@ class FakeResponse:
 
 def test_router_backend_returns_text(monkeypatch):
     captured = {}
-    def fake_post(url, headers, json, timeout):
+    def fake_post(url, headers, json, timeout, **kwargs):
         captured["url"] = url
         captured["headers"] = headers
         captured["json"] = json
