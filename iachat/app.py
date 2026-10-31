@@ -541,7 +541,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         from .go_work_context import public_web_allowed
         if (message.text and not message.attachments and public_web_allowed(
             message.text, work_profile=_is_go_profile(),
-            official_evidence=bool(work_tool_messages),
+            official_evidence=bool(work_tool_messages), history=history,
         )):
             from .web_planner import plan_web_lookup_semantic, split_independent_search_questions
             from .web_research import web_evidence_with_pages, extracted_source_links
