@@ -340,6 +340,30 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
             learn(store, owner, message.text, message.project.strip())
         except Exception:
             logger.warning("IACHAT_AUTO_MEMORY_LEARN_FAILED")
+    # Only explicit requests are persisted. Never claim a memory was saved
+    # on the basis of an LLM-generated acknowledgment.
+    match = re.match(
+        r"^\s*(?:quiero\s+que\s+recuerdes\s+que|record[aá]\s+que|guard[aá]\s+que)\s+(.+)",
+        message.text, flags=re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        content = re.sub(
+            r"\s+guard[aá]\s+(?:esta\s+)?informaci[oó]n\s+para\s+futuras\s+conversaciones\s*\.?\s*$",
+            "", match.group(1).strip(), flags=re.IGNORECASE,
+        ).strip().rstrip(".")
+        if 0 < len(content) <= 1000:
+            # Idempotent across requests and SQLite connections. The user turn
+            # is already durable, and this transaction precedes any provider.
+            saved = store.save_explicit_memory(
+                str(uuid4()), content, owner, message.project.strip()
+            )
+            existing = not saved
+            answer = ("Ya tenía esa información guardada." if existing
+                      else "Guardé esa información en la memoria para futuras conversaciones.")
+            updated = [*history, {"role": "user", "content": message.text},
+                       {"role": "assistant", "content": answer}]
+            _save_chat_history(conversation_id, updated, owner, message.project.strip())
+            return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
     # Structured records persist per authenticated user across conversations.
     # This path precedes one-off file generation; explicit downloadable-file
     # requests continue through the existing file tool unchanged.
@@ -385,27 +409,6 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 conversation_id=conversation_id, answer=answer, history=updated,
                 generated_file={"id": generated["id"], "name": generated["name"]},
             )
-    # Only explicit requests are persisted. Never claim a memory was saved
-    # on the basis of an LLM-generated acknowledgment.
-    match = re.match(
-        r"^\s*(?:quiero\s+que\s+recuerdes\s+que|record[aá]\s+que|guard[aá]\s+que)\s+(.+)",
-        message.text, flags=re.IGNORECASE | re.DOTALL,
-    )
-    if match:
-        content = re.sub(
-            r"\s+guard[aá]\s+(?:esta\s+)?informaci[oó]n\s+para\s+futuras\s+conversaciones\s*\.?\s*$",
-            "", match.group(1).strip(), flags=re.IGNORECASE,
-        ).strip().rstrip(".")
-        if 0 < len(content) <= 1000:
-            existing = any(m["content"].casefold() == content.casefold() for m in store.list_memories(owner, message.project.strip()))
-            if not existing:
-                store.save_memory(str(uuid4()), content, owner, message.project.strip())
-            answer = ("Ya tenía esa información guardada." if existing
-                      else "Guardé esa información en la memoria para futuras conversaciones.")
-            updated = [*history, {"role": "user", "content": message.text},
-                       {"role": "assistant", "content": answer}]
-            _save_chat_history(conversation_id, updated, owner, message.project.strip())
-            return MessageOutput(conversation_id=conversation_id, answer=answer, history=updated)
     try:
         memories = store.list_memories(owner, message.project.strip())
         memory_context = []

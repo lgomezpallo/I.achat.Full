@@ -495,6 +495,31 @@ class ConversationStore:
             )
             self._db.commit()
 
+    def save_explicit_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> bool:
+        """Atomically store an explicit user-requested memory, without auto-learning audit.
+
+        A preflight list_memories() check can race another request or process.
+        BEGIN IMMEDIATE makes the deduplication and insert one SQLite operation.
+        General memories are visible within projects; another owner's memories
+        never participate in the comparison.
+        """
+        def normalized(value: str) -> str:
+            return " ".join(value.split()).strip().rstrip(" .!?¿¡").casefold()
+
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            rows = self._db.execute(
+                "SELECT content FROM memories WHERE owner=? AND (project=? OR project='')",
+                (owner, project),
+            ).fetchall()
+            if any(normalized(row[0]) == normalized(content) for row in rows):
+                return False
+            self._db.execute(
+                "INSERT INTO memories(id,content,updated_at,owner,project) VALUES(?,?,?,?,?)",
+                (memory_id, content, int(time.time()), owner, project),
+            )
+            return True
+
     def save_automatic_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> bool:
         """Commit a unique automatic preference and its audit entry together.
 
