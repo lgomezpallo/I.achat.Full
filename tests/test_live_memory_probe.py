@@ -33,6 +33,7 @@ def test_live_probe_uses_authenticated_http_and_actual_context(tmp_path, monkeyp
     import iachat.app as module
     import iachat.web_planner as web_planner
 
+    monkeypatch.setenv("IACHAT_AUTH_SECRET", "isolated-ci-signing-key-only")
     store = ConversationStore(str(tmp_path / "http.sqlite3"))
     assert store.create_user("alice", "test-password-alice")
     assert store.create_user("bob", "test-password-bob")
@@ -65,6 +66,7 @@ def test_live_probe_rejects_model_that_does_not_recall(tmp_path, monkeypatch):
     import iachat.app as module
     import iachat.web_planner as web_planner
 
+    monkeypatch.setenv("IACHAT_AUTH_SECRET", "isolated-ci-signing-key-only")
     store = ConversationStore(str(tmp_path / "failure.sqlite3"))
     assert store.create_user("alice", "test-password-alice")
     monkeypatch.setattr(module, "store", store)
