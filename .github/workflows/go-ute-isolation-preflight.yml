@@ -76,3 +76,22 @@ jobs:
           DB
           echo 'GO_PREFLIGHT=completed_no_mutations_no_inference'
           REMOTE
+
+  # No secrets or production environment: distinguish runner/branch failure from
+  # oracle-production environment restrictions before touching remote services.
+  runner-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirmar ejecución de jobs en la rama sin secretos
+        shell: bash
+        env:
+          GITHUB_REF_SAFE: ${{ github.ref }}
+          GITHUB_EVENT_SAFE: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          printf 'GO_RUNNER_DIAGNOSTIC=started\n'
+          printf 'GITHUB_REF=%s\n' "$GITHUB_REF_SAFE"
+          printf 'GITHUB_EVENT=%s\n' "$GITHUB_EVENT_SAFE"
+          test "$GITHUB_EVENT_SAFE" = push || test "$GITHUB_EVENT_SAFE" = workflow_dispatch
+          echo 'GO_RUNNER_DIAGNOSTIC=success_no_secrets_no_oracle'
