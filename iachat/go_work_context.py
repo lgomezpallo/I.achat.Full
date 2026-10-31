@@ -45,9 +45,9 @@ _BARE_CLARIFICATION_REPLY = re.compile(
 # never be sent to a public search engine by the automatic web planner.
 # Public search remains available only when the operator explicitly asks for it.
 _EXPLICIT_PUBLIC_WEB = re.compile(
-    r"\\b(?:busc[aá](?:me)?|consult[aá]|investig[aá]|revis[aá]|verific[aá])\\b"
-    r".{0,100}\\b(?:en\\s+(?:internet|la\\s+web)|fuentes?\\s+p[uú]blicas?|"
-    r"p[aá]ginas?\\s+p[uú]blicas?|noticias)\\b", re.I | re.S
+    r"\b(?:busc[aá](?:me)?|consult[aá]|investig[aá]|revis[aá]|verific[aá])\b"
+    r".{0,100}\b(?:en\s+(?:internet|la\s+web)|fuentes?\s+p[uú]blicas?|"
+    r"p[aá]ginas?\s+p[uú]blicas?|noticias)\b", re.I | re.S
 )
 
 
