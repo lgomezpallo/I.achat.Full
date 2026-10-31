@@ -146,3 +146,66 @@ def test_private_online_backup_restores_image_and_versioned_memory_audit(tmp_pat
     assert restored.images_for_conversation("atlas", "bob") == []
     restored._db.close()
     store._db.close()
+
+
+def test_legacy_images_cannot_be_readded_to_committed_turn(tmp_path):
+    """An old client cannot duplicate a persisted attachment after reconnect."""
+    path = tmp_path / "legacy-images.sqlite3"
+    writer = ConversationStore(str(path))
+    writer.put("atlas", [{"role": "user", "content": "Plano inicial."}], "alice", "Atlas")
+    writer.save_images("atlas", "alice", 0, ["data:image/png;base64,AA=="], ["original.png"])
+    writer._db.close()
+
+    reopened = ConversationStore(str(path))
+    with pytest.raises(ValueError, match="image_attachments_already_saved"):
+        reopened.save_images(
+            "atlas", "alice", 0, ["data:image/png;base64,BB=="], ["duplicate.png"]
+        )
+    assert [i["filename"] for i in reopened.images_for_conversation("atlas", "alice")] == [
+        "original.png"
+    ]
+    assert reopened.get("atlas", "alice") == [
+        {"role": "user", "content": "Plano inicial."}
+    ]
+    # A newly appended user turn is still allowed its own first attachment.
+    reopened.put("atlas", [
+        {"role": "user", "content": "Plano inicial."},
+        {"role": "user", "content": "Segundo plano."},
+    ], "alice", "Atlas")
+    reopened.save_images("atlas", "alice", 1, ["data:image/png;base64,CC=="], ["second.png"])
+    assert [i["filename"] for i in reopened.images_for_conversation("atlas", "alice")] == [
+        "original.png", "second.png"
+    ]
+    reopened._db.close()
+
+
+def test_two_sqlite_connections_cannot_attach_twice_to_same_turn(tmp_path):
+    """BEGIN IMMEDIATE makes the duplicate check cross-process safe."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    path = tmp_path / "concurrent-images.sqlite3"
+    setup = ConversationStore(str(path))
+    setup.put("atlas", [{"role": "user", "content": "Un único plano."}], "alice", "Atlas")
+    setup._db.close()
+    barrier = Barrier(2)
+
+    def attempt(name: str) -> str:
+        store = ConversationStore(str(path))
+        try:
+            barrier.wait(timeout=5)
+            store.save_images(
+                "atlas", "alice", 0, ["data:image/png;base64,AA=="], [name]
+            )
+            return "saved"
+        except ValueError as exc:
+            return str(exc)
+        finally:
+            store._db.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt, ("first.png", "second.png")))
+    assert sorted(results) == ["image_attachments_already_saved", "saved"]
+    check = ConversationStore(str(path))
+    assert len(check.images_for_conversation("atlas", "alice")) == 1
+    check._db.close()
