@@ -9,6 +9,18 @@
 - G.O. existente: `go_ute/db.py` usa `GO_DATABASE_URL` PostgreSQL; `go_ute/flexible.py` propone cambios JSONB y confirma mediante transacción; `go_ute/app.py` mantiene passkeys, historial y documentos. El Router grande sigue siendo una dependencia separada, no se copia ni despliega desde este cambio.
 - Archivo de referencia encontrado: `Seguimiento_Integral_Obras_y_Personal_actualizado_26-10-2026.xlsx`, **22 hojas** (no 18 en esa versión): OBRAS, PARTE DIARIO, PERMISOS, MOVIMIENTOS, RESUMEN, RECURSOS, VALLADOS, FUNDICION, ACTIVIDADES EXTERNAS, INCIDENCIAS, NOTAS ACTUALIZACION, PERSONAL UTE, ROTACIONES PERSONAL, EXTRAS CANALETAS, CONTROL SUMIDEROS, REGLAS DE CONTROL, PENDIENTES DE VERIFICAR, INDICE INTEGRAL, CRONOLOGIA 20-21 OCT, CRONOLOGIA 22-24 OCT, NOVEDADES 22-24 OCT, PLANIFICACION 25-27 OCT. Es referencia funcional, **no datos para importar**.
 
+### Campos de la planilla comprobados (no importar)
+
+- **OBRAS**, fila 3: Pto., Dirección, Contratista, Puntero, Estado, Permiso vigente, Vence, Requiere asfalto, Juntas con brea líquida, Demarcación horizontal.
+- **PARTE DIARIO**, fila 3: Fecha, Pto., Dirección, Contratista, Puntero, Personal, Estado del día, Trabajo ejecutado, Observaciones, Dotación / recurso compartido.
+- **PERMISOS**, fila 3: Pto., Dirección / alcance, ID permiso, Fecha inicio permiso, Fecha fin permiso, Estado / nota.
+- **MOVIMIENTOS**, fila 3: Fecha, Contratista origen, Contratista destino, Recurso / equipo, Motivo, Observaciones.
+- **VALLADOS**, fila 1: Pto., Dirección, Contratista, Finalización, Retiro previsto / realizado, Estado del vallado.
+- **FUNDICION**, fila 1: Pto., Dirección, Movimiento, Tipo de fundición, Elemento, Cantidad, Clasificación / Procedencia.
+- **PLANIFICACION 25-27 OCT**, fila 2: Fecha, Contratista, Pto. / Lugar, Tipo de registro, Detalle / condición.
+
+Estos campos orientan consultas y propuestas, no justifican copiar filas, generar tablas nuevas ni asumir que PostgreSQL productivo tiene la misma estructura.
+
 ## Decisión: mismo código, dos procesos y datos separados
 
 | Alternativa | Evaluación |
