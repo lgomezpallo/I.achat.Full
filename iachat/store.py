@@ -96,6 +96,14 @@ class ConversationStore:
         salt, expected = row[0].split(":", 1)
         return secrets.compare_digest(self._digest(password, salt), expected)
 
+    def google_subject_for_user(self, username: str) -> str | None:
+        """Read the bound Google subject without enrolling or changing an account."""
+        row = self._db.execute(
+            "SELECT subject FROM oidc_identities WHERE provider=? AND username=?",
+            ("google", username),
+        ).fetchone()
+        return row[0] if row else None
+
     def get_user(self, username: str) -> dict | None:
         row = self._db.execute("SELECT username, enabled, admin FROM users WHERE username=?", (username,)).fetchone()
         return {"username": row[0], "enabled": bool(row[1]), "admin": bool(row[2])} if row else None
