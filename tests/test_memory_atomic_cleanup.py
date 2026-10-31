@@ -189,22 +189,28 @@ def test_two_sqlite_connections_cannot_attach_twice_to_same_turn(tmp_path):
     setup.put("atlas", [{"role": "user", "content": "Un único plano."}], "alice", "Atlas")
     setup._db.close()
     barrier = Barrier(2)
+    first = ConversationStore(str(path))
+    second = ConversationStore(str(path))
 
-    def attempt(name: str) -> str:
-        store = ConversationStore(str(path))
+    def attempt(store: ConversationStore, name: str) -> str:
+        barrier.wait(timeout=5)
         try:
-            barrier.wait(timeout=5)
             store.save_images(
                 "atlas", "alice", 0, ["data:image/png;base64,AA=="], [name]
             )
             return "saved"
         except ValueError as exc:
             return str(exc)
-        finally:
-            store._db.close()
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(attempt, ("first.png", "second.png")))
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(
+                lambda args: attempt(*args),
+                ((first, "first.png"), (second, "second.png")),
+            ))
+    finally:
+        first._db.close()
+        second._db.close()
     assert sorted(results) == ["image_attachments_already_saved", "saved"]
     check = ConversationStore(str(path))
     assert len(check.images_for_conversation("atlas", "alice")) == 1
