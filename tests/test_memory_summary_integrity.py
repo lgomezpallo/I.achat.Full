@@ -105,3 +105,26 @@ def test_restore_preserves_rebuilt_evidence_without_rewriting_audit(tmp_path):
     assert restored.get_summary("chat", "bob") is None
     store._db.close()
     restored._db.close()
+
+
+def test_invalid_incremental_cursor_types_do_not_block_durable_append(tmp_path):
+    store, original = _seed(tmp_path)
+    invalid = {"format_version": 2, "processed_count": "one",
+               "prefix_hash": "invalid", "items": [{"source_index": "zero"}]}
+    store._db.execute(
+        "UPDATE conversation_summary_state SET summary_json=? "
+        "WHERE owner='alice' AND conversation_id='chat'",
+        (json.dumps(invalid),),
+    )
+    store._db.commit()
+    history = original + [
+        {"role": "user", "content": "Corrijo: usaremos PostgreSQL para Atlas."}
+    ]
+    store.put("chat", history, "alice", "Atlas")
+    summary = store.get_summary("chat", "alice")
+    assert "integrity_rebuilt" not in summary
+    assert summary["version"] == 2
+    assert summary["processed_count"] == 2
+    assert "PostgreSQL" in render_summary(summary)
+    assert store.get("chat", "alice") == history
+    store._db.close()
