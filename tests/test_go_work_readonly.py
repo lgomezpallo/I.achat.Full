@@ -88,6 +88,10 @@ def test_scoped_ledger_read_uses_parameterized_selects_only(monkeypatch):
     assert '"horas": 8' in context
     assert '"estado": "realizado"' in context
     assert '"estado": "pendiente"' in context
+    assert '"categorias_confirmadas"' in context
+    assert '"nombre": "medicion"' in context
+    assert '"version": 2' in context
+    assert '"unidad": "h"' in context
     assert seen == [("test-connection-not-real", {"connect_timeout": 5})]
     assert all(
         sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
@@ -151,6 +155,8 @@ def test_multiwork_query_keeps_each_budget_separate_and_bounded(monkeypatch):
     assert '"presupuesto": "1190"' in result
     assert '"horas": 8' in result and '"horas": 6' in result
     assert '"max_registros_por_obra": 8' in result
+    assert '"categorias_confirmadas"' in result
+    assert '"nombre": "medicion"' in result
     scoped = [(sql, params) for sql, params in connection.statements
               if sql.startswith("SELECT id,direccion,estado FROM obras")]
     assert len(scoped) == 2
