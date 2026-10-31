@@ -188,7 +188,7 @@ else
   [[ "$backend_mode" == "integrated" ]] || { echo "::error::Router backend has no preserved drop-in."; exit 1; }
   [[ -n "$provider_file" ]] || { echo "::error::No provider credential file found on Oracle."; exit 1; }
   dropin_changed=1
-  printf '[Service]\\nEnvironmentFile=%s\\nEnvironmentFile=/etc/iachat/google-oidc.env\\nEnvironment=IACHAT_BACKEND=integrated\\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
+  printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=/etc/iachat/google-oidc.env\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
 fi
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart iachat
