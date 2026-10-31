@@ -136,7 +136,10 @@ def test_long_conversation_recalls_start_middle_end_without_assistant_fabricatio
     assert "Falta revisar el respaldo semanal del proyecto Atlas." in context
     assert "Corrijo: el respaldo del proyecto Atlas será diario." in context
     assert "Respuesta de prueba, no es memoria." not in context
-    assert module.store.get_summary("long", "alice")["version"] == 2
+    # The reply contains no new user evidence: the cursor advances but the
+    # semantic version remains unchanged.
+    assert module.store.get_summary("long", "alice")["version"] == 1
+    assert module.store.get_summary("long", "alice")["processed_count"] == 322
     assert module.store.get_summary("long", "bob") is None
 
 
