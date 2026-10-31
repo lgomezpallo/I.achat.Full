@@ -90,7 +90,7 @@ def test_invalid_model_proposal_does_not_commit(monkeypatch):
     _work(monkeypatch)
     class InvalidProposal(ValueError):
         pass
-    def stage(*args):
+    def stage(*args, **kwargs):
         raise InvalidProposal("Obra ambigua")
     monkeypatch.setattr(actions, "_ledger", lambda: SimpleNamespace(
         InvalidProposal=InvalidProposal, stage=stage,
@@ -149,7 +149,7 @@ def test_postgres_failure_in_stage_returns_controlled_error(monkeypatch):
     class InvalidProposal(ValueError):
         pass
 
-    def broken_stage(*args):
+    def broken_stage(*args, **kwargs):
         raise OSError("private-dsn-and-database-details")
 
     monkeypatch.setattr(actions, "_ledger", lambda: SimpleNamespace(
@@ -167,7 +167,7 @@ def test_postgres_failure_in_decision_returns_controlled_error(monkeypatch, mess
     _work(monkeypatch)
     proposal = str(uuid.uuid4())
 
-    def broken_decide(*args):
+    def broken_decide(*args, **kwargs):
         raise OSError("private-dsn-and-database-details")
 
     monkeypatch.setattr(actions, "_ledger", lambda: SimpleNamespace(
