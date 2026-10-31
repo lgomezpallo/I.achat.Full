@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import pwd
 import re
+from runpy import run_path
 import secrets
 import shutil
 import socket
@@ -30,10 +31,9 @@ ALLOWED_ENV = (
 )
 
 
-def recall_flags(answer: str, marker: str) -> tuple[bool, bool, bool]:
-    """Check literal, synthetic evidence without printing model output."""
-    normalized = re.sub(r"[^A-Z0-9]", "", answer.upper())
-    return ("POSTGRESQL" in normalized, marker in normalized, "DIARIO" in normalized)
+_probe = run_path(str(ROOT / "scripts" / "live_memory_probe.py"))
+recall_flags = _probe["recall_flags"]
+recall_marker = _probe["recall_marker"]
 
 
 def transcript_fingerprint(history: list[dict], prefix_count: int = 480) -> str:
@@ -211,7 +211,9 @@ def child(private: Path) -> None:
                 "conversation_id": conversation_id, "project": "Atlas",
                 "text": ("Según ESTA conversación del proyecto Atlas, ¿qué base de datos "
                          "elegimos, qué código de motor tiene Violeta y cada cuánto "
-                         "será el respaldo? Respondé los tres datos sin inventar."),
+                         'será el respaldo? Respondé SOLO JSON sin Markdown con claves '
+                         '"base_de_datos", "motor_violeta" y "respaldo"; '
+                         'valores exactos o null si no recordás. Sin explicaciones.'),
             })
             answer = first.json().get("answer", "") if first.status_code == 200 else ""
             flags = recall_flags(answer, marker)
@@ -249,10 +251,12 @@ def child(private: Path) -> None:
                 raise AssertionError("restart_modified_transcript")
             followup = client.post("/api/chat", json={
                 "conversation_id": conversation_id, "project": "Atlas",
-                "text": "¿Cuál era el código exacto del motor Violeta que decidimos?",
+                "text": ('¿Cuál era el código exacto del motor Violeta que decidimos? '
+                         'Respondé SOLO JSON sin Markdown con la clave '
+                         '"motor_violeta" y el valor exacto o null.'),
             })
             answer = followup.json().get("answer", "") if followup.status_code == 200 else ""
-            if followup.status_code != 200 or marker not in re.sub(r"[^A-Z0-9]", "", answer.upper()):
+            if followup.status_code != 200 or not recall_marker(answer, marker):
                 raise AssertionError("live_recall_after_restart_failed")
         final_store = ConversationStore(str(db_path))
         try:
