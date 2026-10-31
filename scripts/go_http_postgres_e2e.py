@@ -49,7 +49,7 @@ def main() -> None:
             assert json["required_capabilities"] == ["chat"]
             assert json["images"] == []
             requests.append(json)
-            last = json["conversation"][-1]["content"]
+            last = json["task"]
             if "Registrá 15 horas ejecutadas en obra 1093" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":15}}'
             elif "Registrá 99 horas en obra 1093" in last:
