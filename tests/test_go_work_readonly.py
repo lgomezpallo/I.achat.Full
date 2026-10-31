@@ -322,14 +322,34 @@ def test_unresolved_work_reference_does_not_infer_from_assistant(monkeypatch):
     assert work.official_context("¿Cómo estás ahí?", history=[]) is None
 
 
-def test_http_unresolved_work_reference_never_calls_model(monkeypatch, tmp_path):
+def test_http_clarification_then_official_work_query(monkeypatch, tmp_path):
+    """Clarify first, then use official evidence in the same labor conversation."""
     backend = _prepare_chat(monkeypatch, tmp_path)
-    monkeypatch.delenv("GO_WORK_READONLY_DSN", raising=False)
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    original = work.official_context
+    monkeypatch.setattr(
+        work, "official_context",
+        lambda message, **kwargs: original(
+            message, history=kwargs.get("history"),
+            connect=lambda *args, **kwargs: connection,
+        ),
+    )
     with TestClient(app_module.app, base_url="https://go.test") as client:
-        response = client.post("/api/chat", json={"text": "¿Qué pasó en esa obra?"})
-    assert response.status_code == 200, response.text
-    assert "¿A qué obra te referís?" in response.json()["answer"]
-    assert backend.messages == []
-    conversations = app_module.store.list_conversations("worker")
-    assert len(conversations) == 1
-    assert len(response.json()["history"]) == 2
+        first = client.post("/api/chat", json={"text": "¿Qué pasó en esa obra?"})
+        assert first.status_code == 200, first.text
+        assert "¿A qué obra te referís?" in first.json()["answer"]
+        assert backend.messages == []
+        assert connection.statements == []
+        second = client.post("/api/chat", json={
+            "conversation_id": first.json()["conversation_id"],
+            "text": "Me refiero a la obra 1093",
+        })
+    assert second.status_code == 200, second.text
+    assert len(second.json()["history"]) == 4
+    assert len(backend.messages) == 1
+    assert any(
+        '"presupuesto": "1093"' in item["content"]
+        for item in backend.messages[0] if item["role"] == "user"
+    )
+    assert len(app_module.store.list_conversations("worker")) == 1
