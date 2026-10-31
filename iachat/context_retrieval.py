@@ -87,8 +87,13 @@ def related_excerpts(history: list[dict[str, str]], question: str,
         if len(chosen) >= max_items or remaining <= 0:
             break
         # Reserve space for other matches instead of letting the first consume the budget.
-        per_item = max(1, max_chars // max(1, max_items))
-        limit = min(len(text), 500, remaining, per_item)
+        prefix = f"Mensaje anterior del usuario (posición {i}): "
+        # The label is part of the model context too. Reserve its bytes
+        # before selecting the excerpt, or several hits exceed max_chars.
+        per_item = max(1, max_chars // max(1, max_items) - len(prefix))
+        limit = min(len(text), 500, remaining - len(prefix), per_item)
+        if limit <= 0:
+            continue
         # Anchor the excerpt around a relevant word, not just the beginning.
         tokens = list(re.finditer(r"[^\W\d_]{4,}", text, re.UNICODE))
         hits = [m.start() for m in tokens if _concept(m.group()) in terms]
@@ -99,7 +104,8 @@ def related_excerpts(history: list[dict[str, str]], question: str,
             start = 0
         excerpt = text[start:start + limit]
         if excerpt:
-            chosen.append((i, excerpt))
-            remaining -= len(excerpt)
+            rendered = prefix + excerpt
+            chosen.append((i, rendered))
+            remaining -= len(rendered)
     chosen.sort()
-    return [f"Mensaje anterior del usuario (posición {i}): {text}" for i, text in chosen]
+    return [text for _, text in chosen]
