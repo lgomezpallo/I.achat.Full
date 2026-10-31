@@ -453,7 +453,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         if _is_go_profile():
             from .go_work_context import WorkContextUnavailable, official_context
             try:
-                work_evidence = official_context(message.text)
+                work_evidence = official_context(message.text, history=history)
             except WorkContextUnavailable as exc:
                 # Do not infer official facts from memory or model guesses when
                 # the work ledger cannot be read safely.
