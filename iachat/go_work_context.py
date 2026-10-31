@@ -41,6 +41,30 @@ _BARE_CLARIFICATION_REPLY = re.compile(
 )
 
 
+# In the labor profile, an unrecognized address or free-form work update must
+# never be sent to a public search engine by the automatic web planner.
+# Public search remains available only when the operator explicitly asks for it.
+_EXPLICIT_PUBLIC_WEB = re.compile(
+    r"\\b(?:busc[aá](?:me)?|consult[aá]|investig[aá]|revis[aá]|verific[aá])\\b"
+    r".{0,100}\\b(?:en\\s+(?:internet|la\\s+web)|fuentes?\\s+p[uú]blicas?|"
+    r"p[aá]ginas?\\s+p[uú]blicas?|noticias)\\b", re.I | re.S
+)
+
+
+def public_web_allowed(message: str, *, work_profile: bool, official_evidence: bool) -> bool:
+    """Keep automatic public search out of the labor instance by default.
+
+    Explicit operator authorization is required for public web lookups. Even
+    explicit requests containing scoped official PostgreSQL evidence stay
+    local to the labor conversation. Personal IAchat is unchanged.
+    """
+    if not work_profile:
+        return True
+    if official_evidence:
+        return False
+    return bool(_EXPLICIT_PUBLIC_WEB.search(message))
+
+
 class WorkContextUnavailable(RuntimeError):
     """No official data can be asserted when the read-only connection fails."""
 
