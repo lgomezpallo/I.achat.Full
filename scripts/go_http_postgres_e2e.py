@@ -110,6 +110,19 @@ def main() -> None:
                 assert proposed.status_code == 200, proposed.text
                 assert events_count() == 2, "chat must never silently write official events"
 
+                categories = client.post("/api/chat", json={
+                    "text": "¿Qué categorías de registros están confirmadas?",
+                })
+                assert categories.status_code == 200, categories.text
+                assert any(
+                    '"consulta": "categorias_confirmadas"' in item["content"]
+                    and '"version": 2' in item["content"]
+                    and '"nombre": "medicion"' in item["content"]
+                    for item in requests[-1]["conversation"]
+                    if item["role"] == "user"
+                )
+                assert events_count() == 2
+
             # Reopen the same isolated work SQLite with the authenticated cookie.
             with TestClient(app_module.app, base_url="https://go.test") as reopened:
                 reopened.cookies.set("iachat_session", cookie)
