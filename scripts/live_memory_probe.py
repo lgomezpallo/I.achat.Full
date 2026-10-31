@@ -6,6 +6,7 @@ the synthetic answer, credentials, stored conversations or generated markers.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
@@ -55,6 +56,15 @@ def recall_marker(answer: str, marker: str) -> bool:
     return data is not None and _literal(data.get("motor_violeta")) == marker.casefold()
 
 
+def transcript_digest(history: list[dict], prefix_count: int = 480) -> str | None:
+    """Hash every original message and metadata field, not just three anchors."""
+    if len(history) < prefix_count:
+        return None
+    payload = json.dumps(history[:prefix_count], sort_keys=True,
+                         ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def seed_memory_probe(store, owner: str, conversation_id: str, marker: str) -> None:
     """Create 480 messages with facts at the beginning, middle and end."""
     history = []
@@ -93,6 +103,7 @@ def run_live_memory_probe(client, store, owner: str, other_owner: str, post_chat
     conversation_id = "e2e-memory-" + secrets.token_hex(8)
     marker = "LUCERO" + secrets.token_hex(4).upper()
     seed_memory_probe(store, owner, conversation_id, marker)
+    original_digest = transcript_digest(store.get(conversation_id, owner))
     prompt = (
         "Según lo que decidimos en ESTA conversación del proyecto Atlas: "
         "¿qué base de datos elegimos, qué código de motor tiene el componente "
@@ -112,6 +123,8 @@ def run_live_memory_probe(client, store, owner: str, other_owner: str, post_chat
     history = loaded.json().get("history", []) if loaded.status_code == 200 else []
     durable = (
         len(history) == 482
+        and original_digest is not None
+        and transcript_digest(history) == original_digest
         and history[0]["content"].startswith("Decidimos usar PostgreSQL")
         and marker in history[200]["content"]
         and history[478]["content"].startswith("Corrijo:")
