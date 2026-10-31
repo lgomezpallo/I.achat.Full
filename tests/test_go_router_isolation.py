@@ -67,3 +67,34 @@ def test_personal_profile_preserves_router_application_identity(monkeypatch):
     backend = RouterFirstBackend(url="https://router.example.test", token="test-only")
     assert backend.answer([{"role": "user", "content": "Hola"}]) == "respuesta personal"
     assert calls == [("iachat", True)]
+
+
+def test_work_instance_cannot_inherit_personal_direct_provider_keys(monkeypatch):
+    """An allowlisted model name does not prove the account cannot be billed."""
+    import iachat.app as app_module
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.delenv("IACHAT_BACKEND", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "test-key-never-used")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-never-used")
+    with pytest.raises(RuntimeError, match="go_router_only_until_free_models_verified"):
+        app_module.get_backend()
+    from fastapi.testclient import TestClient
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        readiness = client.get("/ready")
+    assert readiness.status_code == 503
+    assert readiness.json()["detail"] == "go_router_only_until_free_models_verified"
+
+
+def test_work_instance_router_mode_selects_loopback_transport(monkeypatch):
+    import iachat.app as app_module
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("IACHAT_BACKEND", "router")
+    assert isinstance(app_module.get_backend(), RouterFirstBackend)
+
+
+def test_personal_instance_can_still_select_integrated_backend(monkeypatch):
+    import iachat.app as app_module
+    from iachat.backend import ProviderBackend
+    monkeypatch.setenv("IACHAT_PROFILE", "personal")
+    monkeypatch.setenv("IACHAT_BACKEND", "integrated")
+    assert isinstance(app_module.get_backend(), ProviderBackend)
