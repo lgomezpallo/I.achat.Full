@@ -111,3 +111,42 @@ def test_online_backup_refuses_symlink_destination(tmp_path):
         backup_database(live, destination)
     assert destination.is_symlink()
     assert not outside.exists()
+
+
+def test_online_backup_in_wal_mode_includes_committed_memory_not_uncommitted_edits(tmp_path):
+    """A live WAL snapshot must be transaction-consistent across all memory tables."""
+    live, backup = tmp_path / "wal-live.sqlite3", tmp_path / "wal-snapshot.sqlite3"
+    store = ConversationStore(str(live))
+    assert store._db.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    history = [{"role": "user", "content": "Decidimos mantener la memoria íntegra."}]
+    store.put(
+        "chat", history, "alice", "Atlas",
+        image_attachments=[("plano.png", "data:image/png;base64,AA==")],
+    )
+    store.save_automatic_memory("stable", "Prefiero respuestas claras", "alice", "Atlas")
+
+    # Keep a writer transaction open while the online backup reads a coherent
+    # snapshot. The attempted deletion must never appear in the backup.
+    writer = sqlite3.connect(live, timeout=5)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute("UPDATE conversations SET history='[]' WHERE id='chat'")
+    writer.execute("DELETE FROM memories WHERE id='stable'")
+    try:
+        backup_database(live, backup)
+    finally:
+        writer.rollback()
+        writer.close()
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o600
+    restored = ConversationStore(str(backup))
+    assert restored.get("chat", "alice") == history
+    assert restored.get("chat", "bob") is None
+    assert restored.get_summary("chat", "alice")["processed_count"] == 1
+    assert [i["filename"] for i in restored.images_for_conversation("chat", "alice")] == [
+        "plano.png"
+    ]
+    assert restored.list_memories("alice", "Atlas")[0]["content"] == "Prefiero respuestas claras"
+    assert len(restored.list_automatic_memory_log("alice")) == 1
+    with sqlite3.connect(backup) as check:
+        assert check.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    restored._db.close()
+    store._db.close()

@@ -93,6 +93,40 @@ def verify_snapshot(path: Path, owner: str, other_owner: str,
         store._db.close()
 
 
+def restore_disposable_snapshot(db_path: Path, snapshot: Path) -> None:
+    """Offline rollback drill, restricted to the isolated staging directory.
+
+    This is not a production rollback command. The isolated HTTP server MUST
+    be stopped and every SQLite connection closed before this is invoked.
+    Refuse unexpected paths, symlinks, sidecars or an unverified snapshot.
+    """
+    if db_path.is_symlink() or snapshot.is_symlink():
+        raise RuntimeError("rollback_symlink_refused")
+    if (db_path.name != "isolated.sqlite3"
+            or snapshot.name != "restored.sqlite3"
+            or db_path.parent != snapshot.parent
+            or not db_path.parent.name.startswith(".memory-stage-")):
+        raise RuntimeError("rollback_not_disposable_stage")
+    if not db_path.is_file() or not snapshot.is_file():
+        raise RuntimeError("rollback_database_missing")
+    if stat.S_IMODE(snapshot.stat().st_mode) != 0o600:
+        raise RuntimeError("rollback_snapshot_not_private")
+    if any(Path(str(db_path) + suffix).exists()
+           for suffix in ("-journal", "-wal", "-shm")):
+        raise RuntimeError("rollback_database_still_active")
+    with sqlite3.connect(snapshot.resolve().as_uri() + "?mode=ro", uri=True) as check:
+        if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise RuntimeError("rollback_snapshot_corrupt")
+    # os.replace is atomic within this one private directory; it restores the
+    # complete SQLite file rather than attempting to reverse individual rows.
+    os.replace(snapshot, db_path)
+    directory_fd = os.open(db_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def launcher(stage: Path) -> None:
     if os.geteuid() != 0:
         raise RuntimeError("root_required_for_isolated_launcher")
@@ -291,6 +325,45 @@ def child(private: Path) -> None:
                                expected_prefix_hash, final_hash):
             raise AssertionError("restored_backup_missing_memory")
         print("STAGE_BACKUP_RESTORE_OWNER_ISOLATION: PASS", flush=True)
+
+        # Rehearse a *destructive* rollback only on this disposable staging
+        # database. A simulated later release changes both the transcript and
+        # durable memory. Restoring the earlier snapshot must undo both.
+        stop(process)
+        process = None
+        later = ConversationStore(str(db_path))
+        try:
+            history = later.get(conversation_id, owner)
+            later.put(conversation_id, [
+                *history,
+                {"role": "user", "content": "Decidimos usar otro motor temporalmente."},
+                {"role": "assistant", "content": "Cambio temporal confirmado."},
+            ], owner, "Atlas")
+            later.save_memory("rollback-only", "Preferencia temporal de prueba", owner, "Atlas")
+            if len(later.get(conversation_id, owner)) != 486:
+                raise AssertionError("rollback_mutation_not_applied")
+        finally:
+            later._db.close()
+        restore_disposable_snapshot(db_path, backup_path)
+        if not verify_snapshot(db_path, owner, other, conversation_id, marker,
+                               484, expected_prefix_hash, final_hash):
+            raise AssertionError("rollback_lost_original_memory")
+        rolled_back = ConversationStore(str(db_path))
+        try:
+            if any(m["id"] == "rollback-only" for m in rolled_back.list_memories(owner, "Atlas")):
+                raise AssertionError("rollback_kept_temporary_memory")
+        finally:
+            rolled_back._db.close()
+        process = start()
+        with httpx.Client(base_url=base, timeout=15, follow_redirects=False) as client:
+            login = client.post("/auth/login", json={"username": owner, "password": password})
+            if login.status_code != 200:
+                raise AssertionError("rollback_authentication_failed")
+            client.headers["Cookie"] = "iachat_session=" + login.cookies["iachat_session"]
+            restored = client.get("/api/conversations/" + conversation_id)
+            if restored.status_code != 200 or len(restored.json().get("history", [])) != 484:
+                raise AssertionError("rollback_http_history_mismatch")
+        print("STAGE_ISOLATED_ROLLBACK_RESTART: PASS", flush=True)
     finally:
         if process is not None:
             stop(process)

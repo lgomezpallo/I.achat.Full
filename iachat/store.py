@@ -212,6 +212,16 @@ class ConversationStore:
             history = json.loads(row[0])
             if message_index >= len(history) or history[message_index].get("role") != "user":
                 raise ValueError("image_attachments_require_user_turn")
+            # Legacy callers must not append or silently duplicate images on
+            # an already committed turn. The check and insert share BEGIN
+            # IMMEDIATE so a second process cannot race the first writer.
+            already_attached = self._db.execute(
+                "SELECT 1 FROM image_attachments WHERE conversation_id=? AND owner=? "
+                "AND message_index=? LIMIT 1",
+                (conversation_id, owner, message_index),
+            ).fetchone()
+            if already_attached:
+                raise ValueError("image_attachments_already_saved")
             self._db.executemany(
                 "INSERT INTO image_attachments(conversation_id,owner,message_index,filename,data_url) "
                 "VALUES(?,?,?,?,?)",
