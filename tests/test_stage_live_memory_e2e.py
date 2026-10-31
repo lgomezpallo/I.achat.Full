@@ -152,3 +152,87 @@ def test_oracle_stage_preflight_is_unprivileged_and_branch_triggered():
     assert "needs: preflight" in protected
     assert "environment: oracle-production" in protected
     assert "secrets.ORACLE_SSH_KEY" in protected
+
+
+def test_isolated_rollback_restores_full_history_images_and_memory(tmp_path):
+    """Exercise the same atomic file restore used by the real-provider stage."""
+    private = tmp_path / ".memory-stage-offline"
+    private.mkdir(mode=0o700)
+    live = private / "isolated.sqlite3"
+    snapshot = private / "restored.sqlite3"
+    store = ConversationStore(str(live))
+    marker = "LUCERO12AB34CD"
+    seed_memory_probe(store, "alice", "long", marker)
+    store.save_automatic_memory("stable", "Prefiero respuestas breves", "alice", "Atlas")
+    store.save_images(
+        "long", "alice", 0, ["data:image/png;base64,AA=="], ["plano.png"]
+    )
+    original = stage["raw_transcript"](live, "alice", "long")
+    original_hash = transcript_fingerprint(original)
+    original_summary = store.get_summary("long", "alice")
+    original_events = store.list_automatic_memory_log("alice")
+    store._db.close()
+
+    backup_database(live, snapshot)
+    changed = ConversationStore(str(live))
+    changed.put("long", [
+        *changed.get("long", "alice"),
+        {"role": "user", "content": "Corrijo: cambio temporal."},
+        {"role": "assistant", "content": "Entendido."},
+    ], "alice", "Atlas")
+    changed.save_memory("temporary", "Preferencia temporal", "alice", "Atlas")
+    changed.save_images(
+        "long", "alice", 480, ["data:image/png;base64,BB=="], ["temporal.png"]
+    )
+    assert len(changed.get("long", "alice")) == 482
+    changed._db.close()
+
+    stage["restore_disposable_snapshot"](live, snapshot)
+    assert not snapshot.exists()
+    assert stat.S_IMODE(live.stat().st_mode) == 0o600
+    reopened = ConversationStore(str(live))
+    assert stage["raw_transcript"](live, "alice", "long") == original
+    assert transcript_fingerprint(stage["raw_transcript"](live, "alice", "long")) == original_hash
+    assert reopened.get_summary("long", "alice") == original_summary
+    assert reopened.list_automatic_memory_log("alice") == original_events
+    assert reopened.list_memories("alice", "Atlas") == [
+        {"id": "stable", "content": "Prefiero respuestas breves", "updated_at":
+         reopened.list_memories("alice", "Atlas")[0]["updated_at"], "project": "Atlas"}
+    ]
+    assert [row["filename"] for row in reopened.images_for_conversation("long", "alice")] == [
+        "plano.png"
+    ]
+    assert reopened.get("long", "bob") is None
+    reopened._db.close()
+
+
+def test_isolated_rollback_rejects_wrong_paths_and_live_sqlite_sidecars(tmp_path):
+    private = tmp_path / ".memory-stage-safe"
+    private.mkdir()
+    live = private / "isolated.sqlite3"
+    snapshot = private / "restored.sqlite3"
+    store = ConversationStore(str(live))
+    store.put("c", [{"role": "user", "content": "Decidimos conservar esto."}], "alice")
+    store._db.close()
+    backup_database(live, snapshot)
+    restore = stage["restore_disposable_snapshot"]
+
+    # No production or arbitrary path can be replaced by the test helper.
+    import pytest
+    with pytest.raises(RuntimeError, match="rollback_not_disposable_stage"):
+        restore(tmp_path / "production.sqlite3", snapshot)
+    with pytest.raises(RuntimeError, match="rollback_not_disposable_stage"):
+        restore(live, tmp_path / "unrelated.sqlite3")
+    wal = Path(str(live) + "-wal")
+    wal.write_bytes(b"uncheckpointed")
+    with pytest.raises(RuntimeError, match="rollback_database_still_active"):
+        restore(live, snapshot)
+    wal.unlink()
+    link = private / "link.sqlite3"
+    link.symlink_to(live)
+    with pytest.raises(RuntimeError, match="rollback_symlink_refused"):
+        restore(link, snapshot)
+    assert snapshot.exists()
+    assert ConversationStore(str(live)).get("c", "alice") == [
+        {"role": "user", "content": "Decidimos conservar esto."}
+    ]
