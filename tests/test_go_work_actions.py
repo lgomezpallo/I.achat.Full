@@ -86,3 +86,43 @@ def test_invalid_model_proposal_does_not_commit(monkeypatch):
         "Registrá en obra 1190",
     )
     assert ref is None and "Obra ambigua" in reply
+
+
+def test_short_confirmation_scoped_to_immediate_pending_assistant(monkeypatch):
+    _work(monkeypatch)
+    proposal = str(uuid.uuid4())
+    decisions = []
+    ledger = SimpleNamespace(
+        decide=lambda ref, approved: (decisions.append((ref, approved)) or
+                                      {"reply": "Confirmada" if approved else "Descartada"}),
+    )
+    monkeypatch.setattr(actions, "_ledger", lambda: ledger)
+    own = [{"role": "user", "content": "Registrá una novedad"},
+           {"role": "assistant", "content": "Propuesta pendiente", "go_proposal_id": proposal}]
+    assert actions.decide_in_conversation("dale", own) == "Confirmada"
+    assert actions.decide_in_conversation("sí", own) == "Confirmada"
+    assert actions.decide_in_conversation("descartala", own) is None
+    assert actions.decide_in_conversation("descartá", own) == "Descartada"
+    assert actions.decide_in_conversation("no", own) == "Descartada"
+    assert decisions == [(proposal, True), (proposal, True), (proposal, False), (proposal, False)]
+
+
+def test_short_confirmation_never_uses_another_conversation_or_stale_turn(monkeypatch):
+    _work(monkeypatch)
+    proposal = str(uuid.uuid4())
+    monkeypatch.setattr(actions, "_ledger", lambda: (_ for _ in ()).throw(
+        AssertionError("No database access without immediate pending proposal")
+    ))
+    assert actions.decide_in_conversation("dale", []) is None
+    assert actions.decide_in_conversation("ok", [{"role": "assistant", "content": "Normal"}]) is None
+    assert actions.decide_in_conversation("sí", [
+        {"role": "assistant", "content": "Pending", "go_proposal_id": proposal},
+        {"role": "user", "content": "Otra consulta"},
+        {"role": "assistant", "content": "Respuesta normal"},
+    ]) is None
+    assert actions.decide_in_conversation("no", [
+        {"role": "assistant", "content": "Pending", "go_proposal_id": "not-a-uuid"}
+    ]) is None
+    assert actions.decide_in_conversation("dale, cambiá también la obra", [
+        {"role": "assistant", "content": "Pending", "go_proposal_id": proposal}
+    ]) is None
