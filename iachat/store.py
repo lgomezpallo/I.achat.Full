@@ -223,12 +223,28 @@ class ConversationStore:
                 "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at WHERE conversation_index.owner=excluded.owner",
                 (conversation_id, title, int(time.time()), owner, project),
             )
-            if row is None or summary != previous:
+            # A summary version represents a change in remembered evidence,
+            # not every appended assistant reply or ordinary chat message.
+            # Advance only the scan cursor in the current snapshot when no
+            # evidence changed. This prevents an unbounded copy of the same
+            # 120-item ledger on every turn while retaining incremental scans.
+            evidence_changed = (
+                row is None
+                or summary.get("format_version") != previous.get("format_version")
+                or summary["items"] != previous["items"]
+            )
+            if evidence_changed:
                 self._db.execute(
                     "INSERT INTO conversation_summary_versions(owner,conversation_id,version,summary_json,created_at) "
                     "VALUES(?,?,?,?,?)",
                     (owner, conversation_id, (row[0] + 1) if row else 1,
                      json.dumps(summary, ensure_ascii=False), int(time.time())),
+                )
+            elif summary != previous:
+                self._db.execute(
+                    "UPDATE conversation_summary_versions SET summary_json=? "
+                    "WHERE owner=? AND conversation_id=? AND version=?",
+                    (json.dumps(summary, ensure_ascii=False), owner, conversation_id, row[0]),
                 )
 
     def get_summary(self, conversation_id: str, owner: str = "admin") -> dict | None:
