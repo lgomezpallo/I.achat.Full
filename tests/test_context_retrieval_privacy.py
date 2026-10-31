@@ -75,3 +75,50 @@ def test_unlabeled_api_credentials_and_one_time_codes_are_not_retrieved():
     assert "ghp_" not in excerpts[0]
     assert "4321" not in excerpts[0]
     assert "7654" not in excerpts[0]
+
+
+def test_long_multiline_turn_recovers_safe_fact_without_private_lines():
+    filler = "Texto de relleno sin relación con la pregunta.\n" * 210
+    history = [{
+        "role": "user",
+        "content": (
+            filler
+            + "La contraseña del motor Violeta de Atlas es secreto123.\n"
+            + "Decidimos usar motor LUCERO para Violeta en Atlas.\n"
+            + "Atlas Adjuntos: documento-privado.pdf"
+        ),
+    }]
+    excerpts = related_excerpts(
+        history, "¿Qué motor Violeta elegimos para Atlas?", max_chars=250
+    )
+    assert len(excerpts) == 1
+    assert "motor LUCERO" in excerpts[0]
+    assert "línea " in excerpts[0]
+    assert "secreto123" not in excerpts[0]
+    assert "documento-privado.pdf" not in excerpts[0]
+    assert sum(len(item) for item in excerpts) <= 250
+
+
+def test_long_multiline_turn_with_only_sensitive_matches_returns_nothing():
+    filler = "Relleno completamente ajeno al asunto.\n" * 220
+    history = [{"role": "user", "content":
+                filler + "La contraseña del motor Violeta de Atlas es secreto123."}]
+    assert related_excerpts(history, "¿Qué motor Violeta usa Atlas?") == []
+
+
+def test_long_multiline_late_correction_outranks_earlier_decision():
+    history = [
+        {"role": "user", "content": "El motor Violeta de Atlas será ANTIGUO."},
+        {"role": "assistant", "content": "El motor de Atlas es INVENTADO."},
+        {"role": "user", "content": (
+            "Relleno sin relación.\n" * 350
+            + "Corrijo: el motor Violeta de Atlas será NUEVO."
+        )},
+    ]
+    excerpts = related_excerpts(
+        history, "¿Qué motor Violeta elegimos para Atlas?", max_items=1
+    )
+    assert len(excerpts) == 1
+    assert "NUEVO" in excerpts[0]
+    assert "ANTIGUO" not in excerpts[0]
+    assert "INVENTADO" not in excerpts[0]

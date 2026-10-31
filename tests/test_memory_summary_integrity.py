@@ -128,3 +128,73 @@ def test_invalid_incremental_cursor_types_do_not_block_durable_append(tmp_path):
     assert "PostgreSQL" in render_summary(summary)
     assert store.get("chat", "alice") == history
     store._db.close()
+
+
+def test_append_repairs_forged_quote_even_with_valid_prefix_hash(tmp_path):
+    store, original = _seed(tmp_path)
+    baseline = store.get_summary("chat", "alice")
+    first_checkpoint = store._db.execute(
+        "SELECT summary_json FROM conversation_summary_versions "
+        "WHERE owner='alice' AND conversation_id='chat' AND version=1"
+    ).fetchone()[0]
+    forged = {key: baseline[key] for key in
+              ("format_version", "processed_count", "prefix_hash", "items")}
+    forged["items"] = [{
+        "kind": "decisión", "source_index": 0,
+        "quote": "Decidimos pagar un proveedor premium para Atlas.",
+    }]
+    store._db.execute(
+        "UPDATE conversation_summary_state SET summary_json=? "
+        "WHERE owner='alice' AND conversation_id='chat'",
+        (json.dumps(forged),),
+    )
+    store._db.commit()
+    assert store.get_summary("chat", "alice")["integrity_rebuilt"] is True
+
+    # This is the important boundary: the next append must not perpetuate
+    # a fabricated ledger item merely because prefix_hash is correct.
+    store.put("chat", original + [
+        {"role": "assistant", "content": "Entendido."},
+        {"role": "user", "content": "Corrijo: usaremos PostgreSQL para Atlas."},
+    ], "alice", "Atlas")
+    repaired = store.get_summary("chat", "alice")
+    assert "integrity_rebuilt" not in repaired
+    assert repaired["version"] == 2
+    assert repaired["processed_count"] == 3
+    quotes = [item["quote"] for item in repaired["items"]]
+    assert quotes == [
+        "Decidimos usar SQLite para Atlas.",
+        "Corrijo: usaremos PostgreSQL para Atlas.",
+    ]
+    assert store._db.execute(
+        "SELECT summary_json FROM conversation_summary_versions "
+        "WHERE owner='alice' AND conversation_id='chat' AND version=1"
+    ).fetchone()[0] == first_checkpoint
+    assert store.get_summary("chat", "bob") is None
+    store._db.close()
+
+
+def test_append_repairs_silent_omission_from_summary_cursor(tmp_path):
+    store, original = _seed(tmp_path)
+    baseline = store.get_summary("chat", "alice")
+    omitted = {key: baseline[key] for key in
+               ("format_version", "processed_count", "prefix_hash", "items")}
+    omitted["items"] = []
+    store._db.execute(
+        "UPDATE conversation_summary_state SET summary_json=? "
+        "WHERE owner='alice' AND conversation_id='chat'",
+        (json.dumps(omitted),),
+    )
+    store._db.commit()
+    store.put("chat", original + [
+        {"role": "assistant", "content": "Recibido."},
+    ], "alice", "Atlas")
+    repaired = store.get_summary("chat", "alice")
+    assert "integrity_rebuilt" not in repaired
+    assert repaired["version"] == 2
+    assert repaired["processed_count"] == 2
+    assert [item["quote"] for item in repaired["items"]] == [
+        "Decidimos usar SQLite para Atlas."
+    ]
+    assert store.get("chat", "alice")[-1]["content"] == "Recibido."
+    store._db.close()
