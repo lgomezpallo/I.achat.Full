@@ -46,6 +46,25 @@ def transcript_fingerprint(history: list[dict], prefix_count: int = 480) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def raw_transcript(path: Path, owner: str, conversation_id: str) -> list[dict] | None:
+    """Read authoritative JSON, including fields hidden by the public getter.
+
+    Read-only SQLite connection prevents a missing backup from being created
+    accidentally. E2E integrity must cover *all* persisted metadata.
+    """
+    with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
+        row = db.execute(
+            "SELECT history FROM conversations WHERE id=? AND owner=?",
+            (conversation_id, owner),
+        ).fetchone()
+    if row is None:
+        return None
+    history = json.loads(row[0])
+    if not isinstance(history, list) or not all(isinstance(m, dict) for m in history):
+        raise ValueError("invalid_raw_transcript")
+    return history
+
+
 def verify_snapshot(path: Path, owner: str, other_owner: str,
                     conversation_id: str, marker: str, count: int,
                     expected_prefix_hash: str | None = None,
@@ -55,13 +74,14 @@ def verify_snapshot(path: Path, owner: str, other_owner: str,
     store = ConversationStore(str(path))
     try:
         history = store.get(conversation_id, owner)
+        raw = raw_transcript(path, owner, conversation_id)
         summary = store.get_summary(conversation_id, owner)
         return bool(
-            history and len(history) == count
+            history and raw and len(history) == count and len(raw) == count
             and (expected_prefix_hash is None
-                 or transcript_fingerprint(history) == expected_prefix_hash)
+                 or transcript_fingerprint(raw) == expected_prefix_hash)
             and (expected_full_hash is None
-                 or transcript_fingerprint(history, count) == expected_full_hash)
+                 or transcript_fingerprint(raw, count) == expected_full_hash)
             and history[0]["content"].startswith("Decidimos usar PostgreSQL")
             and marker in history[200]["content"]
             and history[478]["content"].startswith("Corrijo:")
@@ -162,7 +182,7 @@ def child(private: Path) -> None:
     assert store.create_user(owner, password)
     assert store.create_user(other, secrets.token_urlsafe(32))
     seed_memory_probe(store, owner, conversation_id, marker)
-    original = store.get(conversation_id, owner)
+    original = raw_transcript(db_path, owner, conversation_id)
     if original is None or len(original) != 480:
         raise AssertionError("seeded_transcript_incomplete")
     expected_prefix_hash = transcript_fingerprint(original)
@@ -221,13 +241,9 @@ def child(private: Path) -> None:
                 raise AssertionError("live_free_provider_recall_failed")
             if not verify_snapshot(db_path, owner, other, conversation_id, marker, 482, expected_prefix_hash):
                 raise AssertionError("first_live_transcript_not_durable")
-            first_history = ConversationStore(str(db_path))
-            try:
-                first_hash = transcript_fingerprint(
-                    first_history.get(conversation_id, owner), 482
-                )
-            finally:
-                first_history._db.close()
+            first_hash = transcript_fingerprint(
+                raw_transcript(db_path, owner, conversation_id), 482
+            )
             print("STAGE_LIVE_MEMORY_480: PASS (begin/middle/end)", flush=True)
         stop(process)
         process = None
@@ -258,13 +274,9 @@ def child(private: Path) -> None:
             answer = followup.json().get("answer", "") if followup.status_code == 200 else ""
             if followup.status_code != 200 or not recall_marker(answer, marker):
                 raise AssertionError("live_recall_after_restart_failed")
-        final_store = ConversationStore(str(db_path))
-        try:
-            final_hash = transcript_fingerprint(
-                final_store.get(conversation_id, owner), 484
-            )
-        finally:
-            final_store._db.close()
+        final_hash = transcript_fingerprint(
+            raw_transcript(db_path, owner, conversation_id), 484
+        )
         if not verify_snapshot(db_path, owner, other, conversation_id, marker, 484,
                                expected_prefix_hash, final_hash):
             raise AssertionError("restart_transcript_not_durable")
