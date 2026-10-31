@@ -61,6 +61,10 @@ class ConversationStore:
                 self._db.commit()
                 return True
             except sqlite3.IntegrityError:
+                # A failed INSERT leaves the SQLite transaction open. Without
+                # rollback, the next durable conversation write fails at
+                # BEGIN IMMEDIATE with "cannot start a transaction".
+                self._db.rollback()
                 return False
 
     def get_or_create_oidc_user(self, provider: str, subject: str) -> str:
