@@ -322,6 +322,31 @@ def test_unresolved_work_reference_does_not_infer_from_assistant(monkeypatch):
     assert work.official_context("¿Cómo estás ahí?", history=[]) is None
 
 
+def test_bare_budget_only_resolves_pending_server_clarification(monkeypatch):
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    history = [
+        {"role": "user", "content": "¿Qué pasó en esa obra?"},
+        {"role": "assistant", "content": work.WORK_CLARIFICATION_PROMPT},
+    ]
+    connection = FakeReadOnlyConnection()
+    result = work.official_context(
+        "1093", history=history, connect=lambda *args, **kwargs: connection,
+    )
+    assert '"presupuesto": "1093"' in result
+    assert any(params == ("1093",) for sql, params in connection.statements
+               if sql.startswith("SELECT id,direccion,estado FROM obras"))
+    # An assistant's work number is never a source of work identity, and a
+    # number outside a pending clarification must not trigger ledger reads.
+    assert work.official_context("1093", history=[
+        {"role": "assistant", "content": work.WORK_CLARIFICATION_PROMPT},
+    ]) is None
+    assert work.official_context("1093", history=[
+        {"role": "user", "content": "¿Qué pasó en esa obra?"},
+        {"role": "assistant", "content": "La obra 1190 existe."},
+    ]) is None
+    assert work.official_context("1093", history=[]) is None
+
+
 def test_http_clarification_then_official_work_query(monkeypatch, tmp_path):
     """Clarify first, then use official evidence in the same labor conversation."""
     backend = _prepare_chat(monkeypatch, tmp_path)
