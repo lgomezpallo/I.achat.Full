@@ -101,3 +101,48 @@ def test_exists_waits_for_rollback_of_uncommitted_conversation(tmp_path):
     assert finished.is_set()
     assert result == [False]
     store._db.close()
+
+
+def test_private_online_backup_restores_image_and_versioned_memory_audit(tmp_path):
+    from pathlib import Path
+    from runpy import run_path
+    import stat
+
+    backup_database = run_path(str(Path(__file__).resolve().parents[1] /
+                                   "scripts" / "backup_iachat_db.py"))["backup_database"]
+    live = tmp_path / "live.sqlite3"
+    snapshot = tmp_path / "snapshot.sqlite3"
+    store = ConversationStore(str(live))
+    first = [{"role": "user", "content": "Decidimos usar PostgreSQL para Atlas."}]
+    store.put("atlas", first, "alice", "Atlas",
+              image_attachments=[("plano.png", "data:image/png;base64,AA==")])
+    history = first + [
+        {"role": "assistant", "content": "Entendido."},
+        {"role": "user", "content": "Corrijo: el respaldo será diario."},
+    ]
+    store.put("atlas", history, "alice", "Atlas")
+    store.save_automatic_memory("mem-atlas", "Respaldo diario", "alice", "Atlas")
+    versions = store._db.execute(
+        "SELECT version,summary_json FROM conversation_summary_versions "
+        "WHERE owner='alice' AND conversation_id='atlas' ORDER BY version"
+    ).fetchall()
+    assert len(versions) == 2
+
+    backup_database(live, snapshot)
+    assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600
+    restored = ConversationStore(str(snapshot))
+    assert restored.get("atlas", "alice") == history
+    assert restored.get_summary("atlas", "alice") == store.get_summary("atlas", "alice")
+    assert restored.images_for_conversation("atlas", "alice") == [
+        {"message_index": 0, "filename": "plano.png",
+         "data_url": "data:image/png;base64,AA=="}
+    ]
+    assert restored.list_automatic_memory_log("alice")[0]["content"] == "Respaldo diario"
+    assert restored._db.execute(
+        "SELECT version,summary_json FROM conversation_summary_versions "
+        "WHERE owner='alice' AND conversation_id='atlas' ORDER BY version"
+    ).fetchall() == versions
+    assert restored.get("atlas", "bob") is None
+    assert restored.images_for_conversation("atlas", "bob") == []
+    restored._db.close()
+    store._db.close()
