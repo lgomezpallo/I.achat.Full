@@ -19,6 +19,23 @@ from .web import HTML, MANIFEST, SERVICE_WORKER
 app = FastAPI(title="IAchat", version="0.3.0")
 logger = logging.getLogger("iachat.chat")
 
+
+def _validate_work_instance_config(profile: str, db_path: str, auth_secret: str) -> None:
+    """Fail closed before opening a database when the labor profile is misconfigured."""
+    if profile.strip().lower() != "go-ute":
+        return
+    if not db_path or not os.path.isabs(db_path):
+        raise RuntimeError("go_ute_requires_explicit_absolute_iachat_db")
+    if len(auth_secret) < 32:
+        raise RuntimeError("go_ute_requires_dedicated_auth_secret")
+
+
+_validate_work_instance_config(
+    os.getenv("IACHAT_PROFILE", "personal"),
+    os.getenv("IACHAT_DB", ""),
+    os.getenv("IACHAT_AUTH_SECRET", ""),
+)
+
 store = ConversationStore(os.getenv("IACHAT_DB", "iachat.db"))
 google_oidc = GoogleOIDC()
 from .file_workspace import FileWorkspace, WorkspaceError, parse_generated_file
