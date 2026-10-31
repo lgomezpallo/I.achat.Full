@@ -41,28 +41,65 @@ _BARE_CLARIFICATION_REPLY = re.compile(
 )
 
 
-# In the labor profile, an unrecognized address or free-form work update must
-# never be sent to a public search engine by the automatic web planner.
-# Public search remains available only when the operator explicitly asks for it.
+# In the labor profile, public search is automatic for general topics, as in
+# personal IAchat. Never pass work-related text or contextual follow-ups to a
+# public search planner without an explicit operator request.
 _EXPLICIT_PUBLIC_WEB = re.compile(
     r"\b(?:busc[aá](?:me)?|consult[aá]|investig[aá]|revis[aá]|verific[aá])\b"
     r".{0,100}\b(?:en\s+(?:internet|la\s+web)|fuentes?\s+p[uú]blicas?|"
     r"p[aá]ginas?\s+p[uú]blicas?|noticias)\b", re.I | re.S
 )
+_SENSITIVE_WORK_TEXT = re.compile(
+    r"\b(?:obras?|presupuestos?|cuadrillas?|contratistas?|permisos?|"
+    r"sumideros?|volquetes?|vallados?|fundici[oó]n|mediciones?|"
+    r"jornales?|punteros?|canaletas?|partes?\s+diarios?|"
+    r"veredas?|calzadas?|hormigonado|asfalto|rejas?\s+indupag)\b",
+    re.I,
+)
+# Address intersections are work-sensitive even without an explicit "obra".
+_INTERSECTION = re.compile(
+    r"\b(?:en|de|por|sobre)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+"
+    r"\s+(?:y|esq(?:uina)?\.?)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+\b", re.I
+)
+_STREET_NUMBER = re.compile(
+    r"\b(?:en|de|por|sobre)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+\s+\d{2,5}\b",
+    re.I,
+)
 
 
-def public_web_allowed(message: str, *, work_profile: bool, official_evidence: bool) -> bool:
-    """Keep automatic public search out of the labor instance by default.
+def _may_contain_work_context(message: str) -> bool:
+    return bool(
+        _SENSITIVE_WORK_TEXT.search(message)
+        or _INTERSECTION.search(message)
+        or _STREET_NUMBER.search(message)
+    )
 
-    Explicit operator authorization is required for public web lookups. Even
-    explicit requests containing scoped official PostgreSQL evidence stay
-    local to the labor conversation. Personal IAchat is unchanged.
+
+def public_web_allowed(
+    message: str, *, work_profile: bool, official_evidence: bool,
+    history: list[dict] | None = None,
+) -> bool:
+    """Retain general IAchat web search without leaking implicit labor context.
+
+    Explicit public searches are user-authorized, except where official
+    PostgreSQL evidence is attached. Work-like messages and follow-ups to a
+    recent work conversation stay inside the labor instance.
     """
     if not work_profile:
         return True
     if official_evidence:
         return False
-    return bool(_EXPLICIT_PUBLIC_WEB.search(message))
+    if _EXPLICIT_PUBLIC_WEB.search(message):
+        return True
+    if _may_contain_work_context(message):
+        return False
+    if history:
+        for turn in history[-12:]:
+            if isinstance(turn, dict) and turn.get("role") == "user":
+                content = turn.get("content")
+                if isinstance(content, str) and _may_contain_work_context(content):
+                    return False
+    return True
 
 
 class WorkContextUnavailable(RuntimeError):
