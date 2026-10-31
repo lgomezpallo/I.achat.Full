@@ -29,6 +29,8 @@ def test_go_profile_reuses_chat_without_automatic_sqlite_work_writes(monkeypatch
     monkeypatch.setattr(app_module, "structured_store", StructuredStore(path))
     monkeypatch.setattr(app_module, "_signed_user", lambda _: "worker")
     assert app_module.store.create_user("worker", "test-only-password")
+    # A stored memory must never replace the trusted work-only safety policy.
+    app_module.store.save_memory("test-memory", "Turno de mañana", "worker")
     backend = FakeConversationalBackend()
     monkeypatch.setattr(app_module, "get_backend", lambda: backend)
     monkeypatch.setattr(
@@ -52,6 +54,7 @@ def test_go_profile_reuses_chat_without_automatic_sqlite_work_writes(monkeypatch
         conversation_id = result.json()["conversation_id"]
         assert "No guardé ninguna novedad oficial" in result.json()["answer"]
         assert app_module.structured_store.collections("worker") == []
+        assert any("Turno de mañana" in m["content"] for m in backend.messages[-1] if m["role"] == "system")
         assert any(
             "NO modifica registros oficiales" in m["content"]
             for m in backend.messages[-1] if m["role"] == "system"
