@@ -59,4 +59,4 @@ def test_retrieval_respects_strict_character_budget():
     ]
     excerpts = related_excerpts(history, "¿Qué motor tiene Atlas?", max_items=3, max_chars=150)
     assert len(excerpts) <= 3
-    assert sum(len(item.split(": ", 1)[-1]) for item in excerpts) <= 150
+    assert sum(len(item) for item in excerpts) <= 150
