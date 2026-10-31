@@ -485,19 +485,36 @@ class ConversationStore:
             )
             self._db.commit()
 
-    def save_automatic_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> None:
-        """Atomically save a new automatically learned memory and its audit entry."""
-        # The memory and its provenance must commit together. A failed audit
-        # insert must not leave an unaudited memory or an open transaction.
+    def save_automatic_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> bool:
+        """Commit a unique automatic preference and its audit entry together.
+
+        The preliminary lookup in auto_memory.learn() is advisory only: two
+        simultaneous chat requests can both see no memory. Check again under
+        SQLite's cross-process write lock to prevent duplicate memories and
+        duplicate audit events. Global preferences apply to every project.
+        """
+        import re
+
+        def normalized(value: str) -> str:
+            return re.sub(r"\\s+", " ", value).strip().rstrip(" .!?¿¡").casefold()
+
         with self._lock, self._db:
             self._db.execute("BEGIN IMMEDIATE")
+            rows = self._db.execute(
+                "SELECT content FROM memories WHERE owner=? AND (project=? OR project='')",
+                (owner, project),
+            ).fetchall()
+            if any(normalized(row[0]) == normalized(content) for row in rows):
+                return False
+            now = int(time.time())
             self._db.execute(
                 "INSERT INTO memories(id,content,updated_at,owner,project) VALUES(?,?,?,?,?)",
-                (memory_id, content, int(time.time()), owner, project))
+                (memory_id, content, now, owner, project))
             self._db.execute(
                 "INSERT INTO automatic_memory_log(id,memory_id,owner,project,content,created_at) "
                 "VALUES(?,?,?,?,?,?)",
-                (memory_id, memory_id, owner, project, content, int(time.time())))
+                (memory_id, memory_id, owner, project, content, now))
+            return True
 
     def replace_automatic_memory(self, memory_id: str, old: str, new: str, owner: str, project: str) -> bool:
         """Compare-and-swap an automatic memory, preserving a reversible event."""
