@@ -35,6 +35,9 @@ def test_router_failure_is_non_destructive(monkeypatch, tmp_path, case):
             "conversation_id": "existing", "text": "¿Cómo se llama?"
         })
         assert response.status_code == 503
-        assert module.store.get("existing", "test") == original
+        # No invented assistant response, but the failed user turn survives.
+        assert module.store.get("existing", "test") == [
+            *original, {"role": "user", "content": "¿Cómo se llama?"}
+        ]
     finally:
         module.store = previous_store
