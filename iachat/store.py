@@ -296,6 +296,19 @@ class ConversationStore:
                     previous = None
             except (TypeError, ValueError):
                 previous = None
+            # A syntactically valid cursor can still contain fabricated or
+            # omitted quotes while retaining a correct transcript prefix hash.
+            # Verify its entire evidence ledger against the immutable old
+            # transcript before using it for incremental append. Otherwise a
+            # forged quote survives every subsequent put() and can enter the
+            # next model context even after get_summary() flagged corruption.
+            if previous is not None:
+                canonical_previous = build_summary(old) if existing else None
+                if canonical_previous is None or any(
+                    previous.get(key) != canonical_previous[key]
+                    for key in ("format_version", "processed_count", "prefix_hash", "items")
+                ):
+                    previous = None
             summary = build_summary(history, previous)
             payload = json.dumps(history, ensure_ascii=False)
             self._db.execute(
