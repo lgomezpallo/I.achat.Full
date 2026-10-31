@@ -70,3 +70,20 @@ Pruebas nuevas offline: SELECT parametrizado, transacción de solo lectura, rech
 La migración fuente de G.O. `migrations/001_initial.sql` declara `obras(id,presupuesto,direccion,estado)`; `migrations/005_flexible_records.sql` declara `go_record_events(id,tipo,version,obra_id,datos,reemplaza,creado)` y sus referencias. La consulta de lectura ahora incluye **`obras.estado`**: antes faltaba el estado en preguntas sobre una obra concreta. Esto verifica compatibilidad con **el código fuente**, no con el esquema instalado en Oracle.
 
 El rol SELECT también se rechaza si conserva `CREATE` a nivel de **base de datos**, aunque no tenga INSERT/UPDATE/DELETE en tablas ni CREATE en los esquemas existentes: con ese privilegio podría crear un esquema nuevo. Se añadió una regresión offline. El adaptador sigue sin escribir ni crear roles; falta inspeccionar los privilegios reales en Oracle. No se habilitaron modelos externos ni se cambió la instancia laboral productiva.
+
+
+## Barrera económica del perfil laboral (31/10, rama candidata)
+
+La selección de backend ahora es **fail closed** para `IACHAT_PROFILE=go-ute`:
+si `IACHAT_BACKEND` no es exactamente `router`, `get_backend()`
+rechaza el intento con `go_router_only_until_free_models_verified`.
+`/ready` responde HTTP 503 en ese caso. Esto evita que una segunda
+instancia herede por accidente las claves Groq/OpenRouter/NVIDIA de IAchat
+personal y haga inferencias directas, incluso cuando los nombres de modelos
+aparezcan en una allowlist. La instancia personal no cambia.
+
+El transporte Router de G.O. sigue restringido a `127.0.0.1:8010`
+o `localhost:8010` sin proxy, redirecciones ni fallback a proveedor.
+**No es una prueba de gratuidad del Router:** verificar los modelos y las
+condiciones de facturación de las cuentas antes de activar inferencia.
+No desplegar la instancia laboral hasta validar esa condición y el E2E real.
