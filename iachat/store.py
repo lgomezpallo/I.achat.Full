@@ -279,9 +279,19 @@ class ConversationStore:
                 previous = json.loads(row[1]) if row else None
                 if previous is not None and (
                     not isinstance(previous, dict)
-                    or (previous.get("format_version") == 2
-                        and not all(k in previous for k in
-                                    ("processed_count", "prefix_hash", "items")))
+                    or (previous.get("format_version") == 2 and (
+                        type(previous.get("processed_count")) is not int
+                        or previous["processed_count"] < 0
+                        or not isinstance(previous.get("prefix_hash"), str)
+                        or not isinstance(previous.get("items"), list)
+                        or any(
+                            not isinstance(item, dict)
+                            or type(item.get("source_index")) is not int
+                            or not isinstance(item.get("kind"), str)
+                            or not isinstance(item.get("quote"), str)
+                            for item in previous["items"]
+                        )
+                    ))
                 ):
                     previous = None
             except (TypeError, ValueError):
