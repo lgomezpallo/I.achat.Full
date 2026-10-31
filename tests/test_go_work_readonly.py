@@ -38,6 +38,16 @@ class FakeReadOnlyConnection:
             return Result(("on",))
         if "has_table_privilege" in sql:
             return Result((self.writable,))
+        if sql == "SELECT COUNT(*) FROM obras":
+            return Result((3,))
+        if sql.startswith("SELECT estado,COUNT(*) FROM obras"):
+            return Result(many=[("en_ejecucion", 2), ("pendiente", 1)])
+        if sql.startswith("SELECT presupuesto,direccion,estado FROM obras"):
+            return Result(many=[
+                ("1093", "Rivadavia y Rodríguez Peña", "en_ejecucion"),
+                ("1190", "Alsina 354", "en_ejecucion"),
+                ("1192", "Suipacha 671", "pendiente"),
+            ])
         if sql.startswith("SELECT id,direccion FROM obras"):
             assert params == ("1093",)
             return Result(("work-uuid", "Rivadavia y Rodríguez Peña"))
@@ -66,6 +76,30 @@ def test_scoped_ledger_read_uses_parameterized_selects_only(monkeypatch):
         for sql, _ in connection.statements
     )
     assert any("NOT EXISTS" in sql and "LIMIT 8" in sql for sql, _ in connection.statements)
+
+
+def test_general_work_question_reads_bounded_official_overview(monkeypatch):
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    result = work.official_context(
+        "¿Cuántas obras hay y cuáles están pendientes?",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"total_obras": 3' in result
+    assert '"cantidad": 2' in result
+    assert '"presupuesto": "1192"' in result
+    assert '"otros_registros_consultados": false' in result
+    assert any("LIMIT 20" in sql for sql, _ in connection.statements)
+    assert any("LIMIT 30" in sql for sql, _ in connection.statements)
+    assert all(
+        sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
+        for sql, _ in connection.statements
+    )
+
+
+def test_general_chat_without_work_reference_never_reads_postgres(monkeypatch):
+    monkeypatch.delenv("GO_WORK_READONLY_DSN", raising=False)
+    assert work.official_context("Hola, ¿cómo estás?") is None
 
 
 def test_readonly_adapter_refuses_writer_account_and_ambiguous_budget(monkeypatch):
@@ -119,6 +153,21 @@ def test_work_chat_includes_official_data_as_untrusted_tool_evidence(monkeypatch
     assert any(m["role"] == "user" and "official-data-for-1093" in m["content"] for m in messages)
     assert all("official-data-for-1093" not in m["content"] for m in messages if m["role"] == "system")
     assert messages[-1]["content"] == "¿Qué pasó en la obra 1093?"
+
+
+def test_general_work_question_injects_official_overview_not_model_guess(monkeypatch, tmp_path):
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.setattr(work, "official_context", lambda text: (
+        'Datos oficiales G.O.: {"total_obras": 3}' if "obras" in text else None
+    ))
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.post("/api/chat", json={"text": "¿Cuántas obras hay?"})
+    assert response.status_code == 200, response.text
+    assert len(backend.messages) == 1
+    assert any(
+        m["role"] == "user" and '"total_obras": 3' in m["content"]
+        for m in backend.messages[0]
+    )
 
 
 def test_work_chat_fails_closed_without_official_db_instead_of_guessing(monkeypatch, tmp_path):
