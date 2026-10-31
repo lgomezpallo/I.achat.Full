@@ -181,7 +181,8 @@ class ConversationStore:
         with self._lock:
             rows = self._db.execute(
                 "SELECT c.id, COALESCE(i.title, 'Conversación'), COALESCE(i.updated_at, 0), COALESCE(i.project, '') "
-                "FROM conversations c LEFT JOIN conversation_index i ON i.id=c.id "
+                "FROM conversations c LEFT JOIN conversation_index i "
+                "ON i.id=c.id AND i.owner=c.owner "
                 "WHERE c.owner=? ORDER BY COALESCE(i.updated_at, 0) DESC, c.rowid DESC", (owner,)
             ).fetchall()
         return [{"id": r[0], "title": r[1], "updated_at": r[2], "project": r[3]} for r in rows if project is None or r[3] == project]
@@ -209,9 +210,13 @@ class ConversationStore:
                     for item, old_item in zip(history, old)
                 ):
                     raise ValueError("conversation_history_conflict")
+                # Existing turns are immutable, including their metadata.
+                # The public getter intentionally filters some metadata, so
+                # appending through it must preserve the original stored JSON.
+                # setdefault() let a caller silently replace an existing
+                # attachment/model/source field while keeping role/text intact.
                 for index, old_item in enumerate(old):
-                    for key, value in old_item.items():
-                        history[index].setdefault(key, value)
+                    history[index] = old_item
             row = self._db.execute(
                 "SELECT version,summary_json FROM conversation_summary_versions "
                 "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
