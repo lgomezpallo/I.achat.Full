@@ -13,6 +13,12 @@ import re
 _WORK = re.compile(r"(?<!\w)(?:presupuesto|obra|pto\.?|p)\s*(?:n(?:ro|úmero|º|°)?\.?\s*)?(\d{3,6})(?!\d)", re.I)
 # Evidence retrieval only; IAchat still interprets the natural-language request.
 _OVERVIEW = re.compile(r"\b(?:obras|presupuestos)\b", re.I)
+# Resolve only explicit conversational references, never guess a work from
+# assistant messages, document contents or a multi-work comparison.
+_FOLLOWUP = re.compile(
+    r"\b(?:esa obra|esta obra|la misma obra|esa misma obra|"
+    r"ese presupuesto|este presupuesto|ahí|allí)\b", re.I
+)
 
 
 class WorkContextUnavailable(RuntimeError):
@@ -33,6 +39,30 @@ def explicit_budget(message: str) -> str | None:
     if len(matches) > 1:
         raise WorkContextUnavailable("go_work_ambiguous_budget")
     return matches[0] if matches else None
+
+
+def contextual_budgets(message: str, history: list[dict] | None = None) -> list[str]:
+    """Reuse the last unambiguous work cited by the operator for anaphoric follow-ups.
+
+    This is evidence selection, not intent classification. An ambiguous prior
+    comparison cannot silently become a single work. Never trust assistant
+    messages as a source of work identity.
+    """
+    budgets = explicit_budgets(message)
+    if budgets or not history or not _FOLLOWUP.search(message):
+        return budgets
+    for turn in reversed(history[-24:]):
+        if not isinstance(turn, dict) or turn.get("role") != "user":
+            continue
+        content = turn.get("content")
+        if not isinstance(content, str):
+            continue
+        found = explicit_budgets(content)
+        if found:
+            if len(found) != 1:
+                raise WorkContextUnavailable("go_work_ambiguous_budget")
+            return found
+    return []
 
 
 def _summary(values: object) -> dict:
@@ -76,7 +106,7 @@ def _read_work(conn, budget: str) -> dict:
     }
 
 
-def official_context(message: str, *, connect=None) -> str | None:
+def official_context(message: str, *, history: list[dict] | None = None, connect=None) -> str | None:
     """Return bounded official evidence for one or several explicit works.
 
     Multi-work comparisons never choose one work arbitrarily; up to eight
@@ -84,7 +114,7 @@ def official_context(message: str, *, connect=None) -> str | None:
     General queries receive aggregate counts and a bounded sample.
     No model-generated SQL is executed. Connection errors fail closed.
     """
-    budgets = explicit_budgets(message)
+    budgets = contextual_budgets(message, history)
     overview = not budgets and bool(_OVERVIEW.search(message))
     if not budgets and not overview:
         return None
