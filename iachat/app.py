@@ -242,7 +242,16 @@ def _is_go_profile() -> bool:
 
 def get_backend():
     from .backend import ProviderBackend, RouterFirstBackend
-    return RouterFirstBackend() if os.getenv("IACHAT_BACKEND", "integrated").strip().lower() == "router" else ProviderBackend()
+    mode = os.getenv("IACHAT_BACKEND", "integrated").strip().lower()
+    if _is_go_profile():
+        # The shared provider backend's model allowlist cannot prove an
+        # account has billing/overages disabled. Until that is independently
+        # verified, never inherit IAchat's direct-provider credentials.
+        # G.O. uses only the separately controlled, loopback-only Router.
+        if mode != "router":
+            raise RuntimeError("go_router_only_until_free_models_verified")
+        return RouterFirstBackend()
+    return RouterFirstBackend() if mode == "router" else ProviderBackend()
 
 # Startup must not spend inference quota. /api/router/status checks connectivity on demand.
 @app.get("/", response_class=HTMLResponse)
@@ -308,6 +317,8 @@ def health():
 @app.get("/ready")
 def ready():
     from .backend import ProviderBackend
+    if _is_go_profile() and os.getenv("IACHAT_BACKEND", "integrated").strip().lower() != "router":
+        raise HTTPException(503, "go_router_only_until_free_models_verified")
     if os.getenv("IACHAT_BACKEND", "integrated").strip().lower() == "router":
         if not os.getenv("ROUTER_URL", "").strip() or not os.getenv("ROUTER_TOKEN", "").strip():
             raise HTTPException(503, "router_not_configured")
@@ -320,6 +331,9 @@ def ready():
 @app.get("/api/router/status")
 def router_status():
     from .backend import ProviderBackend
+    if _is_go_profile() and os.getenv("IACHAT_BACKEND", "integrated").strip().lower() != "router":
+        return {"configured": False, "reachable": False, "routing_verified": False,
+                "mode": "blocked", "reason": "go_router_only_until_free_models_verified"}
     if os.getenv("IACHAT_BACKEND", "integrated").strip().lower() != "router":
         configured = ProviderBackend.configured()
         return {"configured": configured, "reachable": configured,
