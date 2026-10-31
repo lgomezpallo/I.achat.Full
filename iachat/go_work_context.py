@@ -52,7 +52,7 @@ def _summary(values: object) -> dict:
 def _read_work(conn, budget: str) -> dict:
     """Read a single work and at most eight current events, without mutations."""
     work = conn.execute(
-        "SELECT id,direccion FROM obras WHERE presupuesto=%s", (budget,)
+        "SELECT id,direccion,estado FROM obras WHERE presupuesto=%s", (budget,)
     ).fetchone()
     if not work:
         return {"presupuesto": budget, "encontrada": False, "registros": []}
@@ -67,6 +67,7 @@ def _read_work(conn, budget: str) -> dict:
         "presupuesto": budget,
         "encontrada": True,
         "direccion": str(work[1])[:160],
+        "estado": str(work[2])[:80],
         "registros": [
             {"id": str(event_id), "tipo": str(kind)[:48],
              "version": version, "datos": _summary(values)}
@@ -126,6 +127,13 @@ def official_context(message: str, *, connect=None) -> str | None:
                 "AND n.nspname NOT LIKE 'pg_toast%' "
                 "AND n.nspname NOT LIKE 'pg_temp_%' "
                 "AND has_schema_privilege(current_user,n.oid,'CREATE'))"
+            ).fetchone()[0]:
+                raise WorkContextUnavailable("go_work_role_has_write_privileges")
+            # CREATE ON DATABASE permits creating a new schema even when
+            # existing tables and schemas are read-only. The work instance
+            # must never connect with that privilege.
+            if conn.execute(
+                "SELECT has_database_privilege(current_user,current_database(),'CREATE')"
             ).fetchone()[0]:
                 raise WorkContextUnavailable("go_work_role_has_write_privileges")
             if overview:
