@@ -327,7 +327,9 @@ def test_http_unresolved_work_reference_never_calls_model(monkeypatch, tmp_path)
     monkeypatch.delenv("GO_WORK_READONLY_DSN", raising=False)
     with TestClient(app_module.app, base_url="https://go.test") as client:
         response = client.post("/api/chat", json={"text": "¿Qué pasó en esa obra?"})
-    assert response.status_code == 409, response.text
-    assert response.json()["detail"] == "go_work_missing_budget"
+    assert response.status_code == 200, response.text
+    assert "¿A qué obra te referís?" in response.json()["answer"]
     assert backend.messages == []
-    assert app_module.store.list_conversations("worker") == []
+    conversations = app_module.store.list_conversations("worker")
+    assert len(conversations) == 1
+    assert len(response.json()["history"]) == 2
