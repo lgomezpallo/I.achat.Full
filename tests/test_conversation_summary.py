@@ -334,3 +334,18 @@ def test_version_cursor_advance_preserves_owner_and_backup(tmp_path):
     restored.put("c", history, "alice", "Bicicletas")
     assert restored.get_summary("c", "alice")["version"] == 2
     assert "verde" in restored.get_summary("c", "alice")["items"][-1]["quote"]
+
+
+def test_unlabeled_credentials_never_enter_versioned_memory_ledger():
+    history = [
+        {"role": "user", "content": "Decidimos usar sk-AAAAAAAAAAAAAAAAAAAAAAAA para Atlas."},
+        {"role": "user", "content": "Tengo un PIN de 4321 para Atlas."},
+        {"role": "user", "content": "Decidimos usar PostgreSQL para Atlas."},
+    ]
+    summary = build_summary(history)
+    assert [item["quote"] for item in summary["items"]] == [
+        "Decidimos usar PostgreSQL para Atlas."
+    ]
+    rendered = render_summary(summary)
+    assert "sk-" not in rendered
+    assert "4321" not in rendered
