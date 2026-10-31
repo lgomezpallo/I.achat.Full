@@ -49,10 +49,16 @@ class FakeReadOnlyConnection:
                 ("1192", "Suipacha 671", "pendiente"),
             ])
         if sql.startswith("SELECT id,direccion FROM obras"):
-            assert params == ("1093",)
+            assert params in (("1093",), ("1190",))
+            if params == ("1190",):
+                return Result(("work-1190", "Alsina 354"))
             return Result(("work-uuid", "Rivadavia y Rodríguez Peña"))
         if sql.startswith("SELECT e.id,e.tipo,e.version,e.datos"):
-            assert params == ("work-uuid",)
+            assert params in (("work-uuid",), ("work-1190",))
+            if params == ("work-1190",):
+                return Result(many=[
+                    ("event-1190", "medicion", 1, {"horas": 6, "estado": "previsto"}),
+                ])
             return Result(many=[
                 ("event-uuid", "medicion", 2, {"horas": 8, "estado": "realizado"}),
             ])
@@ -102,12 +108,35 @@ def test_general_chat_without_work_reference_never_reads_postgres(monkeypatch):
     assert work.official_context("Hola, ¿cómo estás?") is None
 
 
-def test_readonly_adapter_refuses_writer_account_and_ambiguous_budget(monkeypatch):
+def test_multiwork_query_keeps_each_budget_separate_and_bounded(monkeypatch):
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    result = work.official_context(
+        "Compará la medición de obra 1093 con obra 1190",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"consulta": "comparacion_obras"' in result
+    assert '"presupuesto": "1093"' in result
+    assert '"presupuesto": "1190"' in result
+    assert '"horas": 8' in result and '"horas": 6' in result
+    assert '"max_registros_por_obra": 8' in result
+    scoped = [(sql, params) for sql, params in connection.statements
+              if sql.startswith("SELECT id,direccion FROM obras")]
+    assert len(scoped) == 2
+    assert {params for _, params in scoped} == {("1093",), ("1190",)}
+    assert all(sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
+               for sql, _ in connection.statements)
+
+
+def test_readonly_adapter_refuses_writer_account_and_unbounded_comparison(monkeypatch):
     monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
     with pytest.raises(work.WorkContextUnavailable, match="go_work_role_has_write_privileges"):
         work.official_context("obra 1093", connect=lambda *args, **kwargs: FakeReadOnlyConnection(writable=True))
-    with pytest.raises(work.WorkContextUnavailable, match="go_work_ambiguous_budget"):
-        work.official_context("Compará obra 1093 con obra 1190", connect=lambda *args, **kwargs: None)
+    with pytest.raises(work.WorkContextUnavailable, match="go_work_too_many_budgets"):
+        work.official_context(
+            " ".join(f"obra {n}" for n in range(1000, 1009)),
+            connect=lambda *args, **kwargs: None,
+        )
 
 
 def test_readonly_adapter_never_scans_ledger_without_explicit_work(monkeypatch):
