@@ -87,3 +87,14 @@ o `localhost:8010` sin proxy, redirecciones ni fallback a proveedor.
 **No es una prueba de gratuidad del Router:** verificar los modelos y las
 condiciones de facturación de las cuentas antes de activar inferencia.
 No desplegar la instancia laboral hasta validar esa condición y el E2E real.
+
+
+## Adaptador de propuestas en el chat compartido (31/10, candidato no desplegado)
+
+`iachat/go_work_actions.py` **no implementa otro motor de IA**: interpreta la salida JSON de la misma llamada al backend de IAchat y delega la validación, preparación y confirmación en `go_ute.flexible`, el código original de G.O. y sus tablas `go_record_proposals`, `go_record_events` y `go_record_types`. El JSON de un modelo **no es autorización de escritura**. Las propuestas sólo se preparan; un mensaje posterior explícito `Confirmo propuesta UUID` o `Descarto propuesta UUID` resuelve la decisión.
+
+El adaptador está **desactivado por defecto** y exige simultáneamente `IACHAT_PROFILE=go-ute`, `GO_WORK_WRITE_ENABLED=1`, `GO_DATABASE_URL` laboral y el paquete original `go_ute` instalado en el proceso de trabajo. Nunca habilitarlo en IAchat personal. El permiso de escritura de la conexión laboral y los privilegios del usuario autenticado deben auditarse antes de habilitar producción; **no** reutilizar la DSN de solo lectura ni credenciales personales. Los adjuntos no pueden preparar escrituras con este puente: su clasificación/asociación requiere una fase específica y confirmación.
+
+La autorización de cada propuesta está vinculada al **último mensaje de asistente de la conversación autenticada**. `ConversationStore` conserva el identificador UUID canónico emitido por el servidor al recargar la conversación; la confirmación no acepta IDs de otra conversación, ni IDs anteriores, ni el fallback global de turnos de G.O. Esto limita la confirmación a la sesión conversacional correcta, sin cambiar el esquema PostgreSQL. La auditoría existente conserva el origen, propuesta, versión y corrección, pero todavía **no** registra explícitamente el usuario IAchat en cada evento oficial; resolver antes de autorizar multiusuario productivo.
+
+La prueba integrada se ejecuta en PostgreSQL 16 efímero con migraciones G.O. reales, login Google simulado, chat HTTP y Router **simulado**. Verifica propuesta sin evento, rechazo de UUID entre conversaciones, confirmación transaccional, lectura posterior, rechazo de obra contradictoria y no duplicación. **No** demuestra inferencia externa, acceso Oracle, despliegue, separación productiva ni autorización de modelos gratuitos. No hacer cutover ni activar `GO_WORK_WRITE_ENABLED` en Oracle antes de comprobar todos esos puntos.
