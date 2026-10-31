@@ -123,6 +123,25 @@ def main() -> None:
                 )
                 assert events_count() == 2
 
+                # Natural follow-up: the operator replies with only the budget
+                # after the server asks which work, never from model inference.
+                before = len(requests)
+                unclear = client.post("/api/chat", json={"text": "¿Qué pasó en esa obra?"})
+                assert unclear.status_code == 200, unclear.text
+                assert "¿A qué obra te referís?" in unclear.json()["answer"]
+                assert len(requests) == before, "clarification must not call Router"
+                resolved = client.post("/api/chat", json={
+                    "conversation_id": unclear.json()["conversation_id"],
+                    "text": "1093",
+                })
+                assert resolved.status_code == 200, resolved.text
+                assert len(requests) == before + 1
+                assert any(
+                    '"presupuesto": "1093"' in item["content"]
+                    for item in requests[-1]["conversation"] if item["role"] == "user"
+                )
+                assert events_count() == 2
+
             # Reopen the same isolated work SQLite with the authenticated cookie.
             with TestClient(app_module.app, base_url="https://go.test") as reopened:
                 reopened.cookies.set("iachat_session", cookie)
