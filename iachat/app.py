@@ -84,6 +84,10 @@ class PasswordChange(BaseModel):
 
 @app.post("/auth/login")
 def login(payload: LoginInput, response: Response):
+    # The labor instance enrolls only explicitly allowed Google subjects.
+    # Never permit a password or legacy-admin bootstrap to bypass that gate.
+    if _is_go_profile():
+        raise HTTPException(403, "go_google_only_authentication")
     username = payload.username.strip().lower()
     valid = store.verify_user(username, payload.password)
     if not valid and username == "admin" and store.get_user("admin") is None:
@@ -171,6 +175,8 @@ def users(request: Request):
 
 @app.post("/api/users", status_code=201)
 def create_account(payload: NewAccount, request: Request):
+    if _is_go_profile():
+        raise HTTPException(403, "go_google_only_authentication")
     username = _user(request)
     if not store.get_user(username)["admin"]:
         raise HTTPException(403, "admin_only")
@@ -190,6 +196,8 @@ def enable_account(username: str, enabled: bool, request: Request):
 
 @app.post("/api/account/password")
 def change_password(payload: PasswordChange, request: Request):
+    if _is_go_profile():
+        raise HTTPException(403, "go_google_only_authentication")
     username = _user(request)
     if not store.verify_user(username, payload.current_password):
         raise HTTPException(401, "invalid_credentials")
