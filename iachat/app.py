@@ -402,7 +402,9 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
     if _is_go_profile() and message.text.strip() and not message.attachments:
         from .go_work_actions import decide_in_conversation
         try:
-            decision_reply = decide_in_conversation(message.text, history)
+            decision_reply = decide_in_conversation(
+                message.text, history, actor=owner, conversation_id=conversation_id
+            )
         except RuntimeError as exc:
             raise HTTPException(503, "go_work_approval_unavailable") from exc
         if decision_reply is not None:
@@ -689,7 +691,8 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         from .go_work_actions import interpret_model_answer
         try:
             answer, go_proposal_id = interpret_model_answer(
-                answer, message.text, attachments=bool(message.attachments)
+                answer, message.text, actor=owner, conversation_id=conversation_id,
+                attachments=bool(message.attachments)
             )
         except RuntimeError as exc:
             raise HTTPException(503, "go_work_approval_unavailable") from exc
