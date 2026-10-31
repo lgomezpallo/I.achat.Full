@@ -472,7 +472,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 "\n".join("- " + m["content"] for m in memories[:30])[:6000]})
         work_tool_messages = []
         if _is_go_profile():
-            from .go_work_context import WorkContextUnavailable, official_context
+            from .go_work_context import WorkContextUnavailable, official_context, WORK_CLARIFICATION_PROMPT
             try:
                 work_evidence = official_context(message.text, history=history)
             except WorkContextUnavailable as exc:
@@ -484,7 +484,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                     # identifier is a clarification, not a database outage.
                     # Persist the exchange in the isolated labor conversation
                     # without calling a model or writing official PostgreSQL.
-                    answer = "¿A qué obra te referís? Indicame el presupuesto para consultar los datos oficiales."
+                    answer = WORK_CLARIFICATION_PROMPT
                     updated = [*history, {"role": "user", "content": message.text},
                                {"role": "assistant", "content": answer}]
                     store.put(conversation_id, updated, owner, message.project.strip())
