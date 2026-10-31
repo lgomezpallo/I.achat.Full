@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import pwd
 import re
+from runpy import run_path
 import secrets
 import shutil
 import socket
@@ -30,7 +31,9 @@ ALLOWED_ENV = (
 )
 
 
-from scripts.live_memory_probe import recall_flags, recall_marker
+_probe = run_path(str(ROOT / "scripts" / "live_memory_probe.py"))
+recall_flags = _probe["recall_flags"]
+recall_marker = _probe["recall_marker"]
 
 
 def transcript_fingerprint(history: list[dict], prefix_count: int = 480) -> str:
