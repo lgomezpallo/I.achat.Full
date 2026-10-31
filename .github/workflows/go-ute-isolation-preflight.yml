@@ -1,0 +1,97 @@
+name: G.O. preflight de aislamiento (solo lectura)
+on:
+  push:
+    branches: [feat/go-ute-second-instance-guard-20261030]
+    paths: [.github/workflows/go-ute-isolation-preflight.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  oracle-readonly:
+    runs-on: ubuntu-latest
+    environment: oracle-production
+    timeout-minutes: 7
+    steps:
+      - name: Verificar servicios y esquema laboral sin cambios ni inferencias
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/go-preflight-key.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/go-preflight-host.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"; chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          for svc in iachat router go-ute postgresql; do
+            printf 'SERVICE %s=' "$svc"
+            systemctl is-active "$svc" || true
+          done
+          for repo in /home/ubuntu/Proyecto/Aplicaciones/IAchat /home/ubuntu/Proyecto/Herramientas/Router /opt/go-ute; do
+            if test -d "$repo/.git"; then
+              printf 'GIT %s=' "$(basename "$repo")"
+              git -C "$repo" rev-parse HEAD
+            else
+              printf 'GIT %s=not_a_checkout\n' "$(basename "$repo")"
+            fi
+          done
+          test -x /opt/go-ute/.venv/bin/python
+          sudo -n -u go-ute bash -se <<'DB'
+          set -euo pipefail
+          set -a
+          . /etc/go-ute/app.env
+          set +a
+          /opt/go-ute/.venv/bin/python - <<'PY'
+          import os
+          import psycopg
+          targets = ('obras','propuestas','movimientos','go_record_types',
+                     'go_record_proposals','go_record_events','go_chat_turns',
+                     'go_attachments')
+          with psycopg.connect(os.environ['GO_DATABASE_URL'], connect_timeout=5) as conn:
+              conn.execute('SET TRANSACTION READ ONLY')
+              assert conn.execute('SHOW transaction_read_only').fetchone()[0] == 'on'
+              rows = conn.execute(
+                  'SELECT table_name,column_name,data_type,is_nullable '
+                  'FROM information_schema.columns '
+                  'WHERE table_schema=current_schema() AND table_name=ANY(%s) '
+                  'ORDER BY table_name,ordinal_position', (list(targets),)
+              ).fetchall()
+              present = {r[0] for r in rows}
+              for table in targets:
+                  print('TABLE', table, 'present' if table in present else 'missing')
+              for table,column,kind,nullable in rows:
+                  print('COLUMN',table,column,kind,nullable)
+              assert {'obras','go_record_types','go_record_proposals',
+                      'go_record_events'}.issubset(present), 'required_work_tables_missing'
+              print('GO_DB_READONLY_SCHEMA=verified')
+          PY
+          DB
+          echo 'GO_PREFLIGHT=completed_no_mutations_no_inference'
+          REMOTE
+
+  # No secrets or production environment: distinguish runner/branch failure from
+  # oracle-production environment restrictions before touching remote services.
+  runner-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirmar ejecución de jobs en la rama sin secretos
+        shell: bash
+        env:
+          GITHUB_REF_SAFE: ${{ github.ref }}
+          GITHUB_EVENT_SAFE: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          printf 'GO_RUNNER_DIAGNOSTIC=started\n'
+          printf 'GITHUB_REF=%s\n' "$GITHUB_REF_SAFE"
+          printf 'GITHUB_EVENT=%s\n' "$GITHUB_EVENT_SAFE"
+          test "$GITHUB_EVENT_SAFE" = push || test "$GITHUB_EVENT_SAFE" = workflow_dispatch
+          echo 'GO_RUNNER_DIAGNOSTIC=success_no_secrets_no_oracle'
