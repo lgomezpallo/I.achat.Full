@@ -496,7 +496,7 @@ class ConversationStore:
         import re
 
         def normalized(value: str) -> str:
-            return re.sub(r"\\s+", " ", value).strip().rstrip(" .!?¿¡").casefold()
+            return re.sub(r"\s+", " ", value).strip().rstrip(" .!?¿¡").casefold()
 
         with self._lock, self._db:
             self._db.execute("BEGIN IMMEDIATE")
