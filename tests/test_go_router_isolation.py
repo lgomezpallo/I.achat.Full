@@ -98,3 +98,57 @@ def test_personal_instance_can_still_select_integrated_backend(monkeypatch):
     monkeypatch.setenv("IACHAT_PROFILE", "personal")
     monkeypatch.setenv("IACHAT_BACKEND", "integrated")
     assert isinstance(app_module.get_backend(), ProviderBackend)
+
+
+def test_work_router_status_rejects_remote_endpoint_without_network(monkeypatch):
+    from fastapi.testclient import TestClient
+    import iachat.app as app_module
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("IACHAT_BACKEND", "router")
+    monkeypatch.setenv("ROUTER_URL", "https://external.example.test")
+    monkeypatch.setenv("ROUTER_TOKEN", "test-only")
+    monkeypatch.setattr(app_module, "_signed_user", lambda _: "worker")
+
+    def no_network(*args, **kwargs):
+        pytest.fail("No network access to a remote Router from G.O.")
+
+    monkeypatch.setattr(app_module.httpx, "get", no_network)
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        readiness = client.get("/ready")
+        status = client.get("/api/router/status")
+    assert readiness.status_code == 503
+    assert readiness.json()["detail"] == "go_router_requires_local_endpoint"
+    assert status.status_code == 200
+    assert status.json()["reason"] == "go_router_requires_local_endpoint"
+    assert status.json()["reachable"] is False
+
+
+def test_work_router_health_uses_no_proxy_and_never_claims_inference(monkeypatch):
+    from fastapi.testclient import TestClient
+    import iachat.app as app_module
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("IACHAT_BACKEND", "router")
+    monkeypatch.setenv("ROUTER_URL", "http://127.0.0.1:8010")
+    monkeypatch.setenv("ROUTER_TOKEN", "test-only")
+    monkeypatch.setattr(app_module, "_signed_user", lambda _: "worker")
+    calls = []
+
+    class Health:
+        status_code = 200
+        def json(self):
+            return {"status": "ok"}
+
+    def health(url, **kwargs):
+        calls.append((url, kwargs))
+        return Health()
+
+    monkeypatch.setattr(app_module.httpx, "get", health)
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        readiness = client.get("/ready")
+        status = client.get("/api/router/status")
+    assert readiness.status_code == 200
+    assert status.status_code == 200
+    assert status.json()["reachable"] is True
+    assert status.json()["routing_verified"] is False
+    assert calls == [("http://127.0.0.1:8010/health",
+                      {"timeout": 8.0, "follow_redirects": False, "trust_env": False})]
