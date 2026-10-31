@@ -1,0 +1,53 @@
+name: G.O. contrato PostgreSQL real (CI aislado)
+on:
+  push:
+    branches: [feat/go-ute-second-instance-guard-20261030]
+    paths:
+      - scripts/go_postgres_contract.py
+      - .github/workflows/go-ute-postgres-contract.yml
+      - iachat/go_work_context.py
+  pull_request:
+    paths:
+      - scripts/go_postgres_contract.py
+      - .github/workflows/go-ute-postgres-contract.yml
+      - iachat/go_work_context.py
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  postgres-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: go_contract
+          POSTGRES_PASSWORD: ci-only-admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d go_contract"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      GO_CONTRACT_ADMIN_DSN: postgresql://postgres:ci-only-admin@127.0.0.1:5432/go_contract
+      GO_WORK_READONLY_DSN: postgresql://go_contract_reader:ci-only-reader@127.0.0.1:5432/go_contract
+      GO_CONTRACT_MIGRATIONS: go-source/migrations
+    steps:
+      - name: Checkout motor IAchat (rama candidata)
+        uses: actions/checkout@v4
+      - name: Checkout migraciones originales G.O. (sin copiar esquema)
+        uses: actions/checkout@v4
+        with:
+          repository: lgomezpallo/G.estion.Obras.UTE
+          ref: main
+          path: go-source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - name: Verificar SQL real, SELECT, correcciones y rechazo del rol escritor
+        run: python scripts/go_postgres_contract.py
