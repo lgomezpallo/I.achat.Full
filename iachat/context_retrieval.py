@@ -58,37 +58,45 @@ def related_excerpts(history: list[dict[str, str]], question: str,
         if msg.get("role") != "user":
             continue
         text = msg.get("content", "")
-        if not isinstance(text, str) or len(text) > 6000:
+        if not isinstance(text, str):
             continue
-        # Retrieved quotes become part of the model prompt. Apply the same
-        # privacy boundary as the versioned summary; do not resurface secrets,
-        # identifiers, URLs or attachment labels via semantic similarity.
-        if (_PRIVATE.search(text) or _SECRET_VALUE.search(text)
-                or re.search(r"https?://|\b\d{8,}\b", text, re.I)
-                or "adjuntos:" in text.casefold()):
-            continue
-        words = {_concept(w) for w in re.findall(r"[^\W\d_]{4,}", text.casefold(), re.UNICODE)}
-        score = len(terms & words)
-        # One generic shared word is too weak when the question names
-        # several specific subjects. Prefer precision over invented recall.
-        if len(terms) >= 4 and score < 2:
-            continue
-        if score:
-            # A later correction should outrank an older conflicting decision
-            # of similar relevance. Never invent or merge statements.
-            correction = bool(re.match(
-                r"^\s*(?:corrijo\b|correcci[oó]n\s*:|rectifico\b|"
-                r"en realidad\b|cambiamos\b|cambi[eé]\b)", text, re.I
-            ))
-            matches.append((score + (2 if correction else 0), i, text))
-    matches.sort(key=lambda item: (-item[0], -item[1]))
+        # A long imported/user turn can contain several independent facts.
+        # Do not discard the entire message merely because it exceeds the
+        # 6000-character privacy inspection limit. Use explicit line
+        # boundaries only: a sensitive line is never joined to a safe one.
+        # Oversized single lines remain excluded rather than risk truncating
+        # a credential across an arbitrary chunk boundary.
+        if len(text) > 6000:
+            fragments = [(j, line.strip()) for j, line in enumerate(text.splitlines())
+                         if 8 <= len(line.strip()) <= 6000]
+        else:
+            fragments = [(-1, text)]
+        for part, fragment in fragments:
+            # Apply the same privacy checks to the exact fragment that will
+            # be returned to the model, not just to the original message.
+            if (_PRIVATE.search(fragment) or _SECRET_VALUE.search(fragment)
+                    or re.search(r"https?://|\\b\\d{8,}\\b", fragment, re.I)
+                    or "adjuntos:" in fragment.casefold()):
+                continue
+            words = {_concept(w) for w in re.findall(r"[^\\W\\d_]{4,}", fragment.casefold(), re.UNICODE)}
+            score = len(terms & words)
+            if len(terms) >= 4 and score < 2:
+                continue
+            if score:
+                correction = bool(re.match(
+                    r"^\\s*(?:corrijo\\b|correcci[oó]n\\s*:|rectifico\\b|"
+                    r"en realidad\\b|cambiamos\\b|cambi[eé]\\b)", fragment, re.I
+                ))
+                matches.append((score + (2 if correction else 0), i, part, fragment))
+    matches.sort(key=lambda item: (-item[0], -item[1], -item[2]))
     chosen = []
     remaining = max_chars
-    for _, i, text in matches:
+    for _, i, part, text in matches:
         if len(chosen) >= max_items or remaining <= 0:
             break
         # Reserve space for other matches instead of letting the first consume the budget.
-        prefix = f"Mensaje anterior del usuario (posición {i}): "
+        prefix = (f"Mensaje anterior del usuario (posición {i}, línea {part + 1}): "
+                  if part >= 0 else f"Mensaje anterior del usuario (posición {i}): ")
         # The label is part of the model context too. Reserve its bytes
         # before selecting the excerpt, or several hits exceed max_chars.
         per_item = max(1, max_chars // max(1, max_items) - len(prefix))
