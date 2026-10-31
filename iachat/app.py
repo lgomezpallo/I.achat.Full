@@ -281,9 +281,9 @@ def router_status():
     return {"configured": True, "reachable": True, "routing_verified": False,
             "reason": "health_only_not_end_to_end"}
 
-def _save_chat_history(conversation_id: str, history: list[dict], owner: str, project: str) -> None:
+def _save_chat_history(conversation_id: str, history: list[dict], owner: str, project: str, image_attachments: list[tuple[str, str]] | None = None) -> None:
     try:
-        store.put(conversation_id, history, owner, project)
+        store.put(conversation_id, history, owner, project, image_attachments=image_attachments)
     except ValueError as exc:
         if str(exc) in ("conversation_history_conflict", "conversation_owner_mismatch"):
             raise HTTPException(409, "conversation_changed_retry") from exc
@@ -320,6 +320,15 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         existing_project = store.conversation_project(conversation_id, owner)
         if existing_project is not None and existing_project != message.project.strip():
             raise HTTPException(409, "conversation_project_mismatch")
+    # Durability precedes ALL model-dependent paths (including tool and web
+    # planning). If a provider times out, the user turn is still in SQLite.
+    # Image bytes share its transaction and are never copied into text history.
+    visible_text = message.text + ("\n\nAdjuntos: " + ", ".join(attachment_names) if attachment_names else "")
+    _save_chat_history(
+        conversation_id, [*history, {"role": "user", "content": visible_text}],
+        owner, message.project.strip(),
+        image_attachments=list(zip(image_names, images)),
+    )
     # Structured records persist per authenticated user across conversations.
     # This path precedes one-off file generation; explicit downloadable-file
     # requests continue through the existing file tool unchanged.
@@ -497,7 +506,12 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         # Resolve visual references against stored original image bytes, not
         # earlier assistant descriptions. Router accepts an image array with
         # the current task; label its order explicitly in the task text.
-        previous_images = store.images_for_conversation(conversation_id, owner)
+        # Exclude images from the CURRENT pending turn; they are already in
+        # `images` and must not be mistaken for a previous attachment.
+        previous_images = [
+            p for p in store.images_for_conversation(conversation_id, owner)
+            if p["message_index"] < len(history)
+        ]
         request_lower = message.text.casefold()
         wants_previous = bool(re.search(r"\b(anterior|anteriores|previa|previas|primera|primero|segunda|segundo)\b", request_lower))
         wants_comparison = bool(re.search(r"compar|diferenc|ambas|las dos|entre las|entre ambas", request_lower))
@@ -555,7 +569,6 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         int(web_lookup_performed), len(web_sources), web_plan_ms, web_fetch_ms,
         model_ms, int((time.monotonic() - chat_started) * 1000),
     )
-    visible_text = message.text + ("\n\nAdjuntos: " + ", ".join(attachment_names) if attachment_names else "")
     from datetime import datetime, timezone
     assistant_record = {
         "role": "assistant", "content": answer,
@@ -565,8 +578,6 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
     }
     updated = [*history, {"role": "user", "content": visible_text}, assistant_record]
     _save_chat_history(conversation_id, updated, owner, message.project.strip())
-    if images:
-        store.save_images(conversation_id, owner, len(history), images, image_names)
     if not message.attachments:
         from .auto_memory import learn
         background_tasks.add_task(learn, store, owner, message.text, message.project.strip())
