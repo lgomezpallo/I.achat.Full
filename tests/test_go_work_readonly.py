@@ -44,6 +44,11 @@ class FakeReadOnlyConnection:
             return Result((self.can_create_schema,))
         if "has_database_privilege" in sql:
             return Result((self.can_create_database,))
+        if sql.startswith("SELECT t.nombre,t.version,t.esquema FROM go_record_types t"):
+            return Result(many=[
+                ("medicion", 2, {"horas": {"tipo": "numero", "unidad": "h", "obligatorio": True}}),
+                ("nota", 1, {"detalle": {"tipo": "texto"}}),
+            ])
         if sql == "SELECT COUNT(*) FROM obras":
             return Result((3,))
         if sql.startswith("SELECT estado,COUNT(*) FROM obras"):
@@ -104,6 +109,25 @@ def test_general_work_question_reads_bounded_official_overview(monkeypatch):
     assert '"otros_registros_consultados": false' in result
     assert any("LIMIT 20" in sql for sql, _ in connection.statements)
     assert any("LIMIT 30" in sql for sql, _ in connection.statements)
+    assert all(
+        sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
+        for sql, _ in connection.statements
+    )
+
+
+def test_confirmed_categories_are_bounded_readonly_metadata(monkeypatch):
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    result = work.official_context(
+        "¿Qué categorías de registros puedo utilizar?",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"consulta": "categorias_confirmadas"' in result
+    assert '"nombre": "medicion"' in result
+    assert '"version": 2' in result
+    assert '"unidad": "h"' in result
+    assert '"nombre": "nota"' in result
+    assert '"sin_cambios_oficiales": true' in result
     assert all(
         sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
         for sql, _ in connection.statements
