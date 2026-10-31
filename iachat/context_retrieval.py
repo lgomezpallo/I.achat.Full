@@ -7,6 +7,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from .conversation_summary import _PRIVATE
+
 
 def _stem(word: str) -> str:
     """Lightweight matching for accents and simple Spanish plural forms."""
@@ -58,6 +60,12 @@ def related_excerpts(history: list[dict[str, str]], question: str,
         text = msg.get("content", "")
         if not isinstance(text, str) or len(text) > 6000:
             continue
+        # Retrieved quotes become part of the model prompt. Apply the same
+        # privacy boundary as the versioned summary; do not resurface secrets,
+        # identifiers, URLs or attachment labels via semantic similarity.
+        if (_PRIVATE.search(text) or re.search(r"https?://|\b\d{8,}\b", text, re.I)
+                or "adjuntos:" in text.casefold()):
+            continue
         words = {_concept(w) for w in re.findall(r"[^\W\d_]{4,}", text.casefold(), re.UNICODE)}
         score = len(terms & words)
         # One generic shared word is too weak when the question names
@@ -65,7 +73,13 @@ def related_excerpts(history: list[dict[str, str]], question: str,
         if len(terms) >= 4 and score < 2:
             continue
         if score:
-            matches.append((score, i, text))
+            # A later correction should outrank an older conflicting decision
+            # of similar relevance. Never invent or merge statements.
+            correction = bool(re.match(
+                r"^\s*(?:corrijo\b|correcci[oó]n\s*:|rectifico\b|"
+                r"en realidad\b|cambiamos\b|cambi[eé]\b)", text, re.I
+            ))
+            matches.append((score + (2 if correction else 0), i, text))
     matches.sort(key=lambda item: (-item[0], -item[1]))
     chosen = []
     remaining = max_chars
