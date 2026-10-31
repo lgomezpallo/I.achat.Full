@@ -45,6 +45,15 @@ class ConversationStore:
             "summary_json TEXT NOT NULL, created_at INTEGER NOT NULL, "
             "PRIMARY KEY(owner,conversation_id,version))"
         )
+        # A version is an immutable evidence checkpoint. The current scan
+        # cursor advances independently, avoiding a new full ledger on every
+        # ordinary message and preserving historical versions for auditing.
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS conversation_summary_state ("
+            "owner TEXT NOT NULL, conversation_id TEXT NOT NULL, version INTEGER NOT NULL, "
+            "summary_json TEXT NOT NULL, "
+            "PRIMARY KEY(owner,conversation_id))"
+        )
         self._db.commit()
         self._lock = Lock()
 
@@ -250,11 +259,19 @@ class ConversationStore:
                 # attachment/model/source field while keeping role/text intact.
                 for index, old_item in enumerate(old):
                     history[index] = old_item
+            # Existing installations may not yet have a state row; fall back
+            # to the latest legacy checkpoint without changing its contents.
             row = self._db.execute(
-                "SELECT version,summary_json FROM conversation_summary_versions "
-                "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
+                "SELECT version,summary_json FROM conversation_summary_state "
+                "WHERE owner=? AND conversation_id=?",
                 (owner, conversation_id),
             ).fetchone()
+            if row is None:
+                row = self._db.execute(
+                    "SELECT version,summary_json FROM conversation_summary_versions "
+                    "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
+                    (owner, conversation_id),
+                ).fetchone()
             previous = json.loads(row[1]) if row else None
             summary = build_summary(history, previous)
             payload = json.dumps(history, ensure_ascii=False)
@@ -286,15 +303,20 @@ class ConversationStore:
                     (owner, conversation_id, (row[0] + 1) if row else 1,
                      json.dumps(summary, ensure_ascii=False), int(time.time())),
                 )
-            elif summary != previous:
-                self._db.execute(
-                    "UPDATE conversation_summary_versions SET summary_json=? "
-                    "WHERE owner=? AND conversation_id=? AND version=?",
-                    (json.dumps(summary, ensure_ascii=False), owner, conversation_id, row[0]),
-                )
+            # Update only the mutable cursor. Historical evidence versions
+            # remain byte-for-byte unchanged, including prefix hashes.
+            current_version = (row[0] + 1) if evidence_changed and row else (1 if row is None else row[0])
+            self._db.execute(
+                "INSERT INTO conversation_summary_state(owner,conversation_id,version,summary_json) "
+                "VALUES(?,?,?,?) ON CONFLICT(owner,conversation_id) DO UPDATE SET "
+                "version=excluded.version,summary_json=excluded.summary_json",
+                (owner, conversation_id, current_version, json.dumps(summary, ensure_ascii=False)),
+            )
             # Keep image bytes and the corresponding user turn in the SAME
             # transaction. A provider error must not orphan an attachment.
             if image_attachments:
+                if existing and len(history) <= len(old):
+                    raise ValueError("image_attachments_require_new_user_turn")
                 if not history or history[-1].get("role") != "user":
                     raise ValueError("image_attachments_require_user_turn")
                 self._db.executemany(
@@ -308,10 +330,16 @@ class ConversationStore:
         """Latest owner-scoped summary; older versions remain auditable."""
         with self._lock:
             row = self._db.execute(
-                "SELECT version,summary_json FROM conversation_summary_versions "
-                "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
+                "SELECT version,summary_json FROM conversation_summary_state "
+                "WHERE owner=? AND conversation_id=?",
                 (owner, conversation_id),
             ).fetchone()
+            if row is None:
+                row = self._db.execute(
+                    "SELECT version,summary_json FROM conversation_summary_versions "
+                    "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
+                    (owner, conversation_id),
+                ).fetchone()
         return {"version": row[0], **json.loads(row[1])} if row else None
 
     def conversation_project(self, conversation_id: str, owner: str = "admin") -> str | None:
@@ -353,6 +381,10 @@ class ConversationStore:
             )
             self._db.execute(
                 "DELETE FROM conversation_summary_versions WHERE conversation_id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            self._db.execute(
+                "DELETE FROM conversation_summary_state WHERE conversation_id=? AND owner=?",
                 (conversation_id, owner),
             )
             return cursor.rowcount > 0
