@@ -195,10 +195,12 @@ def test_isolated_rollback_restores_full_history_images_and_memory(tmp_path):
     assert transcript_fingerprint(stage["raw_transcript"](live, "alice", "long")) == original_hash
     assert reopened.get_summary("long", "alice") == original_summary
     assert reopened.list_automatic_memory_log("alice") == original_events
-    assert reopened.list_memories("alice", "Atlas") == [
-        {"id": "stable", "content": "Prefiero respuestas breves", "updated_at":
-         reopened.list_memories("alice", "Atlas")[0]["updated_at"], "project": "Atlas"}
-    ]
+    remembered = reopened.list_memories("alice", "Atlas")
+    assert len(remembered) == 1
+    assert remembered[0]["id"] == "stable"
+    assert remembered[0]["content"] == "Prefiero respuestas breves"
+    assert remembered[0]["project"] == "Atlas"
+    assert reopened.list_memories("bob") == []
     assert [row["filename"] for row in reopened.images_for_conversation("long", "alice")] == [
         "plano.png"
     ]
@@ -233,6 +235,8 @@ def test_isolated_rollback_rejects_wrong_paths_and_live_sqlite_sidecars(tmp_path
     with pytest.raises(RuntimeError, match="rollback_symlink_refused"):
         restore(link, snapshot)
     assert snapshot.exists()
-    assert ConversationStore(str(live)).get("c", "alice") == [
+    reopened = ConversationStore(str(live))
+    assert reopened.get("c", "alice") == [
         {"role": "user", "content": "Decidimos conservar esto."}
     ]
+    reopened._db.close()
