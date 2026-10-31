@@ -184,7 +184,7 @@ def _prepare_chat(monkeypatch, tmp_path):
 
 def test_work_chat_includes_official_data_as_untrusted_tool_evidence(monkeypatch, tmp_path):
     backend = _prepare_chat(monkeypatch, tmp_path)
-    monkeypatch.setattr(work, "official_context", lambda text: "official-data-for-1093")
+    monkeypatch.setattr(work, "official_context", lambda text, **kwargs: "official-data-for-1093")
     with TestClient(app_module.app, base_url="https://go.test") as client:
         response = client.post("/api/chat", json={"text": "¿Qué pasó en la obra 1093?"})
     assert response.status_code == 200, response.text
@@ -222,7 +222,7 @@ def test_http_chat_uses_real_read_adapter_for_official_work_status(monkeypatch, 
 
 def test_general_work_question_injects_official_overview_not_model_guess(monkeypatch, tmp_path):
     backend = _prepare_chat(monkeypatch, tmp_path)
-    monkeypatch.setattr(work, "official_context", lambda text: (
+    monkeypatch.setattr(work, "official_context", lambda text, **kwargs: (
         'Datos oficiales G.O.: {"total_obras": 3}' if "obras" in text else None
     ))
     with TestClient(app_module.app, base_url="https://go.test") as client:
@@ -237,7 +237,7 @@ def test_general_work_question_injects_official_overview_not_model_guess(monkeyp
 
 def test_work_chat_fails_closed_without_official_db_instead_of_guessing(monkeypatch, tmp_path):
     backend = _prepare_chat(monkeypatch, tmp_path)
-    def fail(_):
+    def fail(_, **kwargs):
         raise work.WorkContextUnavailable("go_work_readonly_unavailable")
     monkeypatch.setattr(work, "official_context", fail)
     with TestClient(app_module.app, base_url="https://go.test") as client:
@@ -246,3 +246,41 @@ def test_work_chat_fails_closed_without_official_db_instead_of_guessing(monkeypa
     assert response.json()["detail"] == "go_work_readonly_unavailable"
     assert backend.messages == []
     assert app_module.store.list_conversations("worker") == []
+
+
+def test_followup_reuses_only_last_unambiguous_operator_work(monkeypatch):
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    history = [
+        {"role": "user", "content": "¿Qué pasó en obra 1093?"},
+        {"role": "assistant", "content": "La obra 1190 también existe."},
+    ]
+    result = work.official_context(
+        "¿Y qué se registró en esa obra?", history=history,
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"presupuesto": "1093"' in result
+    assert '"presupuesto": "1190"' not in result
+    assert any(params == ("1093",) for sql, params in connection.statements
+               if sql.startswith("SELECT id,direccion,estado FROM obras"))
+
+
+def test_followup_after_comparison_requires_clarification_without_sql(monkeypatch):
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    history = [
+        {"role": "user", "content": "Compará obra 1093 con obra 1190"},
+        {"role": "assistant", "content": "Dos obras diferentes."},
+    ]
+    with pytest.raises(work.WorkContextUnavailable, match="go_work_ambiguous_budget"):
+        work.official_context(
+            "¿Y qué pasó en esa obra?", history=history,
+            connect=lambda *args, **kwargs: connection,
+        )
+    assert connection.statements == []
+
+
+def test_followup_without_clear_reference_does_not_query_or_guess(monkeypatch):
+    monkeypatch.delenv("GO_WORK_READONLY_DSN", raising=False)
+    history = [{"role": "user", "content": "obra 1093"}]
+    assert work.official_context("¿Qué hora es?", history=history) is None
