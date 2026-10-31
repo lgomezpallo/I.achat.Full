@@ -113,12 +113,29 @@ def google_start():
     return response
 
 
+def _work_google_subject_allowed(subject: str) -> bool:
+    """Labor instance only: Google identity must be explicitly approved by sub.
+
+    The personal instance keeps its existing open OIDC enrollment behavior.
+    An absent or empty allowlist fails closed for G.O.; never compare emails.
+    """
+    if os.getenv("IACHAT_PROFILE", "personal").strip().lower() != "go-ute":
+        return True
+    allowed = {
+        entry.strip() for entry in os.getenv("IACHAT_GOOGLE_ALLOWED_SUBS", "").split(",")
+        if entry.strip()
+    }
+    return bool(subject) and subject in allowed
+
+
 @app.get("/auth/google/callback")
 def google_callback(request: Request, code: str = "", state: str = "", error: str = ""):
     if error:
         raise HTTPException(401, "google_authorization_denied")
     try:
         subject = google_oidc.complete(code, state, request.cookies.get("iachat_google_flow", ""))
+        if not _work_google_subject_allowed(subject):
+            raise HTTPException(403, "google_account_not_authorized")
         username = store.get_or_create_oidc_user("google", subject)
     except OIDCError:
         raise HTTPException(401, "google_authentication_failed")
