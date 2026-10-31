@@ -53,13 +53,14 @@ def test_stage_reopens_and_restores_full_480_turn_history(tmp_path):
         {"role": "assistant", "content": "La respuesta se conservó."},
     ])
     reopened.put("c", history, "alice", "Atlas")
+    full_hash = transcript_fingerprint(reopened.get("c", "alice"), 482)
     reopened._db.close()
-    assert verify_snapshot(path, "alice", "bob", "c", marker, 482, baseline)
+    assert verify_snapshot(path, "alice", "bob", "c", marker, 482, baseline, full_hash)
 
     restored = tmp_path / "restored.sqlite3"
     backup_database(path, restored)
     assert stat.S_IMODE(restored.stat().st_mode) == 0o600
-    assert verify_snapshot(restored, "alice", "bob", "c", marker, 482, baseline)
+    assert verify_snapshot(restored, "alice", "bob", "c", marker, 482, baseline, full_hash)
 
     # A three-anchor check alone would miss silent corruption at message 99.
     # Corrupt the restored copy, not the original, to prove full-prefix
@@ -72,7 +73,37 @@ def test_stage_reopens_and_restores_full_480_turn_history(tmp_path):
         db.execute("UPDATE conversations SET history=? WHERE id='c'",
                    (json.dumps(history, ensure_ascii=False),))
     assert not verify_snapshot(restored, "alice", "bob", "c", marker, 482, baseline)
-    assert verify_snapshot(path, "alice", "bob", "c", marker, 482, baseline)
+    assert verify_snapshot(path, "alice", "bob", "c", marker, 482, baseline, full_hash)
+
+    # A complete digest must also detect corruption of the newly appended answer.
+    restored_tail = tmp_path / "restored_tail.sqlite3"
+    backup_database(path, restored_tail)
+    with sqlite3.connect(restored_tail) as db:
+        tail = json.loads(db.execute(
+            "SELECT history FROM conversations WHERE id='c'"
+        ).fetchone()[0])
+        tail[481]["content"] = "Respuesta alterada tras la inferencia"
+        db.execute("UPDATE conversations SET history=? WHERE id='c'",
+                   (json.dumps(tail, ensure_ascii=False),))
+    assert verify_snapshot(restored_tail, "alice", "bob", "c", marker, 482, baseline)
+    assert not verify_snapshot(restored_tail, "alice", "bob", "c", marker, 482,
+                               baseline, full_hash)
+
+
+def test_fingerprint_covers_metadata_and_message_order():
+    messages = [
+        {"role": "user", "content": "inicio", "attachments": [{"name": "plano.pdf"}]},
+        {"role": "assistant", "content": "recibido", "model": "free-model"},
+    ]
+    original = transcript_fingerprint(messages, 2)
+    import copy
+    changed = copy.deepcopy(messages)
+    changed[0]["attachments"][0]["name"] = "otro.pdf"
+    assert transcript_fingerprint(changed, 2) != original
+    changed = copy.deepcopy(messages)
+    changed[1]["model"] = "different-model"
+    assert transcript_fingerprint(changed, 2) != original
+    assert transcript_fingerprint(list(reversed(messages)), 2) != original
 
 
 def test_stage_never_inherits_router_or_billing_configuration():
@@ -82,3 +113,19 @@ def test_stage_never_inherits_router_or_billing_configuration():
     assert "STRIPE_SECRET_KEY" not in ALLOWED_ENV
     assert "GROQ_API_KEY" in ALLOWED_ENV
     assert "OPENROUTER_API_KEY" in ALLOWED_ENV
+
+
+def test_oracle_stage_preflight_is_unprivileged_and_branch_triggered():
+    workflow = (ROOT / ".github/workflows/iachat-memory-live-stage.yml").read_text()
+    assert '"test/memory-stage-*"' in workflow
+    assert '"test/isolated-live-memory-stage-*"' in workflow
+    preflight = workflow.split("  preflight:\n", 1)[1].split(
+        "  isolated-live-memory:\n", 1
+    )[0]
+    protected = workflow.split("  isolated-live-memory:\n", 1)[1]
+    assert "pytest -q tests/test_stage_live_memory_e2e.py" in preflight
+    assert "environment:" not in preflight
+    assert "secrets." not in preflight
+    assert "needs: preflight" in protected
+    assert "environment: oracle-production" in protected
+    assert "secrets.ORACLE_SSH_KEY" in protected

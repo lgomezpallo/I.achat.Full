@@ -37,13 +37,10 @@ def recall_flags(answer: str, marker: str) -> tuple[bool, bool, bool]:
 
 
 def transcript_fingerprint(history: list[dict], prefix_count: int = 480) -> str:
-    """Digest all original role/content pairs, not just three sampled anchors."""
+    """Digest complete JSON message records, including attachment metadata."""
     if len(history) < prefix_count:
         raise ValueError("transcript_prefix_incomplete")
-    canonical = [
-        {"role": item["role"], "content": item["content"]}
-        for item in history[:prefix_count]
-    ]
+    canonical = history[:prefix_count]
     payload = json.dumps(canonical, sort_keys=True, ensure_ascii=False,
                          separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
@@ -51,7 +48,8 @@ def transcript_fingerprint(history: list[dict], prefix_count: int = 480) -> str:
 
 def verify_snapshot(path: Path, owner: str, other_owner: str,
                     conversation_id: str, marker: str, count: int,
-                    expected_prefix_hash: str | None = None) -> bool:
+                    expected_prefix_hash: str | None = None,
+                    expected_full_hash: str | None = None) -> bool:
     """Independent SQLite connection: transcript, ledger and owner isolation."""
     from iachat.store import ConversationStore
     store = ConversationStore(str(path))
@@ -62,6 +60,8 @@ def verify_snapshot(path: Path, owner: str, other_owner: str,
             history and len(history) == count
             and (expected_prefix_hash is None
                  or transcript_fingerprint(history) == expected_prefix_hash)
+            and (expected_full_hash is None
+                 or transcript_fingerprint(history, count) == expected_full_hash)
             and history[0]["content"].startswith("Decidimos usar PostgreSQL")
             and marker in history[200]["content"]
             and history[478]["content"].startswith("Corrijo:")
@@ -219,6 +219,13 @@ def child(private: Path) -> None:
                 raise AssertionError("live_free_provider_recall_failed")
             if not verify_snapshot(db_path, owner, other, conversation_id, marker, 482, expected_prefix_hash):
                 raise AssertionError("first_live_transcript_not_durable")
+            first_history = ConversationStore(str(db_path))
+            try:
+                first_hash = transcript_fingerprint(
+                    first_history.get(conversation_id, owner), 482
+                )
+            finally:
+                first_history._db.close()
             print("STAGE_LIVE_MEMORY_480: PASS (begin/middle/end)", flush=True)
         stop(process)
         process = None
@@ -237,6 +244,9 @@ def child(private: Path) -> None:
             restored = client.get("/api/conversations/" + conversation_id)
             if restored.status_code != 200 or len(restored.json().get("history", [])) != 482:
                 raise AssertionError("restart_lost_conversation")
+            if not verify_snapshot(db_path, owner, other, conversation_id, marker,
+                                   482, expected_prefix_hash, first_hash):
+                raise AssertionError("restart_modified_transcript")
             followup = client.post("/api/chat", json={
                 "conversation_id": conversation_id, "project": "Atlas",
                 "text": "¿Cuál era el código exacto del motor Violeta que decidimos?",
@@ -244,7 +254,15 @@ def child(private: Path) -> None:
             answer = followup.json().get("answer", "") if followup.status_code == 200 else ""
             if followup.status_code != 200 or marker not in re.sub(r"[^A-Z0-9]", "", answer.upper()):
                 raise AssertionError("live_recall_after_restart_failed")
-        if not verify_snapshot(db_path, owner, other, conversation_id, marker, 484, expected_prefix_hash):
+        final_store = ConversationStore(str(db_path))
+        try:
+            final_hash = transcript_fingerprint(
+                final_store.get(conversation_id, owner), 484
+            )
+        finally:
+            final_store._db.close()
+        if not verify_snapshot(db_path, owner, other, conversation_id, marker, 484,
+                               expected_prefix_hash, final_hash):
             raise AssertionError("restart_transcript_not_durable")
         print("STAGE_RESTART_21_DAYS_AND_LIVE_RECALL: PASS", flush=True)
 
@@ -253,7 +271,8 @@ def child(private: Path) -> None:
         backup_database(db_path, backup_path)
         if stat.S_IMODE(backup_path.stat().st_mode) != 0o600:
             raise AssertionError("backup_permissions_not_private")
-        if not verify_snapshot(backup_path, owner, other, conversation_id, marker, 484, expected_prefix_hash):
+        if not verify_snapshot(backup_path, owner, other, conversation_id, marker, 484,
+                               expected_prefix_hash, final_hash):
             raise AssertionError("restored_backup_missing_memory")
         print("STAGE_BACKUP_RESTORE_OWNER_ISOLATION: PASS", flush=True)
     finally:
