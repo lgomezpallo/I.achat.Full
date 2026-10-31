@@ -4,11 +4,15 @@ These are local database tests, not live-provider or Oracle E2E tests.
 """
 import sqlite3
 import stat
+from pathlib import Path
+from runpy import run_path
 
 import pytest
 
 from iachat.store import ConversationStore
-from scripts.backup_iachat_db import backup_database
+
+# scripts/ is a deployment artifact, not an installed Python package.
+backup_database = run_path(str(Path(__file__).resolve().parents[1] / "scripts" / "backup_iachat_db.py"))["backup_database"]
 
 
 def test_failed_automatic_memory_audit_rolls_back_and_does_not_poison_chat(tmp_path):
