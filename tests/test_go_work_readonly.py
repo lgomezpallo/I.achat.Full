@@ -22,10 +22,11 @@ class Result:
 
 
 class FakeReadOnlyConnection:
-    def __init__(self, *, writable=False, can_create_schema=False):
+    def __init__(self, *, writable=False, can_create_schema=False, can_create_database=False):
         self.statements = []
         self.writable = writable
         self.can_create_schema = can_create_schema
+        self.can_create_database = can_create_database
 
     def __enter__(self):
         return self
@@ -41,6 +42,8 @@ class FakeReadOnlyConnection:
             return Result((self.writable,))
         if "has_schema_privilege" in sql:
             return Result((self.can_create_schema,))
+        if "has_database_privilege" in sql:
+            return Result((self.can_create_database,))
         if sql == "SELECT COUNT(*) FROM obras":
             return Result((3,))
         if sql.startswith("SELECT estado,COUNT(*) FROM obras"):
@@ -51,11 +54,11 @@ class FakeReadOnlyConnection:
                 ("1190", "Alsina 354", "en_ejecucion"),
                 ("1192", "Suipacha 671", "pendiente"),
             ])
-        if sql.startswith("SELECT id,direccion FROM obras"):
+        if sql.startswith("SELECT id,direccion,estado FROM obras"):
             assert params in (("1093",), ("1190",))
             if params == ("1190",):
-                return Result(("work-1190", "Alsina 354"))
-            return Result(("work-uuid", "Rivadavia y Rodríguez Peña"))
+                return Result(("work-1190", "Alsina 354", "en_ejecucion"))
+            return Result(("work-uuid", "Rivadavia y Rodríguez Peña", "pendiente"))
         if sql.startswith("SELECT e.id,e.tipo,e.version,e.datos"):
             assert params in (("work-uuid",), ("work-1190",))
             if params == ("work-1190",):
@@ -79,6 +82,7 @@ def test_scoped_ledger_read_uses_parameterized_selects_only(monkeypatch):
     assert '"presupuesto": "1093"' in context
     assert '"horas": 8' in context
     assert '"estado": "realizado"' in context
+    assert '"estado": "pendiente"' in context
     assert seen == [("test-connection-not-real", {"connect_timeout": 5})]
     assert all(
         sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
@@ -124,7 +128,7 @@ def test_multiwork_query_keeps_each_budget_separate_and_bounded(monkeypatch):
     assert '"horas": 8' in result and '"horas": 6' in result
     assert '"max_registros_por_obra": 8' in result
     scoped = [(sql, params) for sql, params in connection.statements
-              if sql.startswith("SELECT id,direccion FROM obras")]
+              if sql.startswith("SELECT id,direccion,estado FROM obras")]
     assert len(scoped) == 2
     assert {params for _, params in scoped} == {("1093",), ("1190",)}
     assert all(sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
@@ -137,6 +141,8 @@ def test_readonly_adapter_refuses_writer_account_and_unbounded_comparison(monkey
         work.official_context("obra 1093", connect=lambda *args, **kwargs: FakeReadOnlyConnection(writable=True))
     with pytest.raises(work.WorkContextUnavailable, match="go_work_role_has_write_privileges"):
         work.official_context("obra 1093", connect=lambda *args, **kwargs: FakeReadOnlyConnection(can_create_schema=True))
+    with pytest.raises(work.WorkContextUnavailable, match="go_work_role_has_write_privileges"):
+        work.official_context("obra 1093", connect=lambda *args, **kwargs: FakeReadOnlyConnection(can_create_database=True))
     with pytest.raises(work.WorkContextUnavailable, match="go_work_too_many_budgets"):
         work.official_context(
             " ".join(f"obra {n}" for n in range(1000, 1009)),
