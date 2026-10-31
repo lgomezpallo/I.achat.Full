@@ -353,3 +353,45 @@ def test_http_clarification_then_official_work_query(monkeypatch, tmp_path):
         for item in backend.messages[0] if item["role"] == "user"
     )
     assert len(app_module.store.list_conversations("worker")) == 1
+
+
+def test_work_ledger_query_never_triggers_public_web_lookup(monkeypatch, tmp_path):
+    """Official work evidence must not leak into IAchat's automatic web search."""
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        work, "official_context",
+        lambda message, **kwargs: 'Datos oficiales G.O.: {"presupuesto":"1093"}',
+    )
+    def forbidden_web_plan(*args, **kwargs):
+        raise AssertionError("labor ledger context must not trigger public web search")
+    monkeypatch.setattr(
+        "iachat.web_planner.plan_web_lookup_semantic", forbidden_web_plan,
+    )
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.post("/api/chat", json={
+            "text": "¿Qué pasó en la obra 1093?",
+        })
+    assert response.status_code == 200, response.text
+    assert len(backend.messages) == 1
+    assert any(
+        "presupuesto" in item["content"]
+        for item in backend.messages[0] if item["role"] == "user"
+    )
+
+
+def test_go_general_question_keeps_shared_web_planner(monkeypatch, tmp_path):
+    """Do not disable IAchat's existing web-search functionality in G.O."""
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.setattr(work, "official_context", lambda message, **kwargs: None)
+    planned = []
+    def plan(message, history, selected_backend):
+        planned.append(message)
+        return SimpleNamespace(action="none")
+    monkeypatch.setattr("iachat.web_planner.plan_web_lookup_semantic", plan)
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.post("/api/chat", json={
+            "text": "¿Cuándo es el próximo eclipse?",
+        })
+    assert response.status_code == 200, response.text
+    assert planned == ["¿Cuándo es el próximo eclipse?"]
+    assert len(backend.messages) == 1
