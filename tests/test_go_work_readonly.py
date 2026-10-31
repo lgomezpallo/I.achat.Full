@@ -441,6 +441,15 @@ def test_public_web_policy_requires_explicit_operator_request_for_work():
         "Buscá en internet las últimas noticias de River",
         work_profile=True, official_evidence=False,
     )
+    assert work.public_web_allowed(
+        "¿Cuándo es el próximo eclipse?",
+        work_profile=True, official_evidence=False,
+    )
+    assert not work.public_web_allowed(
+        "¿Y qué pasó hoy?",
+        work_profile=True, official_evidence=False,
+        history=[{"role": "user", "content": "¿Cómo va la obra 1093?"}],
+    )
     assert not work.public_web_allowed(
         "Buscá en internet información sobre obra 1093",
         work_profile=True, official_evidence=True,
