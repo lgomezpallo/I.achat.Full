@@ -192,3 +192,51 @@ def test_personal_password_login_remains_available(monkeypatch, tmp_path):
         })
     assert result.status_code == 200
     assert "iachat_session" in result.cookies
+
+
+def test_session_signatures_are_profile_bound_even_if_secret_is_reused(monkeypatch, tmp_path):
+    """Even an accidentally reused secret and username cannot replay cookies."""
+    import hashlib
+    import hmac
+    import time
+
+    monkeypatch.setenv("IACHAT_AUTH_SECRET", "accidentally-shared-test-secret-at-least-32-characters")
+    monkeypatch.setattr(app_module, "store", ConversationStore(str(tmp_path / "both-profiles-test.db")))
+    assert app_module.store.create_user("same-user", "test-only-password")
+    expiry = str(int(time.time()) + 3600)
+
+    def token_for_current_profile():
+        payload = app_module._session_mac_payload("same-user", expiry)
+        signature = hmac.new(
+            os.environ["IACHAT_AUTH_SECRET"].encode(), payload, hashlib.sha256
+        ).hexdigest()
+        return "same-user." + expiry + "." + signature
+
+    import os
+    monkeypatch.setenv("IACHAT_PROFILE", "personal")
+    personal_cookie = token_for_current_profile()
+    assert app_module._signed_user(personal_cookie) == "same-user"
+
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    assert app_module._signed_user(personal_cookie) is None
+    work_cookie = token_for_current_profile()
+    assert app_module._signed_user(work_cookie) == "same-user"
+
+    monkeypatch.setenv("IACHAT_PROFILE", "personal")
+    assert app_module._signed_user(work_cookie) is None
+
+
+def test_work_google_callback_issues_work_bound_cookie(monkeypatch, tmp_path):
+    """A real work OIDC callback must sign the profile-specific session."""
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("IACHAT_AUTH_SECRET", "isolated-work-test-secret-at-least-32-characters")
+    monkeypatch.setenv("IACHAT_GOOGLE_ALLOWED_SUBS", "approved-google-sub")
+    monkeypatch.setattr(app_module, "store", ConversationStore(str(tmp_path / "work-oidc.db")))
+    monkeypatch.setattr(app_module.google_oidc, "complete", lambda *args: "approved-google-sub")
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.get("/auth/google/callback?code=test&state=test", follow_redirects=False)
+    assert response.status_code == 303
+    cookie = response.cookies.get("iachat_session", "")
+    assert app_module._signed_user(cookie) is not None
+    monkeypatch.setenv("IACHAT_PROFILE", "personal")
+    assert app_module._signed_user(cookie) is None
