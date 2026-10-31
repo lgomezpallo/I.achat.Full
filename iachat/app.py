@@ -538,7 +538,11 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         # Official labor facts come only from the isolated PostgreSQL ledger.
         # Never forward a work-specific query/evidence to an automatic public
         # web lookup. General/public questions still use IAchat's web search.
-        if message.text and not message.attachments and not (_is_go_profile() and work_tool_messages):
+        from .go_work_context import public_web_allowed
+        if (message.text and not message.attachments and public_web_allowed(
+            message.text, work_profile=_is_go_profile(),
+            official_evidence=bool(work_tool_messages),
+        )):
             from .web_planner import plan_web_lookup_semantic, split_independent_search_questions
             from .web_research import web_evidence_with_pages, extracted_source_links
             plan_started = time.monotonic()
