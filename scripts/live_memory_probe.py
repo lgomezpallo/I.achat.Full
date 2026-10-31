@@ -6,10 +6,53 @@ the synthetic answer, credentials, stored conversations or generated markers.
 """
 from __future__ import annotations
 
+import json
 import re
 import secrets
 
 from iachat.conversation_summary import render_archived_evidence
+
+
+def _memory_json(answer: str) -> dict | None:
+    """Accept only a complete structured answer, not a negated or quoted claim.
+
+    Loose substring checks can incorrectly pass 'no elegimos PostgreSQL' or
+    'no recuerdo si era diario'. A real-provider acceptance gate must fail
+    closed when the model does not provide affirmative, exact evidence.
+    """
+    if not isinstance(answer, str) or len(answer) > 2048:
+        return None
+    value = answer.strip()
+    if value.startswith(chr(96) * 3) and value.endswith(chr(96) * 3):
+        value = re.sub(r"^\x60{3}(?:json)?\s*\n?", "", value, flags=re.I)
+        value = re.sub(r"\s*\x60{3}$", "", value)
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _literal(value: object) -> str:
+    return value.strip().casefold() if isinstance(value, str) else ""
+
+
+def recall_flags(answer: str, marker: str) -> tuple[bool, bool, bool]:
+    """Require exact affirmative JSON fields; never accept substring echoes."""
+    data = _memory_json(answer)
+    if data is None:
+        return (False, False, False)
+    return (
+        _literal(data.get("base_de_datos")) == "postgresql",
+        _literal(data.get("motor_violeta")) == marker.casefold(),
+        _literal(data.get("respaldo")) == "diario",
+    )
+
+
+def recall_marker(answer: str, marker: str) -> bool:
+    """Second inference must independently return the exact archived code."""
+    data = _memory_json(answer)
+    return data is not None and _literal(data.get("motor_violeta")) == marker.casefold()
 
 
 def seed_memory_probe(store, owner: str, conversation_id: str, marker: str) -> None:
@@ -54,20 +97,17 @@ def run_live_memory_probe(client, store, owner: str, other_owner: str, post_chat
         "Según lo que decidimos en ESTA conversación del proyecto Atlas: "
         "¿qué base de datos elegimos, qué código de motor tiene el componente "
         "Violeta y con qué frecuencia será el respaldo? "
-        "Respondé los tres datos, sin inventar."
+        'Respondé SOLO un objeto JSON sin Markdown con claves "base_de_datos", '
+        '"motor_violeta" y "respaldo"; usá valores literales exactos o null '
+        'si no recordás algún dato. No agregues explicaciones.'
     )
     response = post_chat(client, "/api/chat", json={
         "conversation_id": conversation_id, "project": "Atlas", "text": prompt,
     })
     data = response.json() if response.status_code == 200 else {}
     answer = data.get("answer", "")
-    normalized = re.sub(r"[^A-Z0-9]", "", answer.upper()) if isinstance(answer, str) else ""
-    recall = (
-        response.status_code == 200
-        and "POSTGRESQL" in normalized
-        and marker in normalized
-        and "DIARIO" in normalized
-    )
+    flags = recall_flags(answer, marker)
+    recall = response.status_code == 200 and all(flags)
     loaded = client.get("/api/conversations/" + conversation_id)
     history = loaded.json().get("history", []) if loaded.status_code == 200 else []
     durable = (
@@ -83,9 +123,9 @@ def run_live_memory_probe(client, store, owner: str, other_owner: str, post_chat
         "LIVE_MEMORY_480:",
         "PASS" if recall and durable else "FAIL",
         "http=" + str(response.status_code),
-        "begin=" + str("POSTGRESQL" in normalized),
-        "middle=" + str(marker in normalized),
-        "end=" + str("DIARIO" in normalized),
+        "begin=" + str(flags[0]),
+        "middle=" + str(flags[1]),
+        "end=" + str(flags[2]),
         "history=" + str(len(history)),
         "owner_isolation=" + str(store.get(conversation_id, other_owner) is None),
         flush=True,
