@@ -181,7 +181,8 @@ class ConversationStore:
         with self._lock:
             rows = self._db.execute(
                 "SELECT c.id, COALESCE(i.title, 'Conversación'), COALESCE(i.updated_at, 0), COALESCE(i.project, '') "
-                "FROM conversations c LEFT JOIN conversation_index i ON i.id=c.id "
+                "FROM conversations c LEFT JOIN conversation_index i "
+                "ON i.id=c.id AND i.owner=c.owner "
                 "WHERE c.owner=? ORDER BY COALESCE(i.updated_at, 0) DESC, c.rowid DESC", (owner,)
             ).fetchall()
         return [{"id": r[0], "title": r[1], "updated_at": r[2], "project": r[3]} for r in rows if project is None or r[3] == project]
