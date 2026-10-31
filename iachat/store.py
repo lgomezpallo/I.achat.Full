@@ -356,12 +356,14 @@ class ConversationStore:
                 (memory_id, owner)).fetchone()
             if not row or row[0] != old or row[1] != project:
                 return False
-            # Never overwrite user-edited entries: require a matching original auto-save.
-            origin = self._db.execute(
-                "SELECT 1 FROM automatic_memory_log WHERE memory_id=? AND owner=? "
-                "AND previous_content IS NULL AND content=? LIMIT 1",
-                (memory_id, owner, old)).fetchone()
-            if not origin:
+            # A preference may be corrected more than once. Only replace the
+            # latest *active* audited value, never an intervening manual edit.
+            latest = self._db.execute(
+                "SELECT content,project FROM automatic_memory_log "
+                "WHERE memory_id=? AND owner=? AND undone=0 "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                (memory_id, owner)).fetchone()
+            if latest != (old, project):
                 return False
             self._db.execute(
                 "UPDATE memories SET content=?,updated_at=? WHERE id=? AND owner=? AND project=?",
@@ -398,6 +400,16 @@ class ConversationStore:
                 "SELECT content,previous_content,project FROM automatic_memory_log WHERE id=? AND owner=?",
                 (event_id, owner)).fetchone()
             if current is None or event is None or current != (event[0], event[2]):
+                return False
+            # Undo only the newest active event. An older event can contain
+            # identical text after A -> B -> A corrections; undoing it would
+            # otherwise erase a newer preference and corrupt the audit chain.
+            latest = self._db.execute(
+                "SELECT id FROM automatic_memory_log "
+                "WHERE memory_id=? AND owner=? AND undone=0 "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                (row[0], owner)).fetchone()
+            if latest is None or latest[0] != event_id:
                 return False
             if event[1] is None:
                 self._db.execute("DELETE FROM memories WHERE id=? AND owner=?", (row[0], owner))
