@@ -509,7 +509,10 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         web_fetch_ms = 0
         # Fetch current evidence before inference; the integrated minirouter does
         # not itself provide internet browsing.
-        if message.text and not message.attachments:
+        # Official labor facts come only from the isolated PostgreSQL ledger.
+        # Never forward a work-specific query/evidence to an automatic public
+        # web lookup. General/public questions still use IAchat's web search.
+        if message.text and not message.attachments and not (_is_go_profile() and work_tool_messages):
             from .web_planner import plan_web_lookup_semantic, split_independent_search_questions
             from .web_research import web_evidence_with_pages, extracted_source_links
             plan_started = time.monotonic()
