@@ -16,6 +16,7 @@ from pathlib import Path
 probe = run_path(str(Path(__file__).resolve().parent.parent / "scripts" / "live_memory_probe.py"))
 run_live_memory_probe = probe["run_live_memory_probe"]
 seed_memory_probe = probe["seed_memory_probe"]
+transcript_digest = probe["transcript_digest"]
 
 
 def test_live_probe_seed_requires_archived_middle(tmp_path):
@@ -88,3 +89,21 @@ def test_live_probe_rejects_model_that_does_not_recall(tmp_path, monkeypatch):
         client, store, "alice", "bob",
         lambda session, path, **kwargs: session.post(path, **kwargs),
     )
+
+
+def test_live_production_probe_detects_silent_middle_or_metadata_corruption():
+    messages = [
+        {"role": "user", "content": "inicio", "attachments": [{"name": "plano.pdf"}]},
+        {"role": "assistant", "content": "respuesta", "model": "free"},
+        {"role": "user", "content": "final"},
+    ]
+    baseline = transcript_digest(messages, 3)
+    assert baseline is not None
+    import copy
+    changed = copy.deepcopy(messages)
+    changed[1]["content"] = "alterado"
+    assert transcript_digest(changed, 3) != baseline
+    changed = copy.deepcopy(messages)
+    changed[0]["attachments"][0]["name"] = "otro.pdf"
+    assert transcript_digest(changed, 3) != baseline
+    assert transcript_digest(messages[:2], 3) is None
