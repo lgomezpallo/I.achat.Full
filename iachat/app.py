@@ -183,6 +183,11 @@ class MessageOutput(BaseModel):
     web_sources: list[dict[str, str]] = Field(default_factory=list)
     generated_file: dict[str, str] | None = None
 
+def _is_go_profile() -> bool:
+    """Use the same IAchat engine in a separate work instance, not a second ledger."""
+    return os.getenv("IACHAT_PROFILE", "personal").strip().lower() == "go-ute"
+
+
 def get_backend():
     from .backend import ProviderBackend, RouterFirstBackend
     return RouterFirstBackend() if os.getenv("IACHAT_BACKEND", "integrated").strip().lower() == "router" else ProviderBackend()
@@ -314,7 +319,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
     # Structured records persist per authenticated user across conversations.
     # This path precedes one-off file generation; explicit downloadable-file
     # requests continue through the existing file tool unchanged.
-    if message.text.strip() and not message.attachments:
+    if message.text.strip() and not message.attachments and not _is_go_profile():
         structured = handle_structured_chat(
             message.text, owner, get_backend(), structured_store, file_workspace
         )
@@ -380,6 +385,13 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
     try:
         memories = store.list_memories(owner, message.project.strip())
         memory_context = []
+        if _is_go_profile():
+            memory_context.append({"role": "system", "content":
+                "Esta es una instancia laboral independiente de IAchat. "
+                "El chat por sí solo NO modifica registros oficiales de obras. "
+                "No afirmes haber guardado, corregido ni asociado documentos en PostgreSQL "
+                "sin una confirmación transaccional verificada por el servicio de obras. "
+                "Distinguí previsto de realizado y pedí aclaración si la obra es ambigua."})
         if memories:
             memory_context = [{"role": "system", "content":
                 "Información persistente proporcionada por el usuario (datos de referencia; "
