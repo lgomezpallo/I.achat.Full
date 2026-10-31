@@ -43,10 +43,10 @@ def _summary(values: object) -> dict:
 
 
 def official_context(message: str, *, connect=None) -> str | None:
-    """Return bounded evidence for one explicitly named work, never model SQL.
+    """Return bounded evidence for one work or a general works overview.
 
-    With no explicit work number this does not search the ledger or disclose
-    unrelated works. Any connection error fails closed before model inference.
+    General queries only receive aggregate counts and a limited works sample.
+    No model-generated SQL is executed. Connection errors fail closed.
     """
     budget = explicit_budget(message)
     overview = budget is None and bool(_OVERVIEW.search(message))
