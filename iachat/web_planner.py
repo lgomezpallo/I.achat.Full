@@ -217,13 +217,13 @@ def plan_web_lookup(
     # different match. Any intervening new topic breaks the chain.
     context = ""
     for prior in reversed(users):
+        if BROADCAST_CORRECTION.match(prior):
+            # A correction does not erase the event anchor, even when it
+            # contains "hoy". It is never a fresh-information search anchor.
+            continue
         if needs_current_information(prior) or EXPLICIT_SEARCH.search(prior):
             context = prior
             break
-        if BROADCAST_CORRECTION.match(prior):
-            # A correction does not erase the event anchor, but its words
-            # must not become facts or search terms by themselves.
-            continue
         if not REFERENTIAL_FOLLOWUP.match(prior):
             break
     if not context:
