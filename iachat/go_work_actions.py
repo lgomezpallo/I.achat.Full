@@ -111,7 +111,7 @@ def interpret_model_answer(raw: str, message: str, *, actor: str, conversation_i
     if isinstance(raw, str):
         import re
         fenced = re.fullmatch(
-            r"\\s*\x60\x60\x60(?:json)?[ \\t]*\\r?\\n(.*?)\\r?\\n\x60\x60\x60\\s*",
+            r"\s*\x60\x60\x60(?:json)?[ \t]*\r?\n(.*?)\r?\n\x60\x60\x60\s*",
             raw, flags=re.I | re.S,
         )
         if fenced:
