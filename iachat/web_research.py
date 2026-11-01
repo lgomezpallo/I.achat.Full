@@ -287,7 +287,7 @@ def _channel_stance(
     """Classify explicit assertions, allowing a bare name only in a channel answer."""
     if allow_short_answer:
         short = _BROADCAST_SHORT_ANSWER.fullmatch(text)
-        if short and short.group(1).casefold() == channel.casefold():
+        if short and short.group(1).rstrip(".,;:!?").casefold() == channel.casefold():
             return "yes"
     name = r"\b" + re.escape(channel) + r"\b"
     for sentence in re.split(r"[\n.!?]+", text):
