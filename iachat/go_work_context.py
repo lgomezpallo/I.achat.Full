@@ -87,7 +87,7 @@ _BARE_ADDRESS = re.compile(
 
 
 def _address_reference(message: str) -> str | None:
-    for pattern in (_ADDRESS_INTERSECTION, _ADDRESS_NUMBER, _BARE_ADDRESS):
+    for pattern in (_BARE_ADDRESS, _ADDRESS_INTERSECTION, _ADDRESS_NUMBER):
         found = pattern.search(message)
         if found:
             return " ".join(found.group("address").split())
