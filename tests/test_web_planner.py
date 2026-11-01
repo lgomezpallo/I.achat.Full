@@ -399,3 +399,44 @@ def test_two_independent_schedule_questions_split_without_duplication():
     assert split_independent_search_questions(
         "Probando si anda IAchat con mi cuenta de mail"
     ) == ["Probando si anda IAchat con mi cuenta de mail"]
+
+
+def test_broadcast_followups_keep_user_subject_without_semantic_rewrite():
+    """River-Boca must not become Mundial or a different match."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class MisleadingClassifier:
+        def answer(self, messages):
+            raise AssertionError("user-anchored follow-up must not be rewritten")
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("La fecha no está confirmada."),
+    ]
+    plan = plan_web_lookup_semantic("¿Y en qué canal lo pasan?", history, MisleadingClassifier())
+    assert plan.action == "search"
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Mundial" not in plan.query
+
+    history.extend([
+        user("¿Y en qué canal lo pasan?"),
+        assistant("No pude confirmar el canal."),
+    ])
+    confirmation = plan_web_lookup_semantic("¿Lo pasan por Telefe?", history, MisleadingClassifier())
+    assert confirmation.action == "search"
+    assert confirmation.reason == "contextual_followup"
+    assert "River-Boca" in confirmation.query
+    assert "Telefe" in confirmation.query
+
+
+def test_broadcast_confirmation_does_not_inherit_unrelated_topic():
+    from iachat.web_planner import plan_web_lookup
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("No confirmado."),
+        user("Explicá cómo se hace una torta."),
+        assistant("Mezclá los ingredientes."),
+    ]
+    assert plan_web_lookup("¿Lo pasan por Telefe?", history).action == "answer"
