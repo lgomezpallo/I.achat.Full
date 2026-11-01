@@ -223,6 +223,52 @@ _USER_CORRECTION = re.compile(
 )
 
 
+_BROADCAST_ALT_CHANNEL = re.compile(
+    # Only alternatives in an already recognized broadcast question. Do not
+    # accidentally treat a lowercase connector as part of a channel name.
+    r"(?i:\b(?:o|y)\s+por\s+)"
+    r"([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})",
+)
+_BROADCAST_QUESTION = re.compile(
+    r"\b(?:canal(?:es)?|transmisi[oó]n|transmiten|televisan|pasan|emiten)\b"
+    r"|\bd[oó]nde\s+(?:ver|mirar)\b", re.I,
+)
+_BROADCAST_REVERSE_CHANNEL = re.compile(
+    r"\b([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})"
+    r"\s+(?:(?:no\s+)?(?:lo|la)\s+)?(?:pasa|transmite|emite)\b",
+)
+
+
+def _broadcast_channels(question: str, answer: str) -> list[str]:
+    """Select channels from a broadcast question or its explicit answer.
+
+    A generic follow-up ("¿Qué canal lo pasa?") contains no channel name,
+    but must still detect a repeated unsupported answer ("Telefe"). Search
+    only syntactic channel assertions, never arbitrary proper nouns.
+    """
+    if not _BROADCAST_QUESTION.search(question):
+        return []
+    candidates = [
+        *(m.group(1) for m in _BROADCAST_CHANNEL.finditer(question)),
+        *(m.group(1) for m in _BROADCAST_ALT_CHANNEL.finditer(question)),
+        *(m.group(1) for m in _BROADCAST_CHANNEL.finditer(answer)),
+        *(m.group(1) for m in _BROADCAST_REVERSE_CHANNEL.finditer(answer)),
+    ]
+    channels: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        name = re.sub(r"\s+(?:hoy|ma[nñ]ana)$", "", raw, flags=re.I).strip()
+        if not name or len(name) > 60 or name.casefold() in seen:
+            continue
+        seen.add(name.casefold())
+        channels.append(name)
+        if len(channels) >= 6:
+            break
+    return channels
+
+
 def _channel_stance(text: str, channel: str) -> str | None:
     """Classify only explicit, nearby channel assertions; otherwise abstain."""
     name = r"\b" + re.escape(channel) + r"\b"
@@ -257,39 +303,37 @@ def guard_unverified_broadcast_claim(
     A newly read page is NOT proof that its content corroborates the answer.
     Do not waive the conflict guard merely because an unrelated page was read.
     """
-    match = _BROADCAST_CHANNEL.search(question)
-    if not match:
-        return answer
-    channel = re.sub(r"\s+(?:hoy|ma[nñ]ana|esta\s+noche)$", "", match.group(1), flags=re.I)
-    stance = _channel_stance(answer, channel)
-    if stance not in ("yes", "no"):
-        return answer
-    prior = [
-        _channel_stance(str(turn.get("content", "")), channel)
-        for turn in history[-20:] if turn.get("role") == "assistant"
-    ]
-    prior = [value for value in prior if value]
-    asserted = {value for value in prior if value in ("yes", "no")}
-    contradiction = (
-        len(asserted) > 1
-        or bool(prior and prior[-1] != stance)
-    )
-    for turn in history[-20:]:
-        if turn.get("role") != "user":
+    for channel in _broadcast_channels(question, answer):
+        stance = _channel_stance(answer, channel)
+        if stance not in ("yes", "no"):
             continue
-        text = str(turn.get("content", ""))
-        if _USER_CORRECTION.search(text):
-            corrected = _channel_stance(text, channel)
-            if corrected in ("yes", "no") and corrected != stance:
-                contradiction = True
-    if not contradiction:
-        return answer
-    # A page_read flag means transport succeeded, not that the page
-    # corroborated the disputed channel. Abstain until a separate,
-    # claim-specific verification path exists.
-    return (
-        f"En esta conversación hubo información contradictoria o sin confirmar "
-        f"sobre la transmisión por {channel}. No tengo una fuente nueva "
-        "suficientemente verificable para resolverlo, así que no voy a "
-        "afirmar ni negar ese canal."
-    )
+        prior = [
+            _channel_stance(str(turn.get("content", "")), channel)
+            for turn in history[-20:] if turn.get("role") == "assistant"
+        ]
+        prior = [value for value in prior if value]
+        asserted = {value for value in prior if value in ("yes", "no")}
+        contradiction = (
+            len(asserted) > 1
+            or bool(prior and prior[-1] != stance)
+        )
+        for turn in history[-20:]:
+            if turn.get("role") != "user":
+                continue
+            text = str(turn.get("content", ""))
+            if _USER_CORRECTION.search(text):
+                corrected = _channel_stance(text, channel)
+                if corrected in ("yes", "no") and corrected != stance:
+                    contradiction = True
+        if not contradiction:
+            continue
+        # A page_read flag means transport succeeded, not that the page
+        # corroborated the disputed channel. Abstain until a separate,
+        # claim-specific verification path exists.
+        return (
+            f"En esta conversación hubo información contradictoria o sin confirmar "
+            f"sobre la transmisión por {channel}. No tengo una fuente nueva "
+            "suficientemente verificable para resolverlo, así que no voy a "
+            "afirmar ni negar ese canal."
+        )
+    return answer
