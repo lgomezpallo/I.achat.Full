@@ -555,6 +555,13 @@ def test_freshness_word_in_short_followup_does_not_drop_original_event():
     assert "River-Boca" in plan.query
     assert "a qué hora" in plan.query
 
+    # Once the time question is in history, the following channel question
+    # must still refer to River-Boca, not the bare phrase "a qué hora".
+    history.extend([user("¿Y a qué hora?"), assistant("Sin horario confirmado.")])
+    chained = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert chained.reason == "contextual_followup"
+    assert "River-Boca" in chained.query
+
     # Without an anchor, keep the previous current-question behavior.
     standalone = plan_web_lookup("¿Y a qué hora?")
     assert standalone.action == "search"
