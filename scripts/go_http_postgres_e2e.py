@@ -71,6 +71,14 @@ def main() -> None:
             elif "Ayer hicieron tres horas" in last:
                 # A model must not infer an official budget from a vague turn.
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
+            elif "Corregí el registro equivocado en obra 1093" in last:
+                # The simulated model selects an event UUID not returned by
+                # the real PostgreSQL read. It must never stage a correction.
+                model_text = (
+                    '{"go_intent":"v1","intent":"correct","record_type":"medicion",'
+                    '"budget":"1093","replaces":"00000000-0000-4000-8000-000000000001",'
+                    '"values":{"horas":99}}'
+                )
             else:
                 model_text = "Respuesta de Router simulado; no hay escritura oficial."
             return httpx.Response(
@@ -136,6 +144,25 @@ def main() -> None:
                     for item in requests[1]["conversation"]
                     if item["role"] == "user"
                 )
+
+                # A fabricated correction ID must be rejected through the
+                # full HTTP chat + real PostgreSQL evidence path, before any
+                # pending proposal or official event can be created.
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    proposals_before = conn.execute(
+                        "SELECT COUNT(*) FROM go_record_proposals"
+                    ).fetchone()[0]
+                bad_correction = client.post("/api/chat", json={
+                    "conversation_id": conversation_id,
+                    "text": "Corregí el registro equivocado en obra 1093",
+                })
+                assert bad_correction.status_code == 200, bad_correction.text
+                assert "No pude verificar el registro oficial a corregir" in bad_correction.json()["answer"]
+                assert events_count() == 2
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    assert conn.execute(
+                        "SELECT COUNT(*) FROM go_record_proposals"
+                    ).fetchone()[0] == proposals_before
 
                 proposed = client.post("/api/chat", json={
                     "conversation_id": conversation_id,
