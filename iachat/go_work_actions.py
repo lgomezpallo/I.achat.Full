@@ -72,9 +72,24 @@ def decide_in_conversation(message: str, history: list[dict], *, actor: str, con
     # Natural confirmations are safe only for the immediate pending proposal
     # in the authenticated, server-loaded conversation. Never consult the
     # G.O. ledger's global last-turn fallback (it is not user-scoped).
-    short_yes = re.fullmatch(r"\s*(?:s[ií]|dale|ok(?:ay)?|confirmo|confirm[aá]r?)\s*[.!]?\s*", message, re.I)
-    short_no = re.fullmatch(r"\s*(?:no|descarto|descart[aá]r?|cancel[aá]r?)\s*[.!]?\s*", message, re.I)
-    explicit = re.match(r"^\s*(?:confirmo|confirmar|descarto|descartar)\s+propuesta\b", message, re.I)
+    # Natural, bounded approvals are allowed ONLY for the immediately
+    # preceding server-owned proposal. Never infer approval from a longer
+    # sentence that may also contain a correction or a new instruction.
+    yes_verb = r"(?:confirmo|confirmar|confirm[aá](?:la)?)"
+    no_verb = r"(?:descarto|descartar|descart[aá](?:la)?)"
+    reference = r"(?:\s+(?:la|esa|esta)\s+propuesta)?"
+    short_yes = re.fullmatch(
+        rf"\s*(?:s[ií]|dale|ok(?:ay)?|{yes_verb}{reference})\s*[.!]?\s*",
+        message, re.I,
+    )
+    short_no = re.fullmatch(
+        rf"\s*(?:no|{no_verb}{reference}|cancel[aá]r?)\s*[.!]?\s*",
+        message, re.I,
+    )
+    explicit = re.match(
+        r"^\s*(?:confirmo|confirmar|descarto|descartar)\s+(?:la\s+)?propuesta\b",
+        message, re.I,
+    )
     if not (short_yes or short_no or explicit):
         return None
     last = history[-1] if history else None
