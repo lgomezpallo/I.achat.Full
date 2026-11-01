@@ -810,3 +810,52 @@ def test_multiple_mixed_references_require_clarification_before_sql(monkeypatch)
     assert work._address_references("¿Qué pasó en presupuesto 1093?") == []
     assert work._address_references("¿Qué se registró en la obra 1093?") == []
     assert work._address_references("¿Qué se registró en el presupuesto 1093?") == []
+
+
+def test_http_ambiguous_comparison_followup_can_be_clarified_by_budget(monkeypatch, tmp_path):
+    """After comparing works, an ambiguous follow-up asks; a bare reply resolves it.
+
+    No model is called for the ambiguous turn and no work is guessed. This
+    uses the real HTTP chat route and a bounded read-only PostgreSQL adapter.
+    """
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    original = work.official_context
+    monkeypatch.setattr(
+        work, "official_context",
+        lambda message, **kwargs: original(
+            message, history=kwargs.get("history"),
+            connect=lambda *args, **kwargs: connection,
+        ),
+    )
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        comparison = client.post("/api/chat", json={
+            "text": "Compará obra 1093 con obra 1190",
+        })
+        assert comparison.status_code == 200, comparison.text
+        conversation_id = comparison.json()["conversation_id"]
+        assert len(backend.messages) == 1
+
+        clarification = client.post("/api/chat", json={
+            "conversation_id": conversation_id,
+            "text": "¿Y qué pasó en esa obra?",
+        })
+        assert clarification.status_code == 200, clarification.text
+        assert clarification.json()["answer"] == work.WORK_CLARIFICATION_PROMPT
+        assert len(backend.messages) == 1, "ambiguous work must not reach a model"
+
+        resolved = client.post("/api/chat", json={
+            "conversation_id": conversation_id, "text": "1190",
+        })
+        assert resolved.status_code == 200, resolved.text
+        assert len(backend.messages) == 2
+        assert any(
+            '"presupuesto": "1190"' in item["content"]
+            for item in backend.messages[-1] if item["role"] == "user"
+        )
+        assert not any(
+            '"presupuesto": "1093"' in item["content"]
+            for item in backend.messages[-1] if item["role"] == "user"
+        )
+        assert len(resolved.json()["history"]) == 6

@@ -562,9 +562,9 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
                 # Do not infer official facts from memory or model guesses when
                 # the work ledger cannot be read safely.
                 code = str(exc)
-                if code == "go_work_missing_budget":
-                    # A work-specific anaphora without an operator-provided
-                    # identifier is a clarification, not a database outage.
+                if code in {"go_work_missing_budget", "go_work_ambiguous_budget"}:
+                    # An unresolved or ambiguous work reference needs a
+                    # conversational clarification, not an HTTP 409 or model guess.
                     # Persist the exchange in the isolated labor conversation
                     # without calling a model or writing official PostgreSQL.
                     answer = WORK_CLARIFICATION_PROMPT
