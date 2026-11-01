@@ -57,13 +57,18 @@ _SENSITIVE_WORK_TEXT = re.compile(
     re.I,
 )
 # Address intersections are work-sensitive even without an explicit "obra".
+# Labor addresses often have multiword street names (Combate de los Pozos,
+# Rodríguez Peña) or an Av./Avenida prefix. A one-word-only pattern leaked
+# these queries into the automatic public web planner when no budget was given.
+# Keep the match bounded; this is a privacy guard, NOT address-to-work inference.
+_STREET_WORD = r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+"
+_STREET_NAME = rf"(?:Av(?:enida)?\.?\s+)?{_STREET_WORD}(?:\s+{_STREET_WORD}){{0,3}}"
 _INTERSECTION = re.compile(
-    r"\b(?:en|de|por|sobre)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+"
-    r"\s+(?:y|esq(?:uina)?\.?)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+\b", re.I
+    rf"\b(?:en|de|por|sobre)\s+{_STREET_NAME}"
+    rf"\s+(?:y|esq(?:uina)?\.?)\s+{_STREET_NAME}\b", re.I
 )
 _STREET_NUMBER = re.compile(
-    r"\b(?:en|de|por|sobre)\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]+\s+\d{2,5}\b",
-    re.I,
+    rf"\b(?:en|de|por|sobre)\s+{_STREET_NAME}\s+\d{{2,5}}\b", re.I
 )
 
 
