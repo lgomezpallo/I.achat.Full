@@ -243,3 +243,34 @@ def test_semantic_web_rewrite_with_zero_sources_retries_original(monkeypatch):
     assert response.status_code == 200
     assert searches == ["novedades institucionales ambiguas", question]
     assert response.json()["web_sources"][0]["url"] == "https://example.com/anses"
+
+
+def test_day_later_broadcast_followup_uses_persisted_user_topic(monkeypatch):
+    """The date gap must not change River-Boca into an unrelated event."""
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    app_module.store.put("river-day-old", [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "No pude confirmar la fecha.",
+         "completed_at": "2026-10-31T16:00:00+00:00"},
+    ], "admin", "")
+
+    response = client.post("/api/chat", json={
+        "conversation_id": "river-day-old",
+        "text": "¿Y en qué canal lo pasan?",
+    })
+    assert response.status_code == 200
+    assert len(searches) == 1
+    assert "River-Boca" in searches[0]
+    assert "Mundial" not in searches[0]
+    assert "canal" in searches[0]
+
+    confirmation = client.post("/api/chat", json={
+        "conversation_id": "river-day-old",
+        "text": "¿Lo pasan por Telefe?",
+    })
+    assert confirmation.status_code == 200
+    assert len(searches) == 2
+    assert "River-Boca" in searches[1]
+    assert "Telefe" in searches[1]
+    assert all("Mundial" not in query for query in searches)
