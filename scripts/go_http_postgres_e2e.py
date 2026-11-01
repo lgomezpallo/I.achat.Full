@@ -268,6 +268,34 @@ def main() -> None:
                 )
                 assert events_count() == 3
 
+                # Real PostgreSQL + HTTP conversation: a newer street address
+                # supersedes an older work number on an anaphoric follow-up.
+                # Router remains simulated; this checks the actual shared chat
+                # and SELECT-only evidence path, not a model's intelligence.
+                prior_work = client.post("/api/chat", json={
+                    "text": "¿Qué pasó en obra 1190?",
+                })
+                assert prior_work.status_code == 200, prior_work.text
+                address_conversation = prior_work.json()["conversation_id"]
+                switched = client.post("/api/chat", json={
+                    "conversation_id": address_conversation,
+                    "text": "¿Qué pasó en Rivadavia y Rodríguez Peña?",
+                })
+                assert switched.status_code == 200, switched.text
+                address_followup = client.post("/api/chat", json={
+                    "conversation_id": address_conversation,
+                    "text": "¿Y qué hicieron ahí?",
+                })
+                assert address_followup.status_code == 200, address_followup.text
+                official_evidence = [
+                    item["content"] for item in requests[-1]["conversation"]
+                    if item["role"] == "user"
+                    and "Datos oficiales G.O." in item["content"]
+                ]
+                assert official_evidence and '"presupuesto": "1093"' in official_evidence[-1]
+                assert '"presupuesto": "1190"' not in official_evidence[-1]
+                assert events_count() == 3, "follow-up reads must never write"
+
             # Reopen the same isolated work SQLite with the authenticated cookie.
             with TestClient(app_module.app, base_url="https://go.test") as reopened:
                 reopened.cookies.set("iachat_session", cookie)
