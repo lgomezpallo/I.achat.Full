@@ -92,6 +92,17 @@ _PSEUDO_ADDRESS = re.compile(
 )
 
 
+def _is_work_reference_not_address(candidate: str) -> bool:
+    """Exclude a budget embedded in a greedily matched street phrase.
+
+    In "control de juntas en obra 1093", the generic street-name matcher can
+    consume "juntas en obra 1093" as an address. The operator supplied a
+    budget, not a conflicting street. Real addresses such as "Alsina 354"
+    still qualify for the independent PostgreSQL identity check.
+    """
+    return bool(_PSEUDO_ADDRESS.fullmatch(candidate) or _WORK.search(candidate))
+
+
 def _address_references(message: str) -> list[str]:
     """Extract operator-supplied addresses without silently choosing the first.
 
@@ -101,7 +112,7 @@ def _address_references(message: str) -> list[str]:
     found = _BARE_ADDRESS.fullmatch(message)
     if found:
         candidate = " ".join(found.group("address").split())
-        return [] if _PSEUDO_ADDRESS.fullmatch(candidate) else [candidate]
+        return [] if _is_work_reference_not_address(candidate) else [candidate]
     matches = [
         (match.start(), " ".join(match.group("address").split()))
         for pattern in (_ADDRESS_INTERSECTION, _ADDRESS_NUMBER)
@@ -110,7 +121,7 @@ def _address_references(message: str) -> list[str]:
     result = []
     seen = set()
     for _, address in sorted(matches):
-        if address.casefold() not in seen and not _PSEUDO_ADDRESS.fullmatch(address):
+        if address.casefold() not in seen and not _is_work_reference_not_address(address):
             seen.add(address.casefold())
             result.append(address)
     return result
