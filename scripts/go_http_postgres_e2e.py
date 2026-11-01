@@ -71,6 +71,36 @@ def main() -> None:
             elif "Ayer hicieron tres horas" in last:
                 # A model must not infer an official budget from a vague turn.
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
+            elif "Creá una categoría de control de juntas" in last:
+                model_text = (
+                    '{"go_intent":"v1","intent":"define_type",'
+                    '"record_type":"control_juntas","schema":{'
+                    '"observacion":{"tipo":"texto","obligatorio":true},'
+                    '"fecha":{"tipo":"fecha","obligatorio":true},'
+                    '"metros":{"tipo":"numero","unidad":"m","obligatorio":false}}}'
+                )
+            elif "Registrá control de juntas en obra 1093" in last:
+                model_text = (
+                    '{"go_intent":"v1","intent":"record",'
+                    '"record_type":"control_juntas","budget":"1093",'
+                    '"values":{"observacion":"revisar","fecha":"2026-11-01","metros":4}}'
+                )
+            elif "Corregí el control de juntas en obra 1093" in last:
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    current = conn.execute(
+                        "SELECT e.id FROM go_record_events e "
+                        "JOIN obras o ON o.id=e.obra_id "
+                        "WHERE o.presupuesto='1093' AND e.tipo='control_juntas' "
+                        "AND NOT EXISTS (SELECT 1 FROM go_record_events n WHERE n.reemplaza=e.id) "
+                        "ORDER BY e.creado DESC LIMIT 1"
+                    ).fetchone()
+                assert current is not None
+                model_text = (
+                    '{"go_intent":"v1","intent":"correct",'
+                    '"record_type":"control_juntas","budget":"1093",'
+                    '"replaces":"' + str(current[0]) + '",'
+                    '"values":{"observacion":"juntas verificadas"}}'
+                )
             elif "Corregí el registro equivocado en obra 1093" in last:
                 # The simulated model selects an event UUID not returned by
                 # the real PostgreSQL read. It must never stage a correction.
@@ -418,6 +448,98 @@ def main() -> None:
                 assert saved.status_code == 200, saved.text
                 # Includes the rejected correction request and its response.\n                assert len(saved.json()["history"]) == 18
                 assert events_count() == 3
+
+            # End-to-end new category lifecycle, without DDL or hardcoded
+            # business tables: same IAchat HTTP chat -> existing G.O. metadata
+            # -> human approval -> versioned JSONB -> correction audit chain.
+            # This is a disposable PostgreSQL 16 test, not real inference.
+            with TestClient(app_module.app, base_url="https://go.test") as metadata_client:
+                metadata_client.cookies.set("iachat_session", cookie)
+                before = events_count()
+                proposed_type = metadata_client.post("/api/chat", json={
+                    "text": "Creá una categoría de control de juntas con observación, fecha y metros",
+                })
+                assert proposed_type.status_code == 200, proposed_type.text
+                metadata_conversation = proposed_type.json()["conversation_id"]
+                type_proposal = proposed_type.json()["history"][-1]["go_proposal_id"]
+                assert "No está confirmado" in proposed_type.json()["answer"]
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    assert conn.execute(
+                        "SELECT COUNT(*) FROM go_record_types WHERE nombre='control_juntas'"
+                    ).fetchone()[0] == 0
+                assert events_count() == before
+                type_approved = metadata_client.post("/api/chat", json={
+                    "conversation_id": metadata_conversation,
+                    "text": "confirmala",
+                })
+                assert type_approved.status_code == 200, type_approved.text
+                assert "versión 1 confirmada" in type_approved.json()["answer"]
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    version, schema = conn.execute(
+                        "SELECT version,esquema FROM go_record_types "
+                        "WHERE nombre='control_juntas'"
+                    ).fetchone()
+                    assert version == 1
+                    assert schema["metros"]["unidad"] == "m"
+                    assert schema["fecha"]["tipo"] == "fecha"
+                    assert conn.execute(
+                        "SELECT decidido_por IS NOT NULL FROM go_record_proposals WHERE id=%s",
+                        (type_proposal,),
+                    ).fetchone() == (True,)
+                assert events_count() == before, "metadata confirmation is not an event"
+
+                proposed_record = metadata_client.post("/api/chat", json={
+                    "conversation_id": metadata_conversation,
+                    "text": "Registrá control de juntas en obra 1093, fecha 2026-11-01, revisar, 4 metros",
+                })
+                assert proposed_record.status_code == 200, proposed_record.text
+                record_proposal = proposed_record.json()["history"][-1]["go_proposal_id"]
+                assert events_count() == before
+                confirmed_record = metadata_client.post("/api/chat", json={
+                    "conversation_id": metadata_conversation, "text": "dale",
+                })
+                assert confirmed_record.status_code == 200, confirmed_record.text
+                assert "Novedad confirmada" in confirmed_record.json()["answer"]
+                assert events_count() == before + 1
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    original_id, values = conn.execute(
+                        "SELECT id,datos FROM go_record_events WHERE propuesta_id=%s",
+                        (record_proposal,),
+                    ).fetchone()
+                    assert values == {
+                        "observacion": "revisar", "fecha": "2026-11-01", "metros": 4,
+                    }
+
+                correction = metadata_client.post("/api/chat", json={
+                    "conversation_id": metadata_conversation,
+                    "text": "Corregí el control de juntas en obra 1093: ya verificadas",
+                })
+                assert correction.status_code == 200, correction.text
+                correction_proposal = correction.json()["history"][-1]["go_proposal_id"]
+                assert events_count() == before + 1
+                corrected = metadata_client.post("/api/chat", json={
+                    "conversation_id": metadata_conversation,
+                    "text": "confirmá la propuesta",
+                })
+                assert corrected.status_code == 200, corrected.text
+                assert "Corrección confirmada" in corrected.json()["answer"]
+                assert events_count() == before + 2
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    replaced, corrected_values = conn.execute(
+                        "SELECT reemplaza,datos FROM go_record_events WHERE propuesta_id=%s",
+                        (correction_proposal,),
+                    ).fetchone()
+                    assert replaced == original_id
+                    assert corrected_values == {
+                        "observacion": "juntas verificadas",
+                        "fecha": "2026-11-01", "metros": 4,
+                    }
+                    assert conn.execute(
+                        "SELECT COUNT(*) FROM go_record_events e "
+                        "WHERE e.tipo='control_juntas' AND NOT EXISTS "
+                        "(SELECT 1 FROM go_record_events n WHERE n.reemplaza=e.id)"
+                    ).fetchone()[0] == 1
+                print("GO_METADATA_LIFECYCLE=passed_real_postgres16_http_chat_approval_versioning_correction_simulated_router")
 
     print("GO_HTTP_POSTGRES_CONTRACT=passed_real_postgres16_staging_approval_isolated_simulated_router_no_oracle_no_inference")
 
