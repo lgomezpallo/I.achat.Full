@@ -185,8 +185,10 @@ def test_short_confirmation_scoped_to_immediate_pending_assistant(monkeypatch):
 def test_natural_approval_never_accepts_compound_instructions_or_stale_proposal(monkeypatch):
     _work(monkeypatch)
     proposal = str(uuid.uuid4())
-    monkeypatch.setattr(actions, "_ledger", lambda: (_ for _ in ()).throw(
-        AssertionError("Compound or stale approval must not access the ledger")
+    foreign = str(uuid.uuid4())
+    monkeypatch.setattr(actions, "_ledger", lambda: SimpleNamespace(
+        decision_from_message=lambda _: (foreign, True),
+        decide=lambda *args, **kwargs: pytest.fail("No foreign or stale approval"),
     ))
     pending = [{"role": "assistant", "content": "Pendiente", "go_proposal_id": proposal}]
     for message in (
