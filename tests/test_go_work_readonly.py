@@ -874,3 +874,31 @@ def test_http_ambiguous_comparison_followup_can_be_clarified_by_budget(monkeypat
         assert '"presupuesto": "1190"' in latest_official[0]
         assert '"presupuesto": "1093"' not in latest_official[0]
         assert len(resolved.json()["history"]) == 6
+
+
+def test_work_budget_in_long_natural_update_is_not_an_address(monkeypatch):
+    """An operator can mention a work, date and details in one chat turn.
+
+    The street matcher must not turn "de juntas en obra 1093" into a
+    contradictory address. Genuine mixed budget/street references remain
+    checked separately against PostgreSQL.
+    """
+    message = (
+        "Registrá control de juntas en obra 1093, fecha 2026-11-01, "
+        "revisar, 4 metros"
+    )
+    assert work._address_references(message) == []
+    assert work._address_references(
+        "Registrá horas de personal en la obra 1093"
+    ) == []
+    assert work._address_references(
+        "Registrá horas en obra 1093 en Alsina 354"
+    ) == ["Alsina 354"]
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    evidence = work.official_context(
+        message, connect=lambda *args, **kwargs: connection,
+    )
+    assert '"presupuesto": "1093"' in evidence
+    assert '"encontrada": true' in evidence
+    assert '"consulta": "direccion_presupuesto_incompatibles"' not in evidence
