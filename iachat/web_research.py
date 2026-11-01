@@ -247,7 +247,7 @@ _BROADCAST_SHORT_ANSWER = re.compile(
     r"\s*[.!]?\s*"
 )
 _BROADCAST_REVERSE_CHANNEL = re.compile(
-    r"\b(?!Se\s+(?:transmite|emite)\b)([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"\b(?!(?i:se\s+(?:transmite|emite)\b))([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
     r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})"
     r"\s+(?:(?:no\s+)?(?:lo|la)\s+)?(?:pasa|transmite|emite)\b",
 )
