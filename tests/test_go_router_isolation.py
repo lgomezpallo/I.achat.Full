@@ -6,6 +6,7 @@ from iachat.backend import RouterFirstBackend
 
 def test_go_profile_routes_with_labor_identity_on_oracle_loopback(monkeypatch):
     monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("GO_ROUTER_INFERENCE_ENABLED", "1")
     calls = []
 
     class Response:
@@ -47,6 +48,42 @@ def test_go_profile_rejects_non_loopback_router_before_network(monkeypatch, url)
         RouterFirstBackend(url=url, token="test-only").answer(
             [{"role": "user", "content": "No enviar a destino externo"}]
         )
+
+
+def test_go_profile_rejects_unverified_inference_before_network(monkeypatch):
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.delenv("GO_ROUTER_INFERENCE_ENABLED", raising=False)
+    monkeypatch.setattr(
+        "iachat.backend.httpx.post",
+        lambda *a, **kw: pytest.fail("No Router inference before explicit activation"),
+    )
+    with pytest.raises(RuntimeError, match="go_router_inference_not_authorized"):
+        RouterFirstBackend(url="http://127.0.0.1:8010", token="test-only").answer(
+            [{"role": "user", "content": "No facturar"}]
+        )
+
+
+def test_go_profile_ready_and_status_fail_closed_without_activation(monkeypatch):
+    from fastapi.testclient import TestClient
+    import iachat.app as app_module
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("IACHAT_BACKEND", "router")
+    monkeypatch.setenv("ROUTER_URL", "http://127.0.0.1:8010")
+    monkeypatch.setenv("ROUTER_TOKEN", "test-only")
+    monkeypatch.delenv("GO_ROUTER_INFERENCE_ENABLED", raising=False)
+    monkeypatch.setattr(app_module, "_signed_user", lambda _: "worker")
+    monkeypatch.setattr(
+        app_module.httpx, "get",
+        lambda *a, **kw: pytest.fail("Status must not probe Router when locked"),
+    )
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        readiness = client.get("/ready")
+        status = client.get("/api/router/status")
+    assert readiness.status_code == 503
+    assert readiness.json()["detail"] == "go_router_inference_not_authorized"
+    assert status.status_code == 200
+    assert status.json()["reason"] == "go_router_inference_not_authorized"
+    assert status.json()["routing_verified"] is False
 
 
 def test_personal_profile_preserves_router_application_identity(monkeypatch):
@@ -127,6 +164,7 @@ def test_work_router_health_uses_no_proxy_and_never_claims_inference(monkeypatch
     from fastapi.testclient import TestClient
     import iachat.app as app_module
     monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("GO_ROUTER_INFERENCE_ENABLED", "1")
     monkeypatch.setenv("IACHAT_BACKEND", "router")
     monkeypatch.setenv("ROUTER_URL", "http://127.0.0.1:8010")
     monkeypatch.setenv("ROUTER_TOKEN", "test-only")
