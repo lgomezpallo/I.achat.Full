@@ -73,7 +73,8 @@ def launcher() -> None:
 def cleanup_account(db_path: str, username: str) -> None:
     with sqlite3.connect(db_path, timeout=20) as connection:
         for table in ("structured_records", "structured_collections", "workspace_files", "automatic_memory_log", "memories",
-                      "conversation_index", "conversations", "image_attachments"):
+                      "conversation_index", "conversations", "image_attachments",
+                      "conversation_summary_versions"):
             if connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
             ).fetchone():
@@ -315,6 +316,21 @@ def child() -> None:
             print("AUTH_COOKIE_AND_FILE_ROUTES: OK", flush=True)
 
             failures = []
+            # Release acceptance: a real allowlisted FREE provider must recall
+            # three facts from the beginning, evicted middle and end of 480
+            # synthetic turns. This runs through authenticated HTTP, not a
+            # mocked backend. The same account is deleted by the E2E cleanup.
+            try:
+                from live_memory_probe import run_live_memory_probe
+                if not run_live_memory_probe(
+                    client, store, username, other_username, paced_model_post
+                ):
+                    failures.append("live_memory_long_conversation_recall_failed")
+            except Exception as exc:
+                # Never log the model answer, synthetic marker, secrets or
+                # conversation content. Failure must block release acceptance.
+                print("LIVE_MEMORY_480_ERROR:", type(exc).__name__, flush=True)
+                failures.append("live_memory_probe_error")
             # The actual user-observed regression: a conversational Google
             # account probe must never invoke web evidence or show RSS sources.
             # One authenticated HTTP call uses a real allowlisted free model.

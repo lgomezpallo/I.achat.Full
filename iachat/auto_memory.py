@@ -62,5 +62,4 @@ def learn(store, owner: str, text: str, project: str = "") -> bool:
                     return False  # never overwrite general memories from a project
                 return store.replace_automatic_memory(
                     memory["id"], memory["content"], value, owner, project)
-    store.save_automatic_memory(str(uuid4()), value, owner, project)
-    return True
+    return store.save_automatic_memory(str(uuid4()), value, owner, project)

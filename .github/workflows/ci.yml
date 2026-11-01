@@ -19,6 +19,8 @@ jobs:
         run: |
           set -o pipefail
           pytest -q 2>&1 | tee pytest-result.txt
+      - name: Medir recuperación de memoria en conversación larga simulada
+        run: python scripts/smoke_memory_recall.py
       - name: Validar sintaxis del E2E de producción
         run: python -m py_compile scripts/iachat_production_e2e.py
       - name: Conversación aislada sin credenciales reales

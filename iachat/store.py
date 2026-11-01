@@ -5,6 +5,7 @@ import time
 import hashlib
 import secrets
 from threading import Lock
+from .conversation_summary import build_summary
 
 class ConversationStore:
     def __init__(self, path: str = "iachat.db") -> None:
@@ -38,6 +39,21 @@ class ConversationStore:
             self._db.execute("ALTER TABLE automatic_memory_log ADD COLUMN previous_content TEXT")
         self._db.execute("CREATE TABLE IF NOT EXISTS image_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL, owner TEXT NOT NULL, message_index INTEGER NOT NULL, filename TEXT NOT NULL, data_url TEXT NOT NULL)")
         self._db.execute("CREATE INDEX IF NOT EXISTS image_attachments_lookup ON image_attachments(conversation_id, owner, message_index)")
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS conversation_summary_versions ("
+            "owner TEXT NOT NULL, conversation_id TEXT NOT NULL, version INTEGER NOT NULL, "
+            "summary_json TEXT NOT NULL, created_at INTEGER NOT NULL, "
+            "PRIMARY KEY(owner,conversation_id,version))"
+        )
+        # A version is an immutable evidence checkpoint. The current scan
+        # cursor advances independently, avoiding a new full ledger on every
+        # ordinary message and preserving historical versions for auditing.
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS conversation_summary_state ("
+            "owner TEXT NOT NULL, conversation_id TEXT NOT NULL, version INTEGER NOT NULL, "
+            "summary_json TEXT NOT NULL, "
+            "PRIMARY KEY(owner,conversation_id))"
+        )
         self._db.commit()
         self._lock = Lock()
 
@@ -54,6 +70,10 @@ class ConversationStore:
                 self._db.commit()
                 return True
             except sqlite3.IntegrityError:
+                # A failed INSERT leaves the SQLite transaction open. Without
+                # rollback, the next durable conversation write fails at
+                # BEGIN IMMEDIATE with "cannot start a transaction".
+                self._db.rollback()
                 return False
 
     def get_or_create_oidc_user(self, provider: str, subject: str) -> str:
@@ -125,11 +145,20 @@ class ConversationStore:
             self._db.commit()
 
     def exists(self, conversation_id: str, owner: str = "admin") -> bool:
-        row = self._db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()
+        # Do not expose a conversation created in an uncommitted transaction
+        # on this shared SQLite connection.
+        with self._lock:
+            row = self._db.execute(
+                "SELECT 1 FROM conversations WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            ).fetchone()
         return row is not None
 
     def get(self, conversation_id: str, owner: str = "admin") -> list[dict[str, object]] | None:
-        row = self._db.execute("SELECT history FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()
+        # Serialize reads with writers sharing this SQLite connection, so a
+        # concurrent request cannot observe an uncommitted transcript.
+        with self._lock:
+            row = self._db.execute("SELECT history FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone()
         if not row:
             return None
         data = json.loads(row[0])
@@ -172,26 +201,144 @@ class ConversationStore:
         return history
 
     def images_for_conversation(self, conversation_id: str, owner: str = "admin") -> list[dict]:
-        rows = self._db.execute("SELECT message_index, filename, data_url FROM image_attachments WHERE conversation_id=? AND owner=? ORDER BY message_index,id", (conversation_id, owner)).fetchall()
+        with self._lock:
+            rows = self._db.execute("SELECT message_index, filename, data_url FROM image_attachments WHERE conversation_id=? AND owner=? ORDER BY message_index,id", (conversation_id, owner)).fetchall()
         return [{"message_index": r[0], "filename": r[1], "data_url": r[2]} for r in rows]
 
     def save_images(self, conversation_id: str, owner: str, message_index: int, images: list[str], names: list[str]) -> None:
-        with self._lock:
-            self._db.executemany("INSERT INTO image_attachments(conversation_id,owner,message_index,filename,data_url) VALUES(?,?,?,?,?)", [(conversation_id,owner,message_index,name,image) for name,image in zip(names,images)])
-            self._db.commit()
+        """Attach images only to an existing, committed user turn.
+
+        The chat endpoint normally uses put(..., image_attachments=...) to
+        commit the turn and images together. Guard this legacy method too:
+        silently zipping mismatched lists or inserting orphan images would
+        make a later backup incomplete or attach files to the wrong owner.
+        """
+        if len(images) != len(names):
+            raise ValueError("image_attachment_count_mismatch")
+        if not images:
+            return
+        if type(message_index) is not int or message_index < 0:
+            raise ValueError("invalid_image_message_index")
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            row = self._db.execute(
+                "SELECT history FROM conversations WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            ).fetchone()
+            if row is None:
+                raise ValueError("image_conversation_not_found")
+            history = json.loads(row[0])
+            if message_index >= len(history) or history[message_index].get("role") != "user":
+                raise ValueError("image_attachments_require_user_turn")
+            # Legacy callers must not append or silently duplicate images on
+            # an already committed turn. The check and insert share BEGIN
+            # IMMEDIATE so a second process cannot race the first writer.
+            already_attached = self._db.execute(
+                "SELECT 1 FROM image_attachments WHERE conversation_id=? AND owner=? "
+                "AND message_index=? LIMIT 1",
+                (conversation_id, owner, message_index),
+            ).fetchone()
+            if already_attached:
+                raise ValueError("image_attachments_already_saved")
+            self._db.executemany(
+                "INSERT INTO image_attachments(conversation_id,owner,message_index,filename,data_url) "
+                "VALUES(?,?,?,?,?)",
+                [(conversation_id, owner, message_index, name, image)
+                 for name, image in zip(names, images)],
+            )
 
     def list_conversations(self, owner: str = "admin", project: str | None = None) -> list[dict]:
         with self._lock:
             rows = self._db.execute(
                 "SELECT c.id, COALESCE(i.title, 'Conversación'), COALESCE(i.updated_at, 0), COALESCE(i.project, '') "
-                "FROM conversations c LEFT JOIN conversation_index i ON i.id=c.id "
+                "FROM conversations c LEFT JOIN conversation_index i "
+                "ON i.id=c.id AND i.owner=c.owner "
                 "WHERE c.owner=? ORDER BY COALESCE(i.updated_at, 0) DESC, c.rowid DESC", (owner,)
             ).fetchall()
         return [{"id": r[0], "title": r[1], "updated_at": r[2], "project": r[3]} for r in rows if project is None or r[3] == project]
 
-    def put(self, conversation_id: str, history: list[dict[str, str]], owner: str = "admin", project: str = "") -> None:
-        payload = json.dumps(history, ensure_ascii=False)
-        with self._lock:
+    def put(self, conversation_id: str, history: list[dict[str, str]], owner: str = "admin", project: str = "", image_attachments: list[tuple[str, str]] | None = None) -> None:
+        """Append-only message text, plus atomic versioned extractive summary.
+
+        Reject stale concurrent writers rather than silently losing conversation
+        turns. Existing metadata is retained when older clients omit it.
+        """
+        with self._lock, self._db:
+            # Serialize competing writers across SQLite connections/processes.
+            self._db.execute("BEGIN IMMEDIATE")
+            existing = self._db.execute(
+                "SELECT history,owner FROM conversations WHERE id=?", (conversation_id,)
+            ).fetchone()
+            history = [dict(item) for item in history]
+            if existing:
+                if existing[1] != owner:
+                    raise ValueError("conversation_owner_mismatch")
+                old = json.loads(existing[0])
+                if len(history) < len(old) or any(
+                    item.get("role") != old_item.get("role")
+                    or item.get("content") != old_item.get("content")
+                    for item, old_item in zip(history, old)
+                ):
+                    raise ValueError("conversation_history_conflict")
+                # Existing turns are immutable, including their metadata.
+                # The public getter intentionally filters some metadata, so
+                # appending through it must preserve the original stored JSON.
+                # setdefault() let a caller silently replace an existing
+                # attachment/model/source field while keeping role/text intact.
+                for index, old_item in enumerate(old):
+                    history[index] = old_item
+            # Existing installations may not yet have a state row; fall back
+            # to the latest legacy checkpoint without changing its contents.
+            row = self._db.execute(
+                "SELECT version,summary_json FROM conversation_summary_state "
+                "WHERE owner=? AND conversation_id=?",
+                (owner, conversation_id),
+            ).fetchone()
+            if row is None:
+                row = self._db.execute(
+                    "SELECT version,summary_json FROM conversation_summary_versions "
+                    "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
+                    (owner, conversation_id),
+                ).fetchone()
+            # A malformed current cursor must never block appending durable
+            # messages. Reconstruct from the authoritative transcript; the
+            # immutable historical checkpoint remains available for audit.
+            try:
+                previous = json.loads(row[1]) if row else None
+                if previous is not None and (
+                    not isinstance(previous, dict)
+                    or (previous.get("format_version") == 2 and (
+                        type(previous.get("processed_count")) is not int
+                        or previous["processed_count"] < 0
+                        or not isinstance(previous.get("prefix_hash"), str)
+                        or not isinstance(previous.get("items"), list)
+                        or any(
+                            not isinstance(item, dict)
+                            or type(item.get("source_index")) is not int
+                            or not isinstance(item.get("kind"), str)
+                            or not isinstance(item.get("quote"), str)
+                            for item in previous["items"]
+                        )
+                    ))
+                ):
+                    previous = None
+            except (TypeError, ValueError):
+                previous = None
+            # A syntactically valid cursor can still contain fabricated or
+            # omitted quotes while retaining a correct transcript prefix hash.
+            # Verify its entire evidence ledger against the immutable old
+            # transcript before using it for incremental append. Otherwise a
+            # forged quote survives every subsequent put() and can enter the
+            # next model context even after get_summary() flagged corruption.
+            if previous is not None:
+                canonical_previous = build_summary(old) if existing else None
+                if canonical_previous is None or any(
+                    previous.get(key) != canonical_previous[key]
+                    for key in ("format_version", "processed_count", "prefix_hash", "items")
+                ):
+                    previous = None
+            summary = build_summary(history, previous)
+            payload = json.dumps(history, ensure_ascii=False)
             self._db.execute(
                 "INSERT INTO conversations(id, history, owner) VALUES(?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET history=excluded.history WHERE conversations.owner=excluded.owner",
@@ -203,13 +350,93 @@ class ConversationStore:
                 "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at WHERE conversation_index.owner=excluded.owner",
                 (conversation_id, title, int(time.time()), owner, project),
             )
-            self._db.commit()
+            # A summary version represents a change in remembered evidence,
+            # not every appended assistant reply or ordinary chat message.
+            # Advance only the scan cursor in the current snapshot when no
+            # evidence changed. This prevents an unbounded copy of the same
+            # 120-item ledger on every turn while retaining incremental scans.
+            evidence_changed = (
+                row is None
+                or previous is None
+                or summary.get("format_version") != previous.get("format_version")
+                or summary["items"] != previous["items"]
+            )
+            if evidence_changed:
+                self._db.execute(
+                    "INSERT INTO conversation_summary_versions(owner,conversation_id,version,summary_json,created_at) "
+                    "VALUES(?,?,?,?,?)",
+                    (owner, conversation_id, (row[0] + 1) if row else 1,
+                     json.dumps(summary, ensure_ascii=False), int(time.time())),
+                )
+            # Update only the mutable cursor. Historical evidence versions
+            # remain byte-for-byte unchanged, including prefix hashes.
+            current_version = (row[0] + 1) if evidence_changed and row else (1 if row is None else row[0])
+            self._db.execute(
+                "INSERT INTO conversation_summary_state(owner,conversation_id,version,summary_json) "
+                "VALUES(?,?,?,?) ON CONFLICT(owner,conversation_id) DO UPDATE SET "
+                "version=excluded.version,summary_json=excluded.summary_json",
+                (owner, conversation_id, current_version, json.dumps(summary, ensure_ascii=False)),
+            )
+            # Keep image bytes and the corresponding user turn in the SAME
+            # transaction. A provider error must not orphan an attachment.
+            if image_attachments:
+                if existing and len(history) <= len(old):
+                    raise ValueError("image_attachments_require_new_user_turn")
+                if not history or history[-1].get("role") != "user":
+                    raise ValueError("image_attachments_require_user_turn")
+                self._db.executemany(
+                    "INSERT INTO image_attachments(conversation_id,owner,message_index,filename,data_url) "
+                    "VALUES(?,?,?,?,?)",
+                    [(conversation_id, owner, len(history) - 1, name, data_url)
+                     for name, data_url in image_attachments],
+                )
+
+    def get_summary(self, conversation_id: str, owner: str = "admin") -> dict | None:
+        """Return only evidence consistent with the authoritative transcript.
+
+        A stale, malformed or tampered cursor must not inject invented memories
+        into the next model prompt. Rebuild in memory without rewriting audit
+        checkpoints; the next append will persist a corrected state/version.
+        """
+        with self._lock:
+            row = self._db.execute(
+                "SELECT version,summary_json FROM conversation_summary_state "
+                "WHERE owner=? AND conversation_id=?",
+                (owner, conversation_id),
+            ).fetchone()
+            if row is None:
+                row = self._db.execute(
+                    "SELECT version,summary_json FROM conversation_summary_versions "
+                    "WHERE owner=? AND conversation_id=? ORDER BY version DESC LIMIT 1",
+                    (owner, conversation_id),
+                ).fetchone()
+            transcript = self._db.execute(
+                "SELECT history FROM conversations WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            ).fetchone()
+        if not row or not transcript:
+            return None
+        # Comparing the complete extractive ledger (not just its prefix hash)
+        # detects both changed transcripts and fabricated/omitted summary items.
+        history = json.loads(transcript[0])
+        canonical = build_summary(history)
+        try:
+            stored = json.loads(row[1])
+        except (TypeError, ValueError):
+            stored = None
+        if not isinstance(stored, dict) or any(
+            stored.get(key) != canonical[key]
+            for key in ("format_version", "processed_count", "prefix_hash", "items")
+        ):
+            return {"version": row[0], **canonical, "integrity_rebuilt": True}
+        return {"version": row[0], **stored}
 
     def conversation_project(self, conversation_id: str, owner: str = "admin") -> str | None:
-        row = self._db.execute(
-            "SELECT i.project FROM conversation_index i JOIN conversations c ON c.id=i.id "
-            "WHERE i.id=? AND c.owner=? AND i.owner=?", (conversation_id, owner, owner)
-        ).fetchone()
+        with self._lock:
+            row = self._db.execute(
+                "SELECT i.project FROM conversation_index i JOIN conversations c ON c.id=i.id "
+                "WHERE i.id=? AND c.owner=? AND i.owner=?", (conversation_id, owner, owner)
+            ).fetchone()
         return row[0] if row else None
 
     def move_conversation(self, conversation_id: str, project: str, owner: str = "admin") -> bool:
@@ -222,12 +449,34 @@ class ConversationStore:
             return cursor.rowcount > 0
 
     def delete(self, conversation_id: str, owner: str = "admin") -> bool:
-        with self._lock:
-            cursor = self._db.execute("DELETE FROM conversations WHERE id=? AND owner=?", (conversation_id, owner))
-            self._db.execute("DELETE FROM conversation_index WHERE id=? AND owner=?", (conversation_id, owner))
-            self._db.execute("DELETE FROM image_attachments WHERE conversation_id=? AND owner=?", (conversation_id, owner))
-            self._db.commit()
-        return cursor.rowcount > 0
+        """Delete all conversation records atomically, never a partial history.
+
+        A failing attachment/summary cleanup must roll back the transcript
+        deletion as well, including when another SQLite connection is active.
+        """
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            cursor = self._db.execute(
+                "DELETE FROM conversations WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            self._db.execute(
+                "DELETE FROM conversation_index WHERE id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            self._db.execute(
+                "DELETE FROM image_attachments WHERE conversation_id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            self._db.execute(
+                "DELETE FROM conversation_summary_versions WHERE conversation_id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            self._db.execute(
+                "DELETE FROM conversation_summary_state WHERE conversation_id=? AND owner=?",
+                (conversation_id, owner),
+            )
+            return cursor.rowcount > 0
 
     def search_conversations(self, query: str, owner: str = "admin", limit: int = 25, project: str | None = None) -> list[dict]:
         """Owner-scoped literal text search; never sends conversation content to a model."""
@@ -264,32 +513,80 @@ class ConversationStore:
             )
             self._db.commit()
 
-    def save_automatic_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> None:
-        """Atomically save a new automatically learned memory and its audit entry."""
-        with self._lock:
+    def save_explicit_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> bool:
+        """Atomically store an explicit user-requested memory, without auto-learning audit.
+
+        A preflight list_memories() check can race another request or process.
+        BEGIN IMMEDIATE makes the deduplication and insert one SQLite operation.
+        General memories are visible within projects; another owner's memories
+        never participate in the comparison.
+        """
+        def normalized(value: str) -> str:
+            return " ".join(value.split()).strip().rstrip(" .!?¿¡").casefold()
+
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            rows = self._db.execute(
+                "SELECT content FROM memories WHERE owner=? AND (project=? OR project='')",
+                (owner, project),
+            ).fetchall()
+            if any(normalized(row[0]) == normalized(content) for row in rows):
+                return False
             self._db.execute(
                 "INSERT INTO memories(id,content,updated_at,owner,project) VALUES(?,?,?,?,?)",
-                (memory_id, content, int(time.time()), owner, project))
+                (memory_id, content, int(time.time()), owner, project),
+            )
+            return True
+
+    def save_automatic_memory(self, memory_id: str, content: str, owner: str = "admin", project: str = "") -> bool:
+        """Commit a unique automatic preference and its audit entry together.
+
+        The preliminary lookup in auto_memory.learn() is advisory only: two
+        simultaneous chat requests can both see no memory. Check again under
+        SQLite's cross-process write lock to prevent duplicate memories and
+        duplicate audit events. Global preferences apply to every project.
+        """
+        import re
+
+        def normalized(value: str) -> str:
+            return re.sub(r"\s+", " ", value).strip().rstrip(" .!?¿¡").casefold()
+
+        with self._lock, self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            rows = self._db.execute(
+                "SELECT content FROM memories WHERE owner=? AND (project=? OR project='')",
+                (owner, project),
+            ).fetchall()
+            if any(normalized(row[0]) == normalized(content) for row in rows):
+                return False
+            now = int(time.time())
+            self._db.execute(
+                "INSERT INTO memories(id,content,updated_at,owner,project) VALUES(?,?,?,?,?)",
+                (memory_id, content, now, owner, project))
             self._db.execute(
                 "INSERT INTO automatic_memory_log(id,memory_id,owner,project,content,created_at) "
                 "VALUES(?,?,?,?,?,?)",
-                (memory_id, memory_id, owner, project, content, int(time.time())))
-            self._db.commit()
+                (memory_id, memory_id, owner, project, content, now))
+            return True
 
     def replace_automatic_memory(self, memory_id: str, old: str, new: str, owner: str, project: str) -> bool:
         """Compare-and-swap an automatic memory, preserving a reversible event."""
-        with self._lock:
+        with self._lock, self._db:
+            # Serialize compare-and-swap with writers in other processes.
+            self._db.execute("BEGIN IMMEDIATE")
             row = self._db.execute(
                 "SELECT content,project FROM memories WHERE id=? AND owner=?",
                 (memory_id, owner)).fetchone()
             if not row or row[0] != old or row[1] != project:
                 return False
-            # Never overwrite user-edited entries: require a matching original auto-save.
-            origin = self._db.execute(
-                "SELECT 1 FROM automatic_memory_log WHERE memory_id=? AND owner=? "
-                "AND previous_content IS NULL AND content=? LIMIT 1",
-                (memory_id, owner, old)).fetchone()
-            if not origin:
+            # A preference may be corrected more than once. Only replace the
+            # latest *active* audited value, never an intervening manual edit.
+            latest = self._db.execute(
+                "SELECT content,project FROM automatic_memory_log "
+                "WHERE memory_id=? AND owner=? AND undone=0 "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                (memory_id, owner)).fetchone()
+            if latest != (old, project):
                 return False
             self._db.execute(
                 "UPDATE memories SET content=?,updated_at=? WHERE id=? AND owner=? AND project=?",
@@ -298,7 +595,6 @@ class ConversationStore:
                 "INSERT INTO automatic_memory_log(id,memory_id,owner,project,content,created_at,previous_content) "
                 "VALUES(?,?,?,?,?,?,?)",
                 (secrets.token_hex(16), memory_id, owner, project, new, int(time.time()), old))
-            self._db.commit()
             return True
 
     def list_automatic_memory_log(self, owner: str = "admin", limit: int = 50) -> list[dict]:
@@ -312,7 +608,10 @@ class ConversationStore:
 
     def undo_automatic_memory(self, event_id: str, owner: str = "admin") -> bool:
         """Undo only if the remembered text is unchanged; never delete a user's edit."""
-        with self._lock:
+        with self._lock, self._db:
+            # Do not delete/revert a memory unless its audit event can also
+            # be marked undone in the same committed transaction.
+            self._db.execute("BEGIN IMMEDIATE")
             row = self._db.execute(
                 "SELECT memory_id,content FROM automatic_memory_log "
                 "WHERE id=? AND owner=? AND undone=0", (event_id, owner)).fetchone()
@@ -325,6 +624,16 @@ class ConversationStore:
                 (event_id, owner)).fetchone()
             if current is None or event is None or current != (event[0], event[2]):
                 return False
+            # Undo only the newest active event. An older event can contain
+            # identical text after A -> B -> A corrections; undoing it would
+            # otherwise erase a newer preference and corrupt the audit chain.
+            latest = self._db.execute(
+                "SELECT id FROM automatic_memory_log "
+                "WHERE memory_id=? AND owner=? AND undone=0 "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                (row[0], owner)).fetchone()
+            if latest is None or latest[0] != event_id:
+                return False
             if event[1] is None:
                 self._db.execute("DELETE FROM memories WHERE id=? AND owner=?", (row[0], owner))
             else:
@@ -332,7 +641,6 @@ class ConversationStore:
                     "UPDATE memories SET content=?,updated_at=? WHERE id=? AND owner=?",
                     (event[1], int(time.time()), row[0], owner))
             self._db.execute("UPDATE automatic_memory_log SET undone=1 WHERE id=? AND owner=?", (event_id, owner))
-            self._db.commit()
             return True
 
     def delete_memory(self, memory_id: str, owner: str = "admin") -> bool:
