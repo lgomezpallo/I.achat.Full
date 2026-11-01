@@ -118,6 +118,8 @@ def _official_budget_guard(proposal: dict, evidence: str | None) -> str | None:
     address parsing, and it does not let the model choose among candidate works.
     """
     if evidence is None:
+        if proposal.get("intent") == "correct":
+            return "No pude verificar el registro oficial a corregir."
         # No verified work identity was retrieved for this turn. A model may
         # infer a budget from old chat context or simply hallucinate one; it
         # cannot authorize even a *pending* work-scoped proposal on that basis.
