@@ -498,3 +498,69 @@ def test_web_answer_with_no_sources_does_not_invent_citations():
     assert "https://" not in ground_web_answer_urls(
         "Busqué pero no hay datos: https://inventado.example.org/", []
     )
+
+
+def test_broadcast_guard_blocks_reversal_without_new_page_evidence():
+    history = [
+        {"role": "user", "content": "¿Lo pasan por Telefe?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Sí, lo pasan por Telefe."
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history, [],
+    )
+    assert "contradictoria" in guarded
+    assert "no voy a afirmar ni negar" in guarded
+    assert guarded != answer
+    # RSS snippets alone do not settle a previously disputed channel.
+    assert research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history,
+        [{"url": "https://example.com/rss", "evidence_type": "rss_snippet"}],
+    ) == guarded
+    # A fresh page permits the normal evidence-aware answer path; it is not
+    # considered proof by this deterministic guard.
+    assert research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history,
+        [{"url": "https://example.com/page", "evidence_type": "page_read"}],
+    ) == answer
+
+
+def test_broadcast_guard_does_not_change_unrelated_or_uncertain_answers():
+    history = [{"role": "assistant", "content": "No, ESPN no lo pasa."}]
+    assert research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por ESPN?", "No pude confirmar si lo pasan por ESPN.", history, [],
+    ) == "No pude confirmar si lo pasan por ESPN."
+    assert research.guard_unverified_broadcast_claim(
+        "Explicá qué es una variable", "Sí, lo pasan por ESPN.", history, [],
+    ) == "Sí, lo pasan por ESPN."
+
+
+def test_chat_broadcast_guard_persists_safe_answer(monkeypatch):
+    from types import SimpleNamespace
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    monkeypatch.setattr(
+        "iachat.web_planner.plan_web_lookup_semantic",
+        lambda *args: SimpleNamespace(action="answer"),
+    )
+
+    class ContradictoryBackend:
+        def answer(self, messages):
+            return "Sí, lo pasan por Telefe."
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: ContradictoryBackend())
+    app_module.store.put("channel", [
+        {"role": "user", "content": "¿Lo pasan por Telefe?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No, Telefe no lo pasa."},
+    ], "admin", "")
+    response = TestClient(app_module.app, base_url="https://testserver").post(
+        "/api/chat", json={"conversation_id": "channel", "text": "¿Lo pasan por Telefe?"}
+    )
+    assert response.status_code == 200
+    assert "no voy a afirmar ni negar" in response.json()["answer"]
+    saved = app_module.store.get("channel", "admin")
+    assert saved[-1]["content"] == response.json()["answer"]
