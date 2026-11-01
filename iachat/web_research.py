@@ -259,7 +259,7 @@ def _broadcast_channels(question: str, answer: str) -> list[str]:
     channels: list[str] = []
     seen: set[str] = set()
     for raw in candidates:
-        name = re.sub(r"\s+(?:hoy|ma[nñ]ana)$", "", raw, flags=re.I).strip()
+        name = re.sub(r"\s+(?:hoy|ma[nñ]ana)$", "", raw, flags=re.I).strip().rstrip(".,;:!?")
         if not name or len(name) > 60 or name.casefold() in seen:
             continue
         seen.add(name.casefold())
