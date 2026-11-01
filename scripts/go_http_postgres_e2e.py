@@ -64,6 +64,9 @@ def main() -> None:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1190","values":{"horas":99}}'
             elif "Registrá 7 horas en Rivadavia y Rodríguez Peña" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1190","values":{"horas":7}}'
+            elif "Ayer hicieron tres horas" in last:
+                # A model must not infer an official budget from a vague turn.
+                model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
             else:
                 model_text = "Respuesta de Router simulado; no hay escritura oficial."
             return httpx.Response(
@@ -246,6 +249,17 @@ def main() -> None:
                 assert address_mismatch.status_code == 200, address_mismatch.text
                 assert "no coincide con la evidencia oficial" in address_mismatch.json()["answer"]
                 assert "go_proposal_id" not in address_mismatch.json()["history"][-1]
+                assert events_count() == 3
+
+                # PostgreSQL 16 + authenticated HTTP chat: no work was
+                # identified in this new conversation. A fabricated budget
+                # from the simulated model must not even stage a proposal.
+                invented = client.post("/api/chat", json={
+                    "text": "Ayer hicieron tres horas",
+                })
+                assert invented.status_code == 200, invented.text
+                assert "No pude verificar la identidad oficial" in invented.json()["answer"]
+                assert "go_proposal_id" not in invented.json()["history"][-1]
                 assert events_count() == 3
 
                 categories = client.post("/api/chat", json={
