@@ -481,3 +481,48 @@ def test_followup_chain_stops_at_an_intervening_new_subject():
     plan = plan_web_lookup("¿Y el horario?", history)
     assert plan.reason == "unrelated_followup"
     assert "River-Boca" not in plan.query
+
+
+def test_broadcast_correction_keeps_event_anchor_for_later_followup():
+    """A channel correction must not silently turn River-Boca into Mundial."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class NoRewrite:
+        def answer(self, messages):
+            raise AssertionError("An anchored follow-up must bypass rewriting")
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("Sin fecha confirmada."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("Lo pasan por Telefe."),
+        user("No, Telefe no lo pasa."),
+        assistant("Tenés razón, no está confirmado."),
+    ]
+    plan = plan_web_lookup_semantic("¿Y el horario?", history, NoRewrite())
+    assert plan.action == "search"
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Mundial" not in plan.query
+    assert "Telefe" not in plan.query
+
+    # The same conservative continuity applies to an explicit correction
+    # without a channel name. No assistant message becomes a search anchor.
+    history[-2] = user("Te equivocaste con el canal.")
+    plan = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+
+
+def test_explicit_event_correction_breaks_stale_broadcast_anchor():
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("No confirmado."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("No confirmado."),
+        user("No, me refería al Mundial."),
+        assistant("Entendido."),
+    ]
+    plan = plan_web_lookup("¿Y el horario?", history)
+    assert plan.reason == "unrelated_followup"
+    assert "River-Boca" not in plan.query
