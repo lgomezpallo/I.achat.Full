@@ -669,3 +669,48 @@ def test_http_address_only_work_query_uses_official_evidence_without_public_web(
         and '"direccion": "Alsina 354"' in item["content"]
         for item in backend.messages[0]
     )
+
+
+def test_address_number_prefix_cannot_select_a_different_work(monkeypatch):
+    """Alsina 354 must not resolve to Alsina 3540 via SQL ILIKE."""
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+
+    class PrefixOnly(FakeReadOnlyConnection):
+        def execute(self, sql, params=None):
+            if sql.startswith("SELECT presupuesto,direccion,estado FROM obras WHERE direccion ILIKE"):
+                return Result(many=[("1999", "Alsina 3540", "pendiente")])
+            return super().execute(sql, params)
+
+    connection = PrefixOnly()
+    result = work.official_context(
+        "¿Qué pasó en Alsina 354?",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"consulta": "direccion_sin_coincidencias"' in result
+    assert '"presupuesto": "1999"' not in result
+    assert not any(sql.startswith("SELECT id,direccion,estado FROM obras")
+                   for sql, _ in connection.statements)
+
+
+def test_full_address_candidate_page_never_claims_unique_work(monkeypatch):
+    """Nine substring matches may hide another exact work beyond LIMIT 9."""
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+
+    class FullPage(FakeReadOnlyConnection):
+        def execute(self, sql, params=None):
+            if sql.startswith("SELECT presupuesto,direccion,estado FROM obras WHERE direccion ILIKE"):
+                return Result(many=[
+                    (str(2000 + i), f"Alsina 354{i}", "pendiente") for i in range(8)
+                ] + [("1190", "Alsina 354", "en_ejecucion")])
+            return super().execute(sql, params)
+
+    connection = FullPage()
+    result = work.official_context(
+        "¿Qué pasó en Alsina 354?",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"consulta": "direccion_busqueda_limitada"' in result
+    assert '"requiere_aclaracion": true' in result
+    assert '"muestra_limitada": true' in result
+    assert not any(sql.startswith("SELECT id,direccion,estado FROM obras")
+                   for sql, _ in connection.statements)
