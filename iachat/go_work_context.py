@@ -86,7 +86,10 @@ _BARE_ADDRESS = re.compile(
 )
 # "en obra 1093" is a budget, not a street address. Do not treat it as
 # a second, conflicting address when cross-checking mixed references.
-_PSEUDO_ADDRESS = re.compile(r"(?:obra|presupuesto|pto\.?|p)\s+\d{3,6}", re.I)
+_PSEUDO_ADDRESS = re.compile(
+    r"(?:(?:la|el|del)\s+)?(?:obra|presupuesto|pto\.?|p)\s*"
+    r"(?:n(?:ro|úmero|º|°)?\.?\s*)?\d{3,6}", re.I
+)
 
 
 def _address_references(message: str) -> list[str]:
