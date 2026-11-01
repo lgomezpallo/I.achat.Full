@@ -335,6 +335,14 @@ def ready():
             raise HTTPException(503, "go_router_requires_local_endpoint")
         if _is_go_profile() and os.getenv("GO_ROUTER_INFERENCE_ENABLED") != "1":
             raise HTTPException(503, "go_router_inference_not_authorized")
+        if _is_go_profile():
+            # A configured token and opt-in do not prove Router is alive.
+            # This is transport readiness only, never proof of a free model.
+            status = router_status()
+            if not status.get("reachable"):
+                raise HTTPException(503, status.get("reason", "router_unavailable"))
+            return {"status": "ready", "component": "iachat", "mode": "router",
+                    "routing_verified": False}
         return {"status": "ready", "component": "iachat", "mode": "router"}
     if not ProviderBackend.configured():
         raise HTTPException(503, "providers_not_configured")
