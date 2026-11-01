@@ -51,7 +51,11 @@ def main() -> None:
             requests.append(json)
             last = json["task"]
             if "Registrá 16 horas ejecutadas en obra 1093" in last:
-                model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":16}}'
+                # A real free model may wrap the action in one JSON fence.
+                # The same HTTP approval flow must still stage, never commit.
+                model_text = ('```json\\n'
+                              '{"go_intent":"v1","intent":"record","record_type":"medicion",'
+                              '"budget":"1093","values":{"horas":16}}\\n```')
             elif "Registrá 15 horas ejecutadas en obra 1093" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":15}}'
             elif "Registrá 99 horas en obra 1093" in last:
