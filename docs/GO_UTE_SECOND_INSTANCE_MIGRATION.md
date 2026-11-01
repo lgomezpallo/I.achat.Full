@@ -98,3 +98,18 @@ El adaptador está **desactivado por defecto** y exige simultáneamente `IACHAT_
 La autorización de cada propuesta está vinculada al **último mensaje de asistente de la conversación autenticada**. `ConversationStore` conserva el identificador UUID canónico emitido por el servidor al recargar la conversación; la confirmación no acepta IDs de otra conversación, ni IDs anteriores, ni el fallback global de turnos de G.O. Esto limita la confirmación a la sesión conversacional correcta, sin cambiar el esquema PostgreSQL. La auditoría existente conserva el origen, propuesta, versión y corrección, pero todavía **no** registra explícitamente el usuario IAchat en cada evento oficial; resolver antes de autorizar multiusuario productivo.
 
 La prueba integrada se ejecuta en PostgreSQL 16 efímero con migraciones G.O. reales, login Google simulado, chat HTTP y Router **simulado**. Verifica propuesta sin evento, rechazo de UUID entre conversaciones, confirmación transaccional, lectura posterior, rechazo de obra contradictoria y no duplicación. **No** demuestra inferencia externa, acceso Oracle, despliegue, separación productiva ni autorización de modelos gratuitos. No hacer cutover ni activar `GO_WORK_WRITE_ENABLED` en Oracle antes de comprobar todos esos puntos.
+
+
+## Bloqueo adicional de inferencia externa — 1/11 (candidato, no desplegado)
+
+En la segunda instancia, `IACHAT_BACKEND=router`, una URL loopback y un token
+**ya no bastan** para enviar solicitudes: `GO_ROUTER_INFERENCE_ENABLED=1`
+debe habilitarse explícitamente **sólo después** de auditar el catálogo,
+la política de selección y las condiciones de la cuenta del Router instalado.
+Sin ese valor exacto, `/ready` devuelve 503, `/api/router/status`
+indica `go_router_inference_not_authorized` y el transporte no llama a
+`/route`. Es un cierre por defecto; la variable **no certifica** por sí sola
+gratuidad ni elimina el control económico independiente de Router.
+Las pruebas offline pueden usar la variable con Router simulado, sin inferencia
+externa ni proveedores facturables. No activar esta variable en Oracle sin
+evidencia real de modelos gratuitos autorizados y ausencia de riesgo de cobro.
