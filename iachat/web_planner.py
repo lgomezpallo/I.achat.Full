@@ -42,6 +42,16 @@ REFERENTIAL_FOLLOWUP = re.compile(
 
 
 
+
+# "¿Y a qué hora?" is itself a current-information phrase, but without an
+# event name it cannot be the anchor for the *next* follow-up.
+BARE_TIME_FOLLOWUP = re.compile(
+    r"^\s*[¿¡]?\s*(?:y\s+)?a\s+qu[eé]\s+hora"
+    r"(?:\s+(?:lo|la)\s+(?:pasan|transmiten|emiten))?\s*[?!.]*$",
+    re.IGNORECASE,
+)
+
+
 # A user's correction about a broadcast outlet is still part of the same
 # event discussion. It is not a new topic, but it must never be used as the
 # search anchor. Keep this intentionally narrow: "No, era el Mundial" is a
@@ -223,6 +233,8 @@ def plan_web_lookup(
     # different match. Any intervening new topic breaks the chain.
     context = ""
     for prior in reversed(users):
+        if BARE_TIME_FOLLOWUP.match(prior):
+            continue
         if BROADCAST_CORRECTION.match(prior):
             # A correction does not erase the event anchor, even when it
             # contains "hoy". It is never a fresh-information search anchor.
