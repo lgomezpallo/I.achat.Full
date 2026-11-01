@@ -467,6 +467,31 @@ def test_public_web_policy_requires_explicit_operator_request_for_work():
 
 
 
+def test_multiword_labor_addresses_never_enter_automatic_public_web():
+    # These are real-world address shapes used in the work chat. No budget is
+    # needed to protect them from a public search planner.
+    for message in (
+        "¿Qué pasó en Av. Rivadavia y Rodríguez Peña?",
+        "¿Hay novedades en Combate de los Pozos 1590?",
+        "¿Qué hay en Avenida Santa Fe 2380?",
+        "¿Qué pasó en Montevideo y Corrientes?",
+        "Registrá algo en Av. Rivadavia 1234",
+    ):
+        assert not work.public_web_allowed(
+            message, work_profile=True, official_evidence=False,
+        ), message
+    # A public/general question still uses IAchat's shared search behavior.
+    assert work.public_web_allowed(
+        "¿Cuándo es el próximo eclipse?",
+        work_profile=True, official_evidence=False,
+    )
+    # Personal IAchat must never inherit this labor-only restriction.
+    assert work.public_web_allowed(
+        "¿Qué pasó en Av. Rivadavia y Rodríguez Peña?",
+        work_profile=False, official_evidence=False,
+    )
+
+
 def test_old_labor_context_never_reopens_automatic_public_search():
     history = [{"role": "user", "content": "¿Qué pasó en obra 1093?"}]
     history.extend([
