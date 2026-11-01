@@ -352,7 +352,7 @@ def main() -> None:
                 )
                 assert events_count() == 3
 
-                # Two explicit works followed by "esa obra" must not choose
+                # Two explicit works followed by a locative "ahí" must not choose
                 # one silently. The clarification and the next bare budget
                 # are exercised against actual PostgreSQL 16 in this CI job.
                 comparison = client.post("/api/chat", json={
@@ -363,7 +363,7 @@ def main() -> None:
                 before_ambiguous = len(requests)
                 ambiguous = client.post("/api/chat", json={
                     "conversation_id": compared_id,
-                    "text": "¿Y qué pasó en esa obra?",
+                    "text": "¿Y ahí?",
                 })
                 assert ambiguous.status_code == 200, ambiguous.text
                 assert "¿A qué obra te referís?" in ambiguous.json()["answer"]
