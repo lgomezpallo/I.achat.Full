@@ -201,3 +201,93 @@ def ground_web_answer_urls(answer: str, sources: list[dict[str, str]]) -> str:
         return raw[len(candidate):]
 
     return re.sub(r"https?://[^\s)<>]+", replace, answer)
+
+
+# Narrow, deterministic safety net for conflicting broadcast-channel claims.
+# This does not infer the true channel and does not call another provider.
+_BROADCAST_CHANNEL = re.compile(
+    r"\b(?:lo|la)\s+(?:pasan|transmiten|emiten)\s+por\s+"
+    r"([A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})",
+    re.I,
+)
+_UNCERTAIN_CHANNEL = re.compile(
+    r"\b(?:no\s+(?:pude|puedo)\s+confirmar|sin\s+confirmar|"
+    r"no\s+est[aá]\s+confirmado|no\s+s[eé]|"
+    r"no\s+(?:tengo|hay)\s+confirmaci[oó]n)\b", re.I,
+)
+_USER_CORRECTION = re.compile(
+    r"^\s*(?:(?:no[,;:.!]\s*){1,3}|corrijo\b|rectifico\b|"
+    r"te\s+equivocaste\b|eso\s+est[aá]\s+mal\b)", re.I,
+)
+
+
+def _channel_stance(text: str, channel: str) -> str | None:
+    """Classify only explicit, nearby channel assertions; otherwise abstain."""
+    name = r"\b" + re.escape(channel) + r"\b"
+    for sentence in re.split(r"[\n.!?]+", text):
+        if not re.search(name, sentence, re.I):
+            continue
+        if _UNCERTAIN_CHANNEL.search(sentence):
+            return "unknown"
+        negative = (
+            re.search(r"\bno\s+(?:lo|la)\s+(?:pasan|transmiten|emiten)\s+por\s+" + name, sentence, re.I)
+            or re.search(name + r"\s+no\s+(?:(?:lo|la)\s+)?(?:pasa|transmite|emite)\b", sentence, re.I)
+            or re.search(r"\bno\s+es\s+por\s+" + name, sentence, re.I)
+        )
+        if negative:
+            return "no"
+        positive = (
+            re.search(r"\b(?:lo|la)\s+(?:pasan|transmiten|emiten)\s+por\s+" + name, sentence, re.I)
+            or re.search(name + r"\s+(?:(?:lo|la)\s+)?(?:pasa|transmite|emite)\b", sentence, re.I)
+        )
+        if positive:
+            return "yes"
+    return None
+
+
+def guard_unverified_broadcast_claim(
+    question: str, answer: str, history: list[dict], sources: list[dict],
+) -> str:
+    """Abstain when a named channel is asserted against unresolved prior turns.
+
+    Only the current user's named-channel question selects the channel. Prior
+    assistant claims and user corrections are conversational data, not facts.
+    A newly read page avoids automatic suppression, but is NOT proof that its
+    content corroborates the answer; the normal web-evidence guidance remains.
+    """
+    match = _BROADCAST_CHANNEL.search(question)
+    if not match:
+        return answer
+    channel = re.sub(r"\s+(?:hoy|ma[nñ]ana|esta\s+noche)$", "", match.group(1), flags=re.I)
+    stance = _channel_stance(answer, channel)
+    if stance not in ("yes", "no"):
+        return answer
+    prior = [
+        _channel_stance(str(turn.get("content", "")), channel)
+        for turn in history[-20:] if turn.get("role") == "assistant"
+    ]
+    prior = [value for value in prior if value]
+    asserted = {value for value in prior if value in ("yes", "no")}
+    contradiction = (
+        len(asserted) > 1
+        or bool(prior and prior[-1] != stance)
+    )
+    for turn in history[-20:]:
+        if turn.get("role") != "user":
+            continue
+        text = str(turn.get("content", ""))
+        if _USER_CORRECTION.search(text):
+            corrected = _channel_stance(text, channel)
+            if corrected in ("yes", "no") and corrected != stance:
+                contradiction = True
+    if not contradiction:
+        return answer
+    if any(item.get("evidence_type") == "page_read" for item in sources):
+        return answer
+    return (
+        f"En esta conversación hubo información contradictoria o sin confirmar "
+        f"sobre la transmisión por {channel}. No tengo una fuente nueva "
+        "suficientemente verificable para resolverlo, así que no voy a "
+        "afirmar ni negar ese canal."
+    )
