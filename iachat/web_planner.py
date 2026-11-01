@@ -190,20 +190,22 @@ def plan_web_lookup(
     # messages never count as a source of user search intent.
     users = [
         turn.get("content", "").strip()
-        for turn in history[-8:]
+        for turn in history[-12:]
         if turn.get("role") == "user" and isinstance(turn.get("content"), str)
     ]
     if not users:
         return WebLookupPlan("answer", reason="no_recent_context")
+    # Walk a short, uninterrupted chain of referential USER questions back
+    # to the original fresh-information request. A third follow-up must not
+    # lose the entity (e.g. River-Boca) and let a semantic rewrite invent a
+    # different match. Any intervening new topic breaks the chain.
     context = ""
-    if needs_current_information(users[-1]) or EXPLICIT_SEARCH.search(users[-1]):
-        context = users[-1]
-    elif (
-        len(users) >= 2
-        and REFERENTIAL_FOLLOWUP.match(users[-1])
-        and (needs_current_information(users[-2]) or EXPLICIT_SEARCH.search(users[-2]))
-    ):
-        context = users[-2]
+    for prior in reversed(users):
+        if needs_current_information(prior) or EXPLICIT_SEARCH.search(prior):
+            context = prior
+            break
+        if not REFERENTIAL_FOLLOWUP.match(prior):
+            break
     if not context:
         return WebLookupPlan("answer", reason="unrelated_followup")
     query = f"{context} {question}"[:MAX_SEARCH_QUERY]
