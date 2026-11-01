@@ -53,6 +53,16 @@ class FakeReadOnlyConnection:
             return Result((3,))
         if sql.startswith("SELECT estado,COUNT(*) FROM obras"):
             return Result(many=[("en_ejecucion", 2), ("pendiente", 1)])
+        if sql.startswith("SELECT presupuesto,direccion,estado FROM obras WHERE direccion ILIKE"):
+            assert params and len(params) == 1
+            if params == ("%Alsina 354%",):
+                return Result(many=[("1190", "Alsina 354", "en_ejecucion")])
+            if params == ("%Rivadavia y Rodríguez Peña%",):
+                return Result(many=[
+                    ("1093", "Rivadavia y Rodríguez Peña", "en_ejecucion"),
+                    ("1993", "Av. Rivadavia y Rodríguez Peña", "pendiente"),
+                ])
+            return Result(many=[])
         if sql.startswith("SELECT presupuesto,direccion,estado FROM obras"):
             return Result(many=[
                 ("1093", "Rivadavia y Rodríguez Peña", "en_ejecucion"),
@@ -558,3 +568,67 @@ def test_explicit_public_web_request_remains_available_in_work_profile(monkeypat
     assert response.status_code == 200, response.text
     assert planned == ["Buscá en internet las últimas noticias de River"]
     assert len(backend.messages) == 1
+
+
+def test_address_without_budget_reads_existing_work_with_parameterized_sql(monkeypatch):
+    """An address is evidence to query, not permission to guess a budget."""
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    result = work.official_context(
+        "¿Qué se registró en Alsina 354?",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"presupuesto": "1190"' in result
+    assert '"horas": 6' in result
+    assert any(
+        sql.startswith("SELECT presupuesto,direccion,estado FROM obras WHERE direccion ILIKE")
+        and params == ("%Alsina 354%",)
+        and "LIMIT 9" in sql
+        for sql, params in connection.statements
+    )
+    assert all(
+        sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
+        for sql, _ in connection.statements
+    )
+
+
+def test_ambiguous_or_unknown_address_never_selects_an_arbitrary_work(monkeypatch):
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    ambiguous = work.official_context(
+        "¿Qué pasó en Rivadavia y Rodríguez Peña?",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"consulta": "direccion_ambigua"' in ambiguous
+    assert '"requiere_aclaracion": true' in ambiguous
+    assert '"presupuesto": "1093"' in ambiguous
+    assert '"presupuesto": "1993"' in ambiguous
+    assert not any(sql.startswith("SELECT id,direccion,estado FROM obras")
+                   for sql, _ in connection.statements)
+
+    connection = FakeReadOnlyConnection()
+    missing = work.official_context(
+        "Montevideo 1058",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"consulta": "direccion_sin_coincidencias"' in missing
+    assert '"obras_coincidentes": []' in missing
+    assert not any(sql.startswith("SELECT id,direccion,estado FROM obras")
+                   for sql, _ in connection.statements)
+
+
+def test_bare_addresses_and_budget_aliases_do_not_reach_public_search():
+    for text in (
+        "Montevideo 1058", "Combate de los Pozos 1590",
+        "Av. Rivadavia y Rodríguez Peña", "P 1093", "Pto 1190",
+    ):
+        assert not work.public_web_allowed(
+            text, work_profile=True, official_evidence=False,
+        ), text
+    assert work.public_web_allowed(
+        "¿Cuándo es la próxima carrera de F1?",
+        work_profile=True, official_evidence=False,
+    )
+    assert work.public_web_allowed(
+        "Montevideo 1058", work_profile=False, official_evidence=False,
+    )
