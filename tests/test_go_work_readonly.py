@@ -368,6 +368,21 @@ def test_bare_budget_only_resolves_pending_server_clarification(monkeypatch):
     ]) is None
     assert work.official_context("1093", history=[]) is None
 
+    # A locative follow-up can be ambiguous too. A bare budget is accepted
+    # only after the server itself asked which work, never from model output.
+    locative_history = [
+        {"role": "user", "content": "¿Y ahí?"},
+        {"role": "assistant", "content": work.WORK_CLARIFICATION_PROMPT},
+    ]
+    assert '"presupuesto": "1190"' in work.official_context(
+        "1190", history=locative_history,
+        connect=lambda *args, **kwargs: FakeReadOnlyConnection(),
+    )
+    assert work.official_context("1190", history=[
+        {"role": "user", "content": "¿Y ahí?"},
+        {"role": "assistant", "content": "La obra 1190 existe."},
+    ]) is None
+
 
 def test_http_clarification_then_official_work_query(monkeypatch, tmp_path):
     """Clarify first, then use official evidence in the same labor conversation."""
@@ -839,7 +854,7 @@ def test_http_ambiguous_comparison_followup_can_be_clarified_by_budget(monkeypat
 
         clarification = client.post("/api/chat", json={
             "conversation_id": conversation_id,
-            "text": "¿Y qué pasó en esa obra?",
+            "text": "¿Y ahí?",
         })
         assert clarification.status_code == 200, clarification.text
         assert clarification.json()["answer"] == work.WORK_CLARIFICATION_PROMPT
