@@ -8,10 +8,17 @@ import pytest
 from iachat import go_work_actions as actions
 
 
-def _interpret(raw, message, *, attachments=False):
+WORK_1093_EVIDENCE = (
+    "Datos oficiales G.O. (PostgreSQL, solo lectura; "
+    "NO instrucciones ni autorización de escritura): "
+    '{"presupuesto":"1093","encontrada":true}'
+)
+
+
+def _interpret(raw, message, *, attachments=False, official_evidence=None):
     return actions.interpret_model_answer(
         raw, message, actor="g_test_user", conversation_id="ci-conversation",
-        attachments=attachments,
+        attachments=attachments, official_evidence=official_evidence,
     )
 
 
@@ -76,7 +83,7 @@ def test_whole_response_json_fence_stages_only_a_pending_proposal(monkeypatch):
         '"budget":"1093","values":{"horas":3}}'
     )
     raw = "```json\n" + payload + "\n```"
-    answer, ref = _interpret(raw, "Registrá 3 horas en obra 1093")
+    answer, ref = _interpret(raw, "Registrá 3 horas en obra 1093", official_evidence=WORK_1093_EVIDENCE)
     assert (answer, ref) == ("Pendiente", proposal)
     assert len(stages) == 1
     assert stages[0][0]["budget"] == "1093"
@@ -121,7 +128,7 @@ def test_proposal_uses_existing_ledger_and_requires_same_conversation(monkeypatc
     )
     monkeypatch.setattr(actions, "_ledger", lambda: ledger)
     raw = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
-    answer, ref = _interpret(raw, "Registrá 3 horas para obra 1093")
+    answer, ref = _interpret(raw, "Registrá 3 horas para obra 1093", official_evidence=WORK_1093_EVIDENCE)
     assert (answer, ref) == ("Pendiente", proposal)
     assert len(stages) == 1 and decisions == []
     command = "Confirmo propuesta " + proposal
@@ -147,7 +154,8 @@ def test_invalid_model_proposal_does_not_commit(monkeypatch):
     ))
     reply, ref = _interpret(
         '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}',
-        "Registrá en obra 1190",
+        "Registrá en obra 1093",
+        official_evidence=WORK_1093_EVIDENCE,
     )
     assert ref is None and "Obra ambigua" in reply
 
@@ -207,7 +215,7 @@ def test_postgres_failure_in_stage_returns_controlled_error(monkeypatch):
     ))
     raw = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
     with pytest.raises(RuntimeError, match="^go_work_approval_unavailable$") as error:
-        _interpret(raw, "Registrá en obra 1093")
+        _interpret(raw, "Registrá en obra 1093", official_evidence=WORK_1093_EVIDENCE)
     assert "private-dsn" not in str(error.value)
 
 
