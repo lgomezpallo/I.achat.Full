@@ -388,7 +388,7 @@ def official_context(message: str, *, history: list[dict] | None = None, connect
                 # ILIKE substring matches e.g. "Alsina 3540" for "Alsina 354".
                 # Never select that as the user's work. A full candidate page
                 # can also hide another exact match; fail closed in that case.
-                boundary = re.compile(r"(?<!\\w)" + re.escape(address) + r"(?!\\w)", re.I)
+                boundary = re.compile(r"(?<!\w)" + re.escape(address) + r"(?!\w)", re.I)
                 matches = [
                     row for row in candidates
                     if isinstance(row[1], str) and boundary.search(row[1])
