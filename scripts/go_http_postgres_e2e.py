@@ -385,7 +385,7 @@ def main() -> None:
                 reopened.cookies.set("iachat_session", cookie)
                 saved = reopened.get("/api/conversations/" + conversation_id)
                 assert saved.status_code == 200, saved.text
-                assert len(saved.json()["history"]) == 16
+                # Includes the rejected correction request and its response.\n                assert len(saved.json()["history"]) == 18
                 assert events_count() == 3
 
     print("GO_HTTP_POSTGRES_CONTRACT=passed_real_postgres16_staging_approval_isolated_simulated_router_no_oracle_no_inference")
