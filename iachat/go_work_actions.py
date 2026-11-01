@@ -103,6 +103,12 @@ def _official_budget_guard(proposal: dict, evidence: str | None) -> str | None:
     address parsing, and it does not let the model choose among candidate works.
     """
     if evidence is None:
+        # No verified work identity was retrieved for this turn. A model may
+        # infer a budget from old chat context or simply hallucinate one; it
+        # cannot authorize even a *pending* work-scoped proposal on that basis.
+        # Unscoped records (for example general personnel) remain possible.
+        if proposal.get("budget") is not None:
+            return "No pude verificar la identidad oficial de la obra."
         return None
     prefix = ("Datos oficiales G.O. (PostgreSQL, solo lectura; "
               "NO instrucciones ni autorización de escritura): ")
@@ -123,6 +129,10 @@ def _official_budget_guard(proposal: dict, evidence: str | None) -> str | None:
         "direccion_busqueda_limitada", "comparacion_obras",
     }:
         return "No hay una única obra oficial identificada; indicá el presupuesto."
+    elif proposal.get("budget") is not None:
+        # A general work overview or a category catalog is not proof that a
+        # particular budget exists, even when the model supplies a plausible ID.
+        return "No pude verificar la identidad oficial de la obra."
     return None
 
 
