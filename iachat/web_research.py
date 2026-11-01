@@ -206,10 +206,11 @@ def ground_web_answer_urls(answer: str, sources: list[dict[str, str]]) -> str:
 # Narrow, deterministic safety net for conflicting broadcast-channel claims.
 # This does not infer the true channel and does not call another provider.
 _BROADCAST_CHANNEL = re.compile(
-    r"\b(?:lo|la)\s+(?:pasan|transmiten|emiten)\s+por\s+"
+    # Case-insensitive verb, but keep capitalized channel suffixes strict:
+    # "Telefe o por ESPN" must not be parsed as channel "Telefe o por".
+    r"(?i:\b(?:lo|la)\s+(?:pasan|transmiten|emiten)\s+por\s+)"
     r"([A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ.-]*"
     r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})",
-    re.I,
 )
 _UNCERTAIN_CHANNEL = re.compile(
     r"\b(?:no\s+(?:pude|puedo)\s+confirmar|sin\s+confirmar|"
@@ -253,8 +254,8 @@ def guard_unverified_broadcast_claim(
 
     Only the current user's named-channel question selects the channel. Prior
     assistant claims and user corrections are conversational data, not facts.
-    A newly read page avoids automatic suppression, but is NOT proof that its
-    content corroborates the answer; the normal web-evidence guidance remains.
+    A newly read page is NOT proof that its content corroborates the answer.
+    Do not waive the conflict guard merely because an unrelated page was read.
     """
     match = _BROADCAST_CHANNEL.search(question)
     if not match:
@@ -283,8 +284,9 @@ def guard_unverified_broadcast_claim(
                 contradiction = True
     if not contradiction:
         return answer
-    if any(item.get("evidence_type") == "page_read" for item in sources):
-        return answer
+    # A page_read flag means transport succeeded, not that the page
+    # corroborated the disputed channel. Abstain until a separate,
+    # claim-specific verification path exists.
     return (
         f"En esta conversación hubo información contradictoria o sin confirmar "
         f"sobre la transmisión por {channel}. No tengo una fuente nueva "
