@@ -513,6 +513,13 @@ def test_broadcast_correction_keeps_event_anchor_for_later_followup():
     assert plan.reason == "contextual_followup"
     assert "River-Boca" in plan.query
 
+    # A correction mentioning "hoy" must not become the search anchor.
+    history[-2] = user("No, Telefe no lo pasa hoy.")
+    plan = plan_web_lookup("¿Y el horario?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Telefe" not in plan.query
+
 
 def test_explicit_event_correction_breaks_stale_broadcast_anchor():
     history = [
