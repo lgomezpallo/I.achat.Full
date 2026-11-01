@@ -41,6 +41,22 @@ REFERENTIAL_FOLLOWUP = re.compile(
 )
 
 
+
+# A user's correction about a broadcast outlet is still part of the same
+# event discussion. It is not a new topic, but it must never be used as the
+# search anchor. Keep this intentionally narrow: "No, era el Mundial" is a
+# topic change and must stop inheritance of River-Boca.
+BROADCAST_CORRECTION = re.compile(
+    r"^\s*(?:(?:no[,;:.!]?\s+){1,3}"
+    r"[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2}"
+    r"\s+no\s+(?:lo|la)\s+(?:pasa|pasan|transmite|transmiten|emite|emiten)\b"
+    r"|(?:te\s+equivocaste|eso\s+est[aá]\s+mal)\s+"
+    r"(?:con\s+)?(?:el\s+)?canal\b)",
+    re.IGNORECASE,
+)
+
+
 # Generic informational phrasing without question marks is also eligible for
 # semantic classification. These are intent forms, not domain-specific topics.
 INFORMATIONAL_REQUEST = re.compile(
@@ -204,6 +220,10 @@ def plan_web_lookup(
         if needs_current_information(prior) or EXPLICIT_SEARCH.search(prior):
             context = prior
             break
+        if BROADCAST_CORRECTION.match(prior):
+            # A correction does not erase the event anchor, but its words
+            # must not become facts or search terms by themselves.
+            continue
         if not REFERENTIAL_FOLLOWUP.match(prior):
             break
     if not context:
