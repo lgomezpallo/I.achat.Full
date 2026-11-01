@@ -352,6 +352,37 @@ def main() -> None:
                 )
                 assert events_count() == 3
 
+                # Two explicit works followed by "esa obra" must not choose
+                # one silently. The clarification and the next bare budget
+                # are exercised against actual PostgreSQL 16 in this CI job.
+                comparison = client.post("/api/chat", json={
+                    "text": "Compará obra 1093 con obra 1190",
+                })
+                assert comparison.status_code == 200, comparison.text
+                compared_id = comparison.json()["conversation_id"]
+                before_ambiguous = len(requests)
+                ambiguous = client.post("/api/chat", json={
+                    "conversation_id": compared_id,
+                    "text": "¿Y qué pasó en esa obra?",
+                })
+                assert ambiguous.status_code == 200, ambiguous.text
+                assert "¿A qué obra te referís?" in ambiguous.json()["answer"]
+                assert len(requests) == before_ambiguous
+                clarified = client.post("/api/chat", json={
+                    "conversation_id": compared_id, "text": "1190",
+                })
+                assert clarified.status_code == 200, clarified.text
+                assert len(requests) == before_ambiguous + 1
+                current_evidence = [
+                    item["content"] for item in requests[-1]["conversation"]
+                    if item["role"] == "user"
+                    and item["content"].startswith("[DATOS OFICIALES DE HERRAMIENTA")
+                ]
+                assert len(current_evidence) == 1
+                assert '"presupuesto": "1190"' in current_evidence[0]
+                assert '"presupuesto": "1093"' not in current_evidence[0]
+                assert events_count() == 3, "clarifications cannot write official data"
+
                 # Real PostgreSQL + HTTP conversation: a newer street address
                 # supersedes an older work number on an anaphoric follow-up.
                 # Router remains simulated; this checks the actual shared chat
