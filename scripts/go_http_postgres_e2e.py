@@ -191,7 +191,7 @@ def main() -> None:
 
                 approved = client.post("/api/chat", json={
                     "conversation_id": conversation_id,
-                    "text": "dale",
+                    "text": "confirmá la propuesta",
                 })
                 assert approved.status_code == 200, approved.text
                 assert "confirmada" in approved.json()["answer"], approved.json()["answer"]
@@ -219,7 +219,7 @@ def main() -> None:
                 assert "go_proposal_id" in pending_discard.json()["history"][-1]
                 discarded = client.post("/api/chat", json={
                     "conversation_id": conversation_id,
-                    "text": "no",
+                    "text": "descartala",
                 })
                 assert discarded.status_code == 200, discarded.text
                 assert "descartada" in discarded.json()["answer"].lower()
