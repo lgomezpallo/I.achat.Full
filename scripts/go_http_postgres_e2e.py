@@ -64,6 +64,10 @@ def main() -> None:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1190","values":{"horas":99}}'
             elif "Registrá 7 horas en Rivadavia y Rodríguez Peña" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1190","values":{"horas":7}}'
+            elif "Registrá 3 horas en obra 1093 en Alsina 354" in last:
+                # Even a model that selects the explicit budget must not
+                # override the conflicting street named by the operator.
+                model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
             elif "Ayer hicieron tres horas" in last:
                 # A model must not infer an official budget from a vague turn.
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":3}}'
@@ -249,6 +253,33 @@ def main() -> None:
                 assert address_mismatch.status_code == 200, address_mismatch.text
                 assert "no coincide con la evidencia oficial" in address_mismatch.json()["answer"]
                 assert "go_proposal_id" not in address_mismatch.json()["history"][-1]
+                assert events_count() == 3
+
+                # Mixed explicit work references must agree in real
+                # PostgreSQL before any proposal can be staged. The model
+                # response is simulated, but the SQL identity check is real.
+                conflicting = client.post("/api/chat", json={
+                    "text": "Registrá 3 horas en obra 1093 en Alsina 354",
+                })
+                assert conflicting.status_code == 200, conflicting.text
+                assert "única obra oficial" in conflicting.json()["answer"]
+                assert "go_proposal_id" not in conflicting.json()["history"][-1]
+                assert events_count() == 3
+                assert any(
+                    '"consulta": "direccion_presupuesto_incompatibles"' in item["content"]
+                    for item in requests[-1]["conversation"] if item["role"] == "user"
+                )
+                # Matching references should still retrieve official evidence
+                # through the same chat without any extra business schema.
+                matching = client.post("/api/chat", json={
+                    "text": "¿Qué pasó en obra 1093 en Rivadavia y Rodríguez Peña?",
+                })
+                assert matching.status_code == 200, matching.text
+                assert any(
+                    '"presupuesto": "1093"' in item["content"]
+                    and '"encontrada": true' in item["content"]
+                    for item in requests[-1]["conversation"] if item["role"] == "user"
+                )
                 assert events_count() == 3
 
                 # PostgreSQL 16 + authenticated HTTP chat: no work was
