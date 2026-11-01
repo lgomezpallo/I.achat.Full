@@ -135,6 +135,23 @@ def _official_budget_guard(proposal: dict, evidence: str | None) -> str | None:
         return "No pude verificar la identidad oficial de la obra."
     if not isinstance(source, dict):
         return "No pude verificar la identidad oficial de la obra."
+    if proposal.get("intent") == "correct":
+        # An LLM must not select an unrelated or invented event UUID from
+        # old chat memory. A correction needs a *current* event ID and type
+        # in the bounded PostgreSQL evidence for this exact turn. If the
+        # event is older than the evidence window, ask for more evidence.
+        try:
+            event_id = str(UUID(proposal.get("replaces")))
+        except (TypeError, ValueError, AttributeError):
+            return "No pude verificar el registro oficial a corregir."
+        records = source.get("registros")
+        if not isinstance(records, list) or not any(
+            isinstance(item, dict)
+            and item.get("id") == event_id
+            and item.get("tipo") == proposal.get("record_type")
+            for item in records
+        ):
+            return "No pude verificar el registro oficial a corregir."
     if source.get("encontrada") is True:
         expected = source.get("presupuesto")
         if not isinstance(expected, str) or proposal.get("budget") != expected:
