@@ -274,3 +274,28 @@ def test_day_later_broadcast_followup_uses_persisted_user_topic(monkeypatch):
     assert "River-Boca" in searches[1]
     assert "Telefe" in searches[1]
     assert all("Mundial" not in query for query in searches)
+
+
+def test_day_later_followup_after_channel_correction_keeps_event(monkeypatch):
+    """Persisted user corrections must not erase the original search topic."""
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    app_module.store.put("river-corrected", [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "No confirmado.",
+         "completed_at": "2026-10-30T16:00:00+00:00"},
+        {"role": "user", "content": "¿Y en qué canal lo pasan?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No puedo confirmar el canal."},
+    ], "admin", "")
+
+    response = client.post("/api/chat", json={
+        "conversation_id": "river-corrected",
+        "text": "¿Y el horario?",
+    })
+    assert response.status_code == 200
+    assert len(searches) == 1
+    assert "River-Boca" in searches[0]
+    assert "Mundial" not in searches[0]
+    assert "Telefe" not in searches[0]
