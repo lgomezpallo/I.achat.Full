@@ -62,6 +62,8 @@ def main() -> None:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":15}}'
             elif "Registrá 99 horas en obra 1093" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1190","values":{"horas":99}}'
+            elif "Registrá 7 horas en Rivadavia y Rodríguez Peña" in last:
+                model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1190","values":{"horas":7}}'
             else:
                 model_text = "Respuesta de Router simulado; no hay escritura oficial."
             return httpx.Response(
@@ -234,6 +236,16 @@ def main() -> None:
                 })
                 assert mismatch.status_code == 200, mismatch.text
                 assert "no coincide" in mismatch.json()["answer"]
+                assert events_count() == 3
+
+                # A model-invented budget cannot override a uniquely resolved
+                # PostgreSQL address even when the operator gave no work number.
+                address_mismatch = client.post("/api/chat", json={
+                    "text": "Registrá 7 horas en Rivadavia y Rodríguez Peña",
+                })
+                assert address_mismatch.status_code == 200, address_mismatch.text
+                assert "no coincide con la evidencia oficial" in address_mismatch.json()["answer"]
+                assert "go_proposal_id" not in address_mismatch.json()["history"][-1]
                 assert events_count() == 3
 
                 categories = client.post("/api/chat", json={
