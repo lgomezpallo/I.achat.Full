@@ -574,3 +574,40 @@ def test_freshness_word_in_short_followup_does_not_drop_original_event():
     assert unrelated.action == "search"
     assert unrelated.reason == "current_question"
     assert "River-Boca" not in unrelated.query
+
+
+def test_long_uninterrupted_followup_chain_keeps_event_beyond_six_user_turns():
+    """A chat with many follow-ups must not silently switch to a new event."""
+    history = [user("¿Cuándo es el próximo River-Boca?"), assistant("Sin fecha confirmada.")]
+    for _ in range(9):
+        history.extend([user("¿Y el horario?"), assistant("Todavía sin confirmar.")])
+    plan = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+
+    # An explicit new topic still prevents stale context inheritance.
+    history.extend([user("Explicame cómo cocinar arroz."), assistant("Usá agua.")])
+    changed = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert changed.reason == "unrelated_followup"
+    assert "River-Boca" not in changed.query
+
+
+def test_negated_channel_correction_is_not_a_new_event_anchor():
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("Sin fecha confirmada."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("Lo pasan por Telefe."),
+        user("No, no lo pasan por Telefe."),
+        assistant("No tengo confirmación del canal."),
+    ]
+    plan = plan_web_lookup("¿Y a qué hora?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Telefe" not in plan.query
+
+    # Explicitly changing the event must never preserve the old match.
+    history[-2] = user("No, me refería al Mundial.")
+    changed = plan_web_lookup("¿Y el horario?", history)
+    assert changed.reason == "unrelated_followup"
+    assert "River-Boca" not in changed.query
