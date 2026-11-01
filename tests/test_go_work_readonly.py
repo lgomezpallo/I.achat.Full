@@ -808,3 +808,5 @@ def test_multiple_mixed_references_require_clarification_before_sql(monkeypatch)
     # Ordinary explicit budget phrases are not mistaken for addresses.
     assert work._address_references("¿Qué pasó en obra 1093?") == []
     assert work._address_references("¿Qué pasó en presupuesto 1093?") == []
+    assert work._address_references("¿Qué se registró en la obra 1093?") == []
+    assert work._address_references("¿Qué se registró en el presupuesto 1093?") == []
