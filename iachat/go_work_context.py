@@ -221,7 +221,7 @@ def contextual_budgets(message: str, history: list[dict] | None = None) -> list[
             and isinstance(previous_answer, dict)
             and previous_user.get("role") == "user"
             and isinstance(previous_user.get("content"), str)
-            and _WORK_ANAPHORA.search(previous_user["content"])
+            and _FOLLOWUP.search(previous_user["content"])
             and previous_answer.get("role") == "assistant"
             and previous_answer.get("content") == WORK_CLARIFICATION_PROMPT
         ):
