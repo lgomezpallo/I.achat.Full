@@ -440,3 +440,44 @@ def test_broadcast_confirmation_does_not_inherit_unrelated_topic():
         assistant("Mezclá los ingredientes."),
     ]
     assert plan_web_lookup("¿Lo pasan por Telefe?", history).action == "answer"
+
+
+def test_third_and_fourth_followups_retain_original_user_subject():
+    """A chain of channel questions must not drift from River-Boca to Mundial."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class MisleadingClassifier:
+        def answer(self, messages):
+            raise AssertionError("An anchored follow-up must not be rewritten")
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("No está confirmado."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("No pude confirmarlo."),
+        user("¿Lo pasan por Telefe?"),
+        assistant("Sigue sin confirmarse."),
+    ]
+    plan = plan_web_lookup_semantic("¿Y el horario?", history, MisleadingClassifier())
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Mundial" not in plan.query
+
+    history.extend([user("¿Y el horario?"), assistant("Todavía no hay horario.")])
+    later = plan_web_lookup_semantic("¿Y dónde lo pasan?", history, MisleadingClassifier())
+    assert later.reason == "contextual_followup"
+    assert "River-Boca" in later.query
+
+
+def test_followup_chain_stops_at_an_intervening_new_subject():
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("Sin fecha confirmada."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("Sin canal confirmado."),
+        user("Explicame cómo preparar pizza casera."),
+        assistant("Prepará la masa."),
+    ]
+    plan = plan_web_lookup("¿Y el horario?", history)
+    assert plan.reason == "unrelated_followup"
+    assert "River-Boca" not in plan.query
