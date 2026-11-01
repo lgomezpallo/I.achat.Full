@@ -83,3 +83,30 @@ def test_mixed_documents_and_images(monkeypatch, tmp_path):
     assert "Imagen 1: primera.png" in messages[-1]["content"]
     assert "Imagen 2: segunda.png" in messages[-1]["content"]
     assert "notas.txt" in response.json()["history"][-2]["content"]
+
+
+def test_prior_image_plus_five_new_images_fails_before_router_dispatch(monkeypatch, tmp_path):
+    """The combined comparison request must obey Router's five-image bound."""
+    module.store = ConversationStore(str(tmp_path / "combined-limit.db"))
+    module.store.create_user("smoke", "test-only-secret")
+    monkeypatch.setattr(module, "_signed_user", lambda cookie: "smoke")
+    backend = Backend()
+    monkeypatch.setattr(module, "get_backend", lambda: backend)
+    client = TestClient(module.app)
+    first = client.post("/api/chat", json={
+        "text": "Describí esta imagen",
+        "attachments": [{"name": "anterior.png", "content_base64": PNG}],
+    })
+    assert first.status_code == 200, first.text
+    assert len(backend.calls) == 1
+    response = client.post("/api/chat", json={
+        "conversation_id": first.json()["conversation_id"],
+        "text": "Compará estas cinco fotos con la anterior",
+        "attachments": [
+            {"name": f"nueva-{i}.png", "content_base64": PNG}
+            for i in range(1, 6)
+        ],
+    })
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "too_many_images_for_comparison"
+    assert len(backend.calls) == 1  # No invalid sixth image reaches Router.
