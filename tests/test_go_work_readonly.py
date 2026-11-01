@@ -615,6 +615,17 @@ def test_ambiguous_or_unknown_address_never_selects_an_arbitrary_work(monkeypatc
     assert '"obras_coincidentes": []' in missing
     assert not any(sql.startswith("SELECT id,direccion,estado FROM obras")
                    for sql, _ in connection.statements)
+    # 'de' is part of the street name, not the start of the address.
+    connection = FakeReadOnlyConnection()
+    work.official_context(
+        "Combate de los Pozos 1590",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert any(
+        sql.startswith("SELECT presupuesto,direccion,estado FROM obras WHERE direccion ILIKE")
+        and params == ("%Combate de los Pozos 1590%",)
+        for sql, params in connection.statements
+    )
 
 
 def test_bare_addresses_and_budget_aliases_do_not_reach_public_search():
