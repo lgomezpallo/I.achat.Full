@@ -26,7 +26,7 @@ def main() -> None:
             "IACHAT_PROFILE": "go-ute",
             "IACHAT_DB": os.path.join(temp, "labor-chat.sqlite"),
             "IACHAT_AUTH_SECRET": "ci-only-work-session-secret-longer-than-32",
-            "IACHAT_GOOGLE_ALLOWED_SUBS": "ci-allowed-google-sub",
+            "IACHAT_GOOGLE_ALLOWED_SUBS": "ci-allowed-google-sub,ci-other-google-sub",
             "IACHAT_BACKEND": "router",
             "ROUTER_URL": "http://127.0.0.1:8010",
             "ROUTER_TOKEN": "ci-only-router-token",
@@ -74,7 +74,9 @@ def main() -> None:
 
         assert events_count() == 2
         with (
-            patch.object(app_module.google_oidc, "complete", return_value="ci-allowed-google-sub"),
+            patch.object(app_module.google_oidc, "complete", side_effect=lambda code, state, flow: (
+                "ci-other-google-sub" if code == "other" else "ci-allowed-google-sub"
+            )),
             patch("iachat.web_planner.plan_web_lookup_semantic", return_value=SimpleNamespace(action="none")),
             patch("iachat.tool_planner.is_file_action_candidate", return_value=False),
             patch("iachat.auto_memory.learn", return_value=None),
@@ -141,6 +143,30 @@ def main() -> None:
                 proposal_id = staged.json()["history"][-1]["go_proposal_id"]
                 assert "No está confirmado" in staged.json()["answer"]
                 assert events_count() == 2
+
+                # A second authorized Google account must never read or
+                # approve the first worker's private conversation or proposal.
+                # The official ledger and chat SQLite must agree on ownership.
+                with TestClient(app_module.app, base_url="https://go.test") as other:
+                    other_login = other.get(
+                        "/auth/google/callback?code=other&state=ci",
+                        follow_redirects=False,
+                    )
+                    assert other_login.status_code == 303, other_login.text
+                    assert other.get("/api/conversations/" + conversation_id).status_code == 404
+                    assert other.post("/api/chat", json={
+                        "conversation_id": conversation_id,
+                        "text": "dale",
+                    }).status_code == 404
+                    assert other.get("/api/conversations").json()["conversations"] == []
+                    # The second user's own conversation cannot authorize a
+                    # foreign proposal even if its UUID was disclosed.
+                    cross_user = other.post("/api/chat", json={
+                        "text": "Confirmo propuesta " + proposal_id,
+                    })
+                    assert cross_user.status_code == 200, cross_user.text
+                    assert "no está pendiente en esta conversación" in cross_user.json()["answer"]
+                    assert events_count() == 2
 
                 # A UUID from another conversation cannot authorize a write.
                 forged = client.post("/api/chat", json={
