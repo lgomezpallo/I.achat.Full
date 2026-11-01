@@ -519,12 +519,12 @@ def test_broadcast_guard_blocks_reversal_without_new_page_evidence():
         "¿Lo pasan por Telefe?", answer, history,
         [{"url": "https://example.com/rss", "evidence_type": "rss_snippet"}],
     ) == guarded
-    # A fresh page permits the normal evidence-aware answer path; it is not
-    # considered proof by this deterministic guard.
+    # Reading an unrelated page is transport success, not corroboration.
+    # The guard must not let the model flip its claim just because a page loaded.
     assert research.guard_unverified_broadcast_claim(
         "¿Lo pasan por Telefe?", answer, history,
-        [{"url": "https://example.com/page", "evidence_type": "page_read"}],
-    ) == answer
+        [{"url": "https://example.com/unrelated", "evidence_type": "page_read"}],
+    ) == guarded
 
 
 def test_broadcast_guard_does_not_change_unrelated_or_uncertain_answers():
@@ -564,3 +564,30 @@ def test_chat_broadcast_guard_persists_safe_answer(monkeypatch):
     assert "no voy a afirmar ni negar" in response.json()["answer"]
     saved = app_module.store.get("channel", "admin")
     assert saved[-1]["content"] == response.json()["answer"]
+
+
+def test_broadcast_channel_parser_does_not_swallow_lowercase_connectors():
+    # With global IGNORECASE, [A-Z] incorrectly swallowed "o por" as a
+    # capitalized channel suffix and silently disabled the conflict guard.
+    assert research._BROADCAST_CHANNEL.search(
+        "¿Lo pasan por Telefe o por ESPN?"
+    ).group(1) == "Telefe"
+    assert research._BROADCAST_CHANNEL.search(
+        "¿lo pasan por TyC Sports hoy?"
+    ).group(1) == "TyC Sports"
+    assert research._BROADCAST_CHANNEL.search(
+        "¿LO PASAN POR ESPN Premium?"
+    ).group(1) == "ESPN Premium"
+
+
+def test_broadcast_guard_still_abstains_when_question_names_two_channels():
+    history = [
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Sí, lo pasan por Telefe."
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe o por ESPN?", answer, history, [],
+    )
+    assert "contradictoria" in guarded
+    assert "no voy a afirmar ni negar" in guarded
