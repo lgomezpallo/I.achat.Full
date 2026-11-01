@@ -632,3 +632,29 @@ def test_bare_addresses_and_budget_aliases_do_not_reach_public_search():
     assert work.public_web_allowed(
         "Montevideo 1058", work_profile=False, official_evidence=False,
     )
+
+
+def test_http_address_only_work_query_uses_official_evidence_without_public_web(monkeypatch, tmp_path):
+    backend = _prepare_chat(monkeypatch, tmp_path)
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    original = work.official_context
+    monkeypatch.setattr(
+        work, "official_context",
+        lambda message, **kwargs: original(
+            message, history=kwargs.get("history"),
+            connect=lambda *args, **kwargs: connection,
+        ),
+    )
+    def forbidden_web(*args, **kwargs):
+        raise AssertionError("Address-only labor query must not enter public web planner")
+    monkeypatch.setattr("iachat.web_planner.plan_web_lookup_semantic", forbidden_web)
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        response = client.post("/api/chat", json={"text": "¿Qué pasó en Alsina 354?"})
+    assert response.status_code == 200, response.text
+    assert len(backend.messages) == 1
+    assert any(
+        item["role"] == "user" and '"presupuesto": "1190"' in item["content"]
+        and '"direccion": "Alsina 354"' in item["content"]
+        for item in backend.messages[0]
+    )
