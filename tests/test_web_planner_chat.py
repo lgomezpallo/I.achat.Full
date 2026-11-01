@@ -299,3 +299,33 @@ def test_day_later_followup_after_channel_correction_keeps_event(monkeypatch):
     assert "River-Boca" in searches[0]
     assert "Mundial" not in searches[0]
     assert "Telefe" not in searches[0]
+
+
+def test_day_later_long_chain_with_negated_channel_keeps_original_event(monkeypatch):
+    """Persisted history survives many follow-ups and a channel correction."""
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    history = [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "No confirmado.",
+         "completed_at": "2026-10-29T16:00:00+00:00"},
+    ]
+    for _ in range(9):
+        history.extend([
+            {"role": "user", "content": "¿Y el horario?"},
+            {"role": "assistant", "content": "Sin confirmar."},
+        ])
+    history.extend([
+        {"role": "user", "content": "No, no lo pasan por Telefe."},
+        {"role": "assistant", "content": "No tengo confirmación del canal."},
+    ])
+    app_module.store.put("river-long-negation", history, "admin", "")
+    response = client.post("/api/chat", json={
+        "conversation_id": "river-long-negation",
+        "text": "¿Y dónde lo pasan?",
+    })
+    assert response.status_code == 200
+    assert len(searches) == 1
+    assert "River-Boca" in searches[0]
+    assert "Telefe" not in searches[0]
+    assert "Mundial" not in searches[0]
