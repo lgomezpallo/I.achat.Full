@@ -173,10 +173,33 @@ def test_short_confirmation_scoped_to_immediate_pending_assistant(monkeypatch):
            {"role": "assistant", "content": "Propuesta pendiente", "go_proposal_id": proposal}]
     assert _decide("dale", own) == "Confirmada"
     assert _decide("sí", own) == "Confirmada"
-    assert _decide("descartala", own) is None
+    assert _decide("confirmá la propuesta", own) == "Confirmada"
+    assert _decide("confirmala", own) == "Confirmada"
+    assert _decide("descartala", own) == "Descartada"
+    assert _decide("descartá la propuesta", own) == "Descartada"
     assert _decide("descartá", own) == "Descartada"
     assert _decide("no", own) == "Descartada"
-    assert decisions == [(proposal, approved, {"actor": "g_test_user", "conversation_id": "ci-conversation"}) for approved in (True, True, False, False)]
+    assert decisions == [(proposal, approved, {"actor": "g_test_user", "conversation_id": "ci-conversation"}) for approved in (True, True, True, True, False, False, False, False)]
+
+
+def test_natural_approval_never_accepts_compound_instructions_or_stale_proposal(monkeypatch):
+    _work(monkeypatch)
+    proposal = str(uuid.uuid4())
+    monkeypatch.setattr(actions, "_ledger", lambda: (_ for _ in ()).throw(
+        AssertionError("Compound or stale approval must not access the ledger")
+    ))
+    pending = [{"role": "assistant", "content": "Pendiente", "go_proposal_id": proposal}]
+    for message in (
+        "confirmala y cambiá las horas a 20",
+        "confirmá la propuesta, pero para otra obra",
+        "descartala y registrá otra",
+        "confirmo la propuesta " + str(uuid.uuid4()),
+    ):
+        result = _decide(message, pending)
+        assert result is None or "no está pendiente" in result
+    stale = [*pending, {"role": "user", "content": "Otra pregunta"},
+             {"role": "assistant", "content": "Otra respuesta"}]
+    assert _decide("confirmá la propuesta", stale) is None
 
 
 def test_short_confirmation_never_uses_another_conversation_or_stale_turn(monkeypatch):
