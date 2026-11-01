@@ -28,6 +28,8 @@ def main() -> None:
             "IACHAT_AUTH_SECRET": "ci-only-work-session-secret-longer-than-32",
             "IACHAT_GOOGLE_ALLOWED_SUBS": "ci-allowed-google-sub,ci-other-google-sub",
             "IACHAT_BACKEND": "router",
+            # CI only: the HTTP Router response is mocked, never a provider call.
+            "GO_ROUTER_INFERENCE_ENABLED": "1",
             "ROUTER_URL": "http://127.0.0.1:8010",
             "ROUTER_TOKEN": "ci-only-router-token",
             "GO_WORK_WRITE_ENABLED": "1",
