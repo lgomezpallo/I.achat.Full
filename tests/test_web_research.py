@@ -679,3 +679,45 @@ def test_chat_generic_broadcast_followup_persists_conflict_guard(monkeypatch):
     assert app_module.store.get("generic-channel", "admin")[-1]["content"] == (
         response.json()["answer"]
     )
+
+
+def test_short_broadcast_reply_does_not_repeat_disputed_telefe():
+    history = [
+        {"role": "user", "content": "¿Cuándo juegan River y Boca?"},
+        {"role": "assistant", "content": "No pude confirmar el horario."},
+        {"role": "user", "content": "¿Lo pasan por Telefe?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No, Telefe no lo pasa."},
+    ]
+    for answer in ("Telefe.", "Por Telefe.", "Es por Telefe.", "Va por Telefe"):
+        guarded = research.guard_unverified_broadcast_claim(
+            "¿Y en qué canal lo pasan?", answer, history, [],
+        )
+        assert "contradictoria" in guarded
+        assert "Telefe" in guarded
+        assert guarded != answer
+
+
+def test_short_channel_reply_without_conflict_is_not_modified():
+    for answer in ("Telefe.", "Por Telefe.", "TyC Sports.", "ESPN Premium."):
+        assert research.guard_unverified_broadcast_claim(
+            "¿Y en qué canal lo pasan?", answer, [], [],
+        ) == answer
+    # Do not classify arbitrary capitalized text as a channel claim outside
+    # the broadcast-question context.
+    assert research.guard_unverified_broadcast_claim(
+        "¿Cómo se escribe Telefe?", "Telefe.",
+        [{"role": "assistant", "content": "No, Telefe no lo pasa."}], [],
+    ) == "Telefe."
+
+
+def test_short_channel_answer_guard_on_donde_followup():
+    history = [
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Por Telefe"
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Y dónde lo pasan?", answer, history, [],
+    )
