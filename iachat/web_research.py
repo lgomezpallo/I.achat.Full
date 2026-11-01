@@ -208,13 +208,15 @@ def ground_web_answer_urls(answer: str, sources: list[dict[str, str]]) -> str:
 _BROADCAST_CHANNEL = re.compile(
     # Case-insensitive verb, but keep capitalized channel suffixes strict:
     # "Telefe o por ESPN" must not be parsed as channel "Telefe o por".
-    r"(?i:\b(?:lo|la)\s+(?:pasan|transmiten|emiten)\s+por\s+)"
+    r"(?i:\b(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)\s+|"
+    r"(?:va|van)\s+|(?:se\s+)?(?:transmite|emite)\s+)por\s+)"
     r"([A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ.-]*"
     r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})",
 )
 _UNCERTAIN_CHANNEL = re.compile(
     r"\b(?:no\s+(?:pude|puedo)\s+confirmar|sin\s+confirmar|"
-    r"no\s+est[aá]\s+confirmado|no\s+s[eé]|"
+    r"no\s+est[aá]\s+confirmado|no\s+sé|"
+    # "No se transmite" is a negated broadcast claim, not "no sé".
     r"no\s+(?:tengo|hay)\s+confirmaci[oó]n)\b", re.I,
 )
 _USER_CORRECTION = re.compile(
@@ -231,7 +233,8 @@ _BROADCAST_ALT_CHANNEL = re.compile(
     r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})",
 )
 _BROADCAST_QUESTION = re.compile(
-    r"\b(?:canal(?:es)?|transmisi[oó]n|transmiten|televisan|pasan|emiten)\b"
+    r"\b(?:canal(?:es)?|transmisi[oó]n|transmiten|transmite|televisan|pasan|emiten|emite|dan)\b"
+    r"|\b(?:va|van)\s+por\b"
     r"|\bd[oó]nde\s+(?:ver|mirar|(?:(?:lo|la)\s+)?(?:pasan|transmiten|emiten))\b", re.I,
 )
 # Short replies are channel assertions only when the user's question is
@@ -244,7 +247,7 @@ _BROADCAST_SHORT_ANSWER = re.compile(
     r"\s*[.!]?\s*"
 )
 _BROADCAST_REVERSE_CHANNEL = re.compile(
-    r"\b([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"\b(?!(?i:se\s+(?:transmite|emite)\b))([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
     r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})"
     r"\s+(?:(?:no\s+)?(?:lo|la)\s+)?(?:pasa|transmite|emite)\b",
 )
@@ -296,14 +299,18 @@ def _channel_stance(
         if _UNCERTAIN_CHANNEL.search(sentence):
             return "unknown"
         negative = (
-            re.search(r"\bno\s+(?:lo|la)\s+(?:pasan|transmiten|emiten)\s+por\s+" + name, sentence, re.I)
+            re.search(r"\bno\s+(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)|"
+                      r"(?:va|van)|(?:se\s+)?(?:transmite|emite))\s+por\s+"
+                      + name, sentence, re.I)
             or re.search(name + r"\s+no\s+(?:(?:lo|la)\s+)?(?:pasa|transmite|emite)\b", sentence, re.I)
             or re.search(r"\bno\s+es\s+por\s+" + name, sentence, re.I)
         )
         if negative:
             return "no"
         positive = (
-            re.search(r"\b(?:lo|la)\s+(?:pasan|transmiten|emiten)\s+por\s+" + name, sentence, re.I)
+            re.search(r"\b(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)|"
+                      r"(?:va|van)|(?:se\s+)?(?:transmite|emite))\s+por\s+"
+                      + name, sentence, re.I)
             or re.search(name + r"\s+(?:(?:lo|la)\s+)?(?:pasa|transmite|emite)\b", sentence, re.I)
         )
         if positive:
