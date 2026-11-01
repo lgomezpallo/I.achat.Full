@@ -577,6 +577,8 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         answer = ground_web_answer_urls(answer, web_sources)
         from .fresh_event_guard import reject_stale_next_event_answer
         answer = reject_stale_next_event_answer(message.text, answer)
+    from .web_research import guard_unverified_broadcast_claim
+    answer = guard_unverified_broadcast_claim(message.text, answer, history, web_sources)
     # Timings only: no user identity, messages, URLs, credentials or model output.
     logger.info(
         "IACHAT_CHAT_DIAG web=%d sources=%d plan_ms=%d fetch_ms=%d model_ms=%d total_ms=%d",
