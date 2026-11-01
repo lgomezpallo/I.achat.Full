@@ -671,6 +671,59 @@ def test_http_address_only_work_query_uses_official_evidence_without_public_web(
     )
 
 
+def test_address_followup_reads_latest_operator_address_not_stale_budget(monkeypatch):
+    """An address in a newer user turn supersedes an older numbered work."""
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    history = [
+        {"role": "user", "content": "¿Qué pasó en la obra 1093?"},
+        {"role": "assistant", "content": "Respuesta previa."},
+        {"role": "user", "content": "¿Qué pasó en Alsina 354?"},
+        {"role": "assistant", "content": "Respuesta basada en el registro."},
+    ]
+    connection = FakeReadOnlyConnection()
+    result = work.official_context(
+        "¿Y qué hicieron ahí?", history=history,
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"presupuesto": "1190"' in result
+    assert '"horas": 6' in result
+    assert '"presupuesto": "1093"' not in result
+    assert any(params == ("%Alsina 354%",) for sql, params in connection.statements
+               if "WHERE direccion ILIKE" in sql)
+    assert not any(params == ("1093",) for sql, params in connection.statements
+                   if sql.startswith("SELECT id,direccion,estado FROM obras"))
+
+
+def test_multiple_addresses_require_clarification_without_database_query(monkeypatch):
+    """Never silently select the first of two address-only work references."""
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    with pytest.raises(work.WorkContextUnavailable, match="go_work_missing_budget"):
+        work.official_context(
+            "¿Qué pasó en Alsina 354 y en Suipacha 671?",
+            connect=lambda *args, **kwargs: connection,
+        )
+    assert connection.statements == []
+    history = [
+        {"role": "user", "content": "¿Qué pasó en Alsina 354 y en Suipacha 671?"},
+        {"role": "assistant", "content": "Indicá cuál obra."},
+    ]
+    with pytest.raises(work.WorkContextUnavailable, match="go_work_missing_budget"):
+        work.official_context(
+            "¿Y qué hicieron ahí?", history=history,
+            connect=lambda *args, **kwargs: connection,
+        )
+    assert connection.statements == []
+
+
+def test_address_followup_never_trusts_assistant_generated_location(monkeypatch):
+    monkeypatch.delenv("GO_WORK_READONLY_DSN", raising=False)
+    assert work.official_context(
+        "¿Qué pasó ahí?",
+        history=[{"role": "assistant", "content": "Obra en Alsina 354."}],
+    ) is None
+
+
 def test_address_number_prefix_cannot_select_a_different_work(monkeypatch):
     """Alsina 354 must not resolve to Alsina 3540 via SQL ILIKE."""
     monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
