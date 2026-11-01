@@ -43,6 +43,30 @@ jobs:
               printf 'GIT %s=not_a_checkout\n' "$(basename "$repo")"
             fi
           done
+          # Inspect the running Router catalog over loopback; GET only.
+          # Provider-reported free is NOT evidence that account billing is disabled.
+          python3 - <<'PYROUTER'
+          import json
+          import urllib.request
+          try:
+              with urllib.request.urlopen("http://127.0.0.1:8010/catalog", timeout=5) as response:
+                  catalog = json.load(response)
+              providers = catalog.get("providers", [])
+              models = [m for p in providers if isinstance(p, dict)
+                        for m in p.get("models", []) if isinstance(m, dict)]
+              counts = {kind: sum(m.get("billing_status", "unknown") == kind for m in models)
+                        for kind in ("free", "paid", "unknown")}
+              free_chat = sum(m.get("billing_status") == "free"
+                              and "chat" in m.get("declared_capabilities", [])
+                              for m in models)
+              print("GO_ROUTER_CATALOG_READONLY=ok")
+              print("GO_ROUTER_CATALOG_MODEL_COUNTS free={free} paid={paid} unknown={unknown}".format(**counts))
+              print("GO_ROUTER_REPORTED_FREE_CHAT_CANDIDATES=" + str(free_chat))
+              print("GO_ROUTER_ACCOUNT_BILLING_GUARANTEE=not_verified")
+          except (OSError, ValueError, TypeError, KeyError):
+              print("GO_ROUTER_CATALOG_READONLY=unavailable")
+              print("GO_ROUTER_ACCOUNT_BILLING_GUARANTEE=not_verified")
+          PYROUTER
           test -x /opt/go-ute/.venv/bin/python
           sudo -n -u go-ute bash -se <<'DB'
           set -euo pipefail
