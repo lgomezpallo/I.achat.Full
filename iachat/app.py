@@ -333,6 +333,8 @@ def ready():
             raise HTTPException(503, "router_not_configured")
         if _is_go_profile() and url not in ("http://127.0.0.1:8010", "http://localhost:8010"):
             raise HTTPException(503, "go_router_requires_local_endpoint")
+        if _is_go_profile() and os.getenv("GO_ROUTER_INFERENCE_ENABLED") != "1":
+            raise HTTPException(503, "go_router_inference_not_authorized")
         return {"status": "ready", "component": "iachat", "mode": "router"}
     if not ProviderBackend.configured():
         raise HTTPException(503, "providers_not_configured")
@@ -357,6 +359,9 @@ def router_status():
     if _is_go_profile() and url not in ("http://127.0.0.1:8010", "http://localhost:8010"):
         return {"configured": False, "reachable": False, "routing_verified": False,
                 "reason": "go_router_requires_local_endpoint"}
+    if _is_go_profile() and os.getenv("GO_ROUTER_INFERENCE_ENABLED") != "1":
+        return {"configured": True, "reachable": False, "routing_verified": False,
+                "reason": "go_router_inference_not_authorized"}
     try:
         response = httpx.get(url + "/health", timeout=8.0, follow_redirects=False,
                              trust_env=not _is_go_profile())
