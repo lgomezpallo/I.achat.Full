@@ -275,7 +275,13 @@ def test_work_chat_fails_closed_without_official_db_instead_of_guessing(monkeypa
     assert response.status_code == 503
     assert response.json()["detail"] == "go_work_readonly_unavailable"
     assert backend.messages == []
-    assert app_module.store.list_conversations("worker") == []
+    # IAchat main persists the user turn before provider/database work. A
+    # failed official lookup must preserve that pending turn, but never invent
+    # an assistant answer or write an official work record.
+    conversations = app_module.store.list_conversations("worker")
+    assert len(conversations) == 1
+    history = app_module.store.get(conversations[0]["id"], "worker")
+    assert history == [{"role": "user", "content": "¿Qué pasó en la obra 1093?"}]
 
 
 def test_followup_reuses_only_last_unambiguous_operator_work(monkeypatch):
