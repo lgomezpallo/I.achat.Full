@@ -533,3 +533,37 @@ def test_explicit_event_correction_breaks_stale_broadcast_anchor():
     plan = plan_web_lookup("¿Y el horario?", history)
     assert plan.reason == "unrelated_followup"
     assert "River-Boca" not in plan.query
+
+
+def test_freshness_word_in_short_followup_does_not_drop_original_event():
+    """'¿Y a qué hora?' must use River-Boca, not a standalone web search."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class NoRewrite:
+        def answer(self, messages):
+            raise AssertionError("The model must not replace an anchored event")
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("No confirmado."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("No confirmado."),
+    ]
+    plan = plan_web_lookup_semantic("¿Y a qué hora?", history, NoRewrite())
+    assert plan.action == "search"
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "a qué hora" in plan.query
+
+    # Without an anchor, keep the previous current-question behavior.
+    standalone = plan_web_lookup("¿Y a qué hora?")
+    assert standalone.action == "search"
+    assert standalone.reason == "current_question"
+
+    # A clear topic change must not revive the old match.
+    history.extend([user("Explicame las reglas del ajedrez."),
+                    assistant("Son varias.")])
+    unrelated = plan_web_lookup("¿Y a qué hora?", history)
+    assert unrelated.action == "search"
+    assert unrelated.reason == "current_question"
+    assert "River-Boca" not in unrelated.query
