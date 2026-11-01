@@ -763,6 +763,11 @@ def test_broadcast_guard_catches_lo_dan_por_and_se_transmite_por():
     ) == ["TyC Sports"]
 
 
+def test_no_se_transmite_is_negation_but_no_se_accented_is_uncertainty():
+    assert research._channel_stance("No, no se transmite por Telefe.", "Telefe") == "no"
+    assert research._channel_stance("No sé si lo pasan por Telefe.", "Telefe") == "unknown"
+
+
 def test_non_broadcast_question_remains_outside_channel_guard():
     history = [{"role": "user", "content": "No, no va por Telefe."}]
     answer = "Va por Telefe."
