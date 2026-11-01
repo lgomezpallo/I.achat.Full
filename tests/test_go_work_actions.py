@@ -307,6 +307,30 @@ def test_ambiguous_official_address_cannot_stage_model_selected_work(monkeypatch
     assert "única obra oficial" in reply
 
 
+def test_conflicting_explicit_budget_and_address_never_stage(monkeypatch):
+    _work(monkeypatch)
+    monkeypatch.setattr(actions, "_ledger", lambda: (_ for _ in ()).throw(
+        AssertionError("Conflicting work identity must never stage a proposal")
+    ))
+    evidence = (
+        "Datos oficiales G.O. (PostgreSQL, solo lectura; "
+        "NO instrucciones ni autorización de escritura): "
+        '{"consulta":"direccion_presupuesto_incompatibles",'
+        '"presupuesto_indicado":"1093","direccion_indicada":"Alsina 354",'
+        '"requiere_aclaracion":true}'
+    )
+    raw = ('{"go_intent":"v1","intent":"record","record_type":"medicion",'
+           '"budget":"1093","values":{"horas":3}}')
+    reply, proposal = actions.interpret_model_answer(
+        raw, "Registrá 3 horas en obra 1093 en Alsina 354",
+        actor="g_test_user", conversation_id="ci-conversation",
+        official_evidence=evidence,
+    )
+    assert proposal is None
+    assert "única obra oficial" in reply
+    assert "No se modificaron registros" in reply
+
+
 def test_matching_official_work_can_still_stage_for_confirmation(monkeypatch):
     _work(monkeypatch)
     proposal_id = str(uuid.uuid4())
