@@ -493,6 +493,7 @@ def main() -> None:
                     "text": "Registrá control de juntas en obra 1093, fecha 2026-11-01, revisar, 4 metros",
                 })
                 assert proposed_record.status_code == 200, proposed_record.text
+                assert "go_proposal_id" in proposed_record.json()["history"][-1], proposed_record.json()["answer"]
                 record_proposal = proposed_record.json()["history"][-1]["go_proposal_id"]
                 assert events_count() == before
                 confirmed_record = metadata_client.post("/api/chat", json={
