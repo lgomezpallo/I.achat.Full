@@ -188,5 +188,33 @@ def test_work_router_health_uses_no_proxy_and_never_claims_inference(monkeypatch
     assert status.status_code == 200
     assert status.json()["reachable"] is True
     assert status.json()["routing_verified"] is False
+    assert readiness.json()["routing_verified"] is False
     assert calls == [("http://127.0.0.1:8010/health",
-                      {"timeout": 8.0, "follow_redirects": False, "trust_env": False})]
+                      {"timeout": 8.0, "follow_redirects": False, "trust_env": False})] * 2
+
+
+def test_work_readiness_rejects_unreachable_router_even_when_opted_in(monkeypatch):
+    """No false HTTP 200 readiness just because the feature flag is enabled."""
+    from fastapi.testclient import TestClient
+    import iachat.app as app_module
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("GO_ROUTER_INFERENCE_ENABLED", "1")
+    monkeypatch.setenv("IACHAT_BACKEND", "router")
+    monkeypatch.setenv("ROUTER_URL", "http://127.0.0.1:8010")
+    monkeypatch.setenv("ROUTER_TOKEN", "test-only")
+    monkeypatch.setattr(app_module, "_signed_user", lambda _: "worker")
+
+    def unavailable(url, **kwargs):
+        assert url == "http://127.0.0.1:8010/health"
+        assert kwargs["trust_env"] is False
+        assert kwargs["follow_redirects"] is False
+        raise app_module.httpx.ConnectError("unreachable")
+
+    monkeypatch.setattr(app_module.httpx, "get", unavailable)
+    with TestClient(app_module.app, base_url="https://go.test") as client:
+        readiness = client.get("/ready")
+        status = client.get("/api/router/status")
+    assert readiness.status_code == 503
+    assert readiness.json()["detail"] == "router_unavailable"
+    assert status.json()["reachable"] is False
+    assert status.json()["routing_verified"] is False
