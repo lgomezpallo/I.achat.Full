@@ -28,6 +28,8 @@ REFERENTIAL_FOLLOWUP = re.compile(
     r"^\s*[¿¡]?\s*(?:y\s+)?(?:"
     r"a\s+qu[eé]\s+hora\b|"
     r"(?:qu[eé]|cu[aá]l)\s+(?:canal|horario|resultado|fecha|d[ií]a)\b|"
+    r"(?:en|por)\s+qu[eé]\s+canal\b|"
+    r"(?:lo|la)\s+(?:pasan|transmiten)\s+por\b|"
     r"d[oó]nde\b|"
     r"c[oó]mo\s+(?:sali[oó]|termin[oó]|qued[oó])\b|"
     r"qui[eé]n\s+(?:gan[oó]|juega|transmite)\b|"
@@ -248,6 +250,12 @@ def plan_web_lookup_semantic(
     No source text, attachments, secrets or tool results enter this prompt.
     """
     fallback = plan_web_lookup(message, history, has_attachments=has_attachments)
+    # A referential follow-up already has a user-authored search anchor.
+    # Do not let an unreliable free-model rewrite replace River/Boca (or any
+    # other subject) with an unrelated topic. This also holds after a day:
+    # timestamps never invalidate a continuation of the same conversation.
+    if fallback.reason == "contextual_followup":
+        return fallback
     if (has_attachments or not message.strip()
             or fallback.reason in ("self_contained_text", "explicit_search", "conversational_check")):
         return fallback
