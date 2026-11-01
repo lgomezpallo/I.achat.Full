@@ -86,11 +86,54 @@ _BARE_ADDRESS = re.compile(
 )
 
 
+def _address_references(message: str) -> list[str]:
+    """Extract operator-supplied addresses without silently choosing the first.
+
+    This is only evidence selection, not an intent parser or geocoder. Multiple
+    addresses require clarification until the operator identifies one work.
+    """
+    found = _BARE_ADDRESS.fullmatch(message)
+    if found:
+        return [" ".join(found.group("address").split())]
+    matches = [
+        (match.start(), " ".join(match.group("address").split()))
+        for pattern in (_ADDRESS_INTERSECTION, _ADDRESS_NUMBER)
+        for match in pattern.finditer(message)
+    ]
+    result = []
+    seen = set()
+    for _, address in sorted(matches):
+        if address.casefold() not in seen:
+            seen.add(address.casefold())
+            result.append(address)
+    return result
+
+
 def _address_reference(message: str) -> str | None:
-    for pattern in (_BARE_ADDRESS, _ADDRESS_INTERSECTION, _ADDRESS_NUMBER):
-        found = pattern.search(message)
-        if found:
-            return " ".join(found.group("address").split())
+    references = _address_references(message)
+    return references[0] if len(references) == 1 else None
+
+
+def contextual_address(message: str, history: list[dict] | None = None) -> str | None:
+    """Resolve a work-address follow-up from user turns, never assistant text."""
+    references = _address_references(message)
+    if len(references) > 1:
+        raise WorkContextUnavailable("go_work_missing_budget")
+    if references:
+        return references[0]
+    if not history or not _FOLLOWUP.search(message):
+        return None
+    for turn in reversed(history[-24:]):
+        if not isinstance(turn, dict) or turn.get("role") != "user":
+            continue
+        content = turn.get("content")
+        if not isinstance(content, str):
+            continue
+        references = _address_references(content)
+        if len(references) > 1:
+            raise WorkContextUnavailable("go_work_missing_budget")
+        if references:
+            return references[0]
     return None
 
 
@@ -176,7 +219,9 @@ def contextual_budgets(message: str, history: list[dict] | None = None) -> list[
             and previous_answer.get("content") == WORK_CLARIFICATION_PROMPT
         ):
             return [bare.group(1)]
-    if budgets or not _FOLLOWUP.search(message):
+    # A current address overrides an older budget; otherwise "¿y ahí?"
+    # after switching from obra 1093 to Alsina 354 would read the wrong work.
+    if budgets or _address_references(message) or not _FOLLOWUP.search(message):
         return budgets
     if not history:
         if _WORK_ANAPHORA.search(message):
@@ -193,6 +238,10 @@ def contextual_budgets(message: str, history: list[dict] | None = None) -> list[
             if len(found) != 1:
                 raise WorkContextUnavailable("go_work_ambiguous_budget")
             return found
+        # A newer user-supplied address supersedes older work numbers.
+        # contextual_address() will verify uniqueness and query PostgreSQL.
+        if _address_references(content):
+            return []
     if _WORK_ANAPHORA.search(message):
         raise WorkContextUnavailable("go_work_missing_budget")
     return []
@@ -281,7 +330,7 @@ def official_context(message: str, *, history: list[dict] | None = None, connect
     No model-generated SQL is executed. Connection errors fail closed.
     """
     budgets = contextual_budgets(message, history)
-    address = _address_reference(message) if not budgets else None
+    address = contextual_address(message, history) if not budgets else None
     overview = not budgets and not address and bool(_OVERVIEW.search(message))
     types_requested = not budgets and not address and not overview and bool(_TYPE_QUERY.search(message))
     if not budgets and not address and not overview and not types_requested:
