@@ -215,7 +215,8 @@ _BROADCAST_CHANNEL = re.compile(
 )
 _UNCERTAIN_CHANNEL = re.compile(
     r"\b(?:no\s+(?:pude|puedo)\s+confirmar|sin\s+confirmar|"
-    r"no\s+est[aá]\s+confirmado|no\s+s[eé]|"
+    r"no\s+est[aá]\s+confirmado|no\s+sé|"
+    # "No se transmite" is a negated broadcast claim, not "no sé".
     r"no\s+(?:tengo|hay)\s+confirmaci[oó]n)\b", re.I,
 )
 _USER_CORRECTION = re.compile(
