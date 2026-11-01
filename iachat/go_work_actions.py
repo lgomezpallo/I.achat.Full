@@ -141,7 +141,8 @@ def _official_budget_guard(proposal: dict, evidence: str | None) -> str | None:
             return "La obra propuesta no coincide con la evidencia oficial."
     elif source.get("encontrada") is False or source.get("consulta") in {
         "direccion_ambigua", "direccion_sin_coincidencias",
-        "direccion_busqueda_limitada", "comparacion_obras",
+        "direccion_busqueda_limitada", "direccion_presupuesto_incompatibles",
+        "comparacion_obras",
     }:
         return "No hay una única obra oficial identificada; indicá el presupuesto."
     elif proposal.get("budget") is not None:
