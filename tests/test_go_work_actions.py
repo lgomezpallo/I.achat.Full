@@ -54,6 +54,56 @@ def test_strict_json_only_and_document_never_stage(monkeypatch):
     assert ref is None and "no modifiqué" in answer
 
 
+
+def test_whole_response_json_fence_stages_only_a_pending_proposal(monkeypatch):
+    """Free-model formatting must not silently disable the approval flow."""
+    _work(monkeypatch)
+    proposal = str(uuid.uuid4())
+    stages = []
+
+    class InvalidProposal(ValueError):
+        pass
+
+    monkeypatch.setattr(actions, "_ledger", lambda: SimpleNamespace(
+        InvalidProposal=InvalidProposal,
+        stage=lambda data, text, **scope: (
+            stages.append((data, text, scope)) or
+            {"phase": "flexible_pending", "proposal_id": proposal, "reply": "Pendiente"}
+        ),
+    ))
+    payload = (
+        '{"go_intent":"v1","intent":"record","record_type":"medicion",'
+        '"budget":"1093","values":{"horas":3}}'
+    )
+    raw = "```json\n" + payload + "\n```"
+    answer, ref = _interpret(raw, "Registrá 3 horas en obra 1093")
+    assert (answer, ref) == ("Pendiente", proposal)
+    assert len(stages) == 1
+    assert stages[0][0]["budget"] == "1093"
+    assert stages[0][2] == {"actor": "g_test_user", "conversation_id": "ci-conversation"}
+
+
+def test_never_extracts_action_json_from_prose_or_multiple_fences(monkeypatch):
+    """Explanations, injected documents and partial JSON cannot stage writes."""
+    _work(monkeypatch)
+    monkeypatch.setattr(actions, "_ledger", lambda: (_ for _ in ()).throw(
+        AssertionError("No database access for mixed model output")
+    ))
+    payload = '{"go_intent":"v1","intent":"record","record_type":"medicion"}'
+    fence = "```json\n" + payload + "\n```"
+    for raw in ("Acá va la propuesta:\n" + fence, fence + "\nConfirmado",
+                fence + "\n" + fence, "```json\n{" + "\n```"):
+        assert _interpret(raw, "Registrá una medición") == (raw, None)
+
+
+def test_fenced_conversation_reply_never_writes(monkeypatch):
+    _work(monkeypatch)
+    monkeypatch.setattr(actions, "_ledger", lambda: (_ for _ in ()).throw(
+        AssertionError("No ledger for a normal conversation")
+    ))
+    raw = '```JSON\n{"go_intent":"v1","intent":"conversation","reply":"Necesito la obra."}\n```'
+    assert _interpret(raw, "¿Qué pasó?") == ("Necesito la obra.", None)
+
 def test_proposal_uses_existing_ledger_and_requires_same_conversation(monkeypatch):
     _work(monkeypatch)
     proposal = str(uuid.uuid4())
