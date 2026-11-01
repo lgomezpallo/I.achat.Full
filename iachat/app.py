@@ -744,7 +744,7 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
         try:
             answer, go_proposal_id = interpret_model_answer(
                 answer, message.text, actor=owner, conversation_id=conversation_id,
-                attachments=bool(message.attachments)
+                attachments=bool(message.attachments), official_evidence=work_evidence,
             )
         except RuntimeError as exc:
             raise HTTPException(503, "go_work_approval_unavailable") from exc
