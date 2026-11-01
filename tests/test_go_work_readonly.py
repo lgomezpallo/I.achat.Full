@@ -850,12 +850,12 @@ def test_http_ambiguous_comparison_followup_can_be_clarified_by_budget(monkeypat
         })
         assert resolved.status_code == 200, resolved.text
         assert len(backend.messages) == 2
-        assert any(
-            '"presupuesto": "1190"' in item["content"]
-            for item in backend.messages[-1] if item["role"] == "user"
-        )
-        assert not any(
-            '"presupuesto": "1093"' in item["content"]
-            for item in backend.messages[-1] if item["role"] == "user"
-        )
+        latest_official = [
+            item["content"] for item in backend.messages[-1]
+            if item["role"] == "user"
+            and item["content"].startswith("[DATOS OFICIALES DE HERRAMIENTA")
+        ]
+        assert len(latest_official) == 1
+        assert '"presupuesto": "1190"' in latest_official[0]
+        assert '"presupuesto": "1093"' not in latest_official[0]
         assert len(resolved.json()["history"]) == 6
