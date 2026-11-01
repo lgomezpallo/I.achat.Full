@@ -767,3 +767,44 @@ def test_full_address_candidate_page_never_claims_unique_work(monkeypatch):
     assert '"muestra_limitada": true' in result
     assert not any(sql.startswith("SELECT id,direccion,estado FROM obras")
                    for sql, _ in connection.statements)
+
+
+def test_explicit_budget_and_address_must_identify_same_official_work(monkeypatch):
+    """Do not silently prefer the budget over a conflicting address."""
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    valid = FakeReadOnlyConnection()
+    evidence = work.official_context(
+        "¿Qué pasó en obra 1190 en Alsina 354?",
+        connect=lambda *args, **kwargs: valid,
+    )
+    assert '"presupuesto": "1190"' in evidence
+    assert '"horas": 6' in evidence
+    assert '"consulta": "direccion_presupuesto_incompatibles"' not in evidence
+
+    conflict = FakeReadOnlyConnection()
+    evidence = work.official_context(
+        "Registrá 3 horas en obra 1093 en Alsina 354",
+        connect=lambda *args, **kwargs: conflict,
+    )
+    assert '"consulta": "direccion_presupuesto_incompatibles"' in evidence
+    assert '"presupuesto_indicado": "1093"' in evidence
+    assert '"direccion_indicada": "Alsina 354"' in evidence
+    assert '"requiere_aclaracion": true' in evidence
+    assert '"registros"' not in evidence
+    # The official work may be read to check its address, but its events must
+    # not become trusted evidence when the operator's references conflict.
+    assert not any("FROM go_record_events e" in sql for sql, _ in conflict.statements)
+
+
+def test_multiple_mixed_references_require_clarification_before_sql(monkeypatch):
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = FakeReadOnlyConnection()
+    with pytest.raises(work.WorkContextUnavailable, match="go_work_ambiguous_budget"):
+        work.official_context(
+            "Compará obra 1093 y obra 1190 en Alsina 354",
+            connect=lambda *args, **kwargs: connection,
+        )
+    assert connection.statements == []
+    # Ordinary explicit budget phrases are not mistaken for addresses.
+    assert work._address_references("¿Qué pasó en obra 1093?") == []
+    assert work._address_references("¿Qué pasó en presupuesto 1093?") == []
