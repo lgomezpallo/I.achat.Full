@@ -61,6 +61,9 @@ BROADCAST_CORRECTION = re.compile(
     r"[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
     r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2}"
     r"\s+no\s+(?:lo|la)\s+(?:pasa|pasan|transmite|transmiten|emite|emiten)\b"
+    r"|(?:no[,;:.!]?\s+){1,2}(?:no\s+)?(?:lo|la)\s+"
+    r"(?:pasa|pasan|transmite|transmiten|emite|emiten)\s+(?:por|en)\s+"
+    r"[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*\b"
     r"|(?:te\s+equivocaste|eso\s+est[aá]\s+mal)\s+"
     r"(?:con\s+)?(?:el\s+)?canal\b)",
     re.IGNORECASE,
@@ -221,7 +224,9 @@ def plan_web_lookup(
     # messages never count as a source of user search intent.
     users = [
         turn.get("content", "").strip()
-        for turn in history[-12:]
+        # Scan more than six user follow-ups, but remain bounded; a new
+        # topic still breaks inheritance in the loop below.
+        for turn in history[-64:]
         if turn.get("role") == "user" and isinstance(turn.get("content"), str)
     ]
     if not users:
