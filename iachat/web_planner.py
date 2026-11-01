@@ -192,14 +192,19 @@ def plan_web_lookup(
         needs_current_information(question) or EXPLICIT_SEARCH.search(question)
     ):
         return WebLookupPlan("answer", reason="conversational_check")
-    if needs_current_information(question):
+    # "¿Y a qué hora?" contains a freshness phrase but is also a
+    # referential question. Resolve its event first, rather than searching
+    # the bare words and losing the subject of the conversation.
+    current = needs_current_information(question)
+    referential = bool(REFERENTIAL_FOLLOWUP.match(question) and len(question) <= 180)
+    if current and not (referential and history):
         return WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "current_question")
     if EXPLICIT_SEARCH.search(question):
         return WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "explicit_search")
     clarification = _clarification_query(question, history)
     if clarification:
         return WebLookupPlan("search", clarification, "clarification_followup")
-    if not REFERENTIAL_FOLLOWUP.match(question) or len(question) > 180:
+    if not referential:
         return WebLookupPlan("answer", reason="no_web_signal")
 
     # Restrict context to recent turns in the SAME conversation. Assistant
@@ -210,7 +215,8 @@ def plan_web_lookup(
         if turn.get("role") == "user" and isinstance(turn.get("content"), str)
     ]
     if not users:
-        return WebLookupPlan("answer", reason="no_recent_context")
+        return (WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "current_question")
+                if current else WebLookupPlan("answer", reason="no_recent_context"))
     # Walk a short, uninterrupted chain of referential USER questions back
     # to the original fresh-information request. A third follow-up must not
     # lose the entity (e.g. River-Boca) and let a semantic rewrite invent a
@@ -227,7 +233,8 @@ def plan_web_lookup(
         if not REFERENTIAL_FOLLOWUP.match(prior):
             break
     if not context:
-        return WebLookupPlan("answer", reason="unrelated_followup")
+        return (WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "current_question")
+                if current else WebLookupPlan("answer", reason="unrelated_followup"))
     query = f"{context} {question}"[:MAX_SEARCH_QUERY]
     return WebLookupPlan("search", query, "contextual_followup")
 
