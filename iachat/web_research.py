@@ -232,7 +232,16 @@ _BROADCAST_ALT_CHANNEL = re.compile(
 )
 _BROADCAST_QUESTION = re.compile(
     r"\b(?:canal(?:es)?|transmisi[oó]n|transmiten|televisan|pasan|emiten)\b"
-    r"|\bd[oó]nde\s+(?:ver|mirar)\b", re.I,
+    r"|\bd[oó]nde\s+(?:ver|mirar|(?:(?:lo|la)\s+)?(?:pasan|transmiten|emiten))\b", re.I,
+)
+# Short replies are channel assertions only when the user's question is
+# explicitly about a broadcast. Do not treat an arbitrary proper noun in a
+# longer answer as a station name.
+_BROADCAST_SHORT_ANSWER = re.compile(
+    r"\s*(?:(?i:(?:es|va)\s+por|por)\s+)?"
+    r"([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})"
+    r"\s*[.!]?\s*"
 )
 _BROADCAST_REVERSE_CHANNEL = re.compile(
     r"\b([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
@@ -256,6 +265,9 @@ def _broadcast_channels(question: str, answer: str) -> list[str]:
         *(m.group(1) for m in _BROADCAST_CHANNEL.finditer(answer)),
         *(m.group(1) for m in _BROADCAST_REVERSE_CHANNEL.finditer(answer)),
     ]
+    short_answer = _BROADCAST_SHORT_ANSWER.fullmatch(answer)
+    if short_answer:
+        candidates.append(short_answer.group(1))
     channels: list[str] = []
     seen: set[str] = set()
     for raw in candidates:
@@ -269,8 +281,14 @@ def _broadcast_channels(question: str, answer: str) -> list[str]:
     return channels
 
 
-def _channel_stance(text: str, channel: str) -> str | None:
-    """Classify only explicit, nearby channel assertions; otherwise abstain."""
+def _channel_stance(
+    text: str, channel: str, *, allow_short_answer: bool = False,
+) -> str | None:
+    """Classify explicit assertions, allowing a bare name only in a channel answer."""
+    if allow_short_answer:
+        short = _BROADCAST_SHORT_ANSWER.fullmatch(text)
+        if short and short.group(1).casefold() == channel.casefold():
+            return "yes"
     name = r"\b" + re.escape(channel) + r"\b"
     for sentence in re.split(r"[\n.!?]+", text):
         if not re.search(name, sentence, re.I):
@@ -304,7 +322,7 @@ def guard_unverified_broadcast_claim(
     Do not waive the conflict guard merely because an unrelated page was read.
     """
     for channel in _broadcast_channels(question, answer):
-        stance = _channel_stance(answer, channel)
+        stance = _channel_stance(answer, channel, allow_short_answer=True)
         if stance not in ("yes", "no"):
             continue
         prior = [
