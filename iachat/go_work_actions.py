@@ -104,8 +104,20 @@ def interpret_model_answer(raw: str, message: str, *, actor: str, conversation_i
     """
     if not enabled():
         return raw, None
+    # Some free models wrap otherwise valid JSON in a single Markdown fence.
+    # Accept ONLY a whole-response JSON fence; never extract a JSON fragment
+    # from prose, which could turn an explanation into an unintended proposal.
+    payload = raw
+    if isinstance(raw, str):
+        import re
+        fenced = re.fullmatch(
+            r"\\s*\x60\x60\x60(?:json)?[ \\t]*\\r?\\n(.*?)\\r?\\n\x60\x60\x60\\s*",
+            raw, flags=re.I | re.S,
+        )
+        if fenced:
+            payload = fenced.group(1)
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(payload)
     except (TypeError, ValueError):
         return raw, None
     if not isinstance(parsed, dict) or parsed.get("go_intent") != "v1":
