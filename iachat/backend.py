@@ -27,6 +27,12 @@ class RouterFirstBackend:
         ):
             # Never send a labor-instance bearer or work context off Oracle.
             raise RuntimeError("go_router_requires_local_endpoint")
+        if profile == "go-ute" and os.getenv("GO_ROUTER_INFERENCE_ENABLED") != "1":
+            # A local Router URL and a valid token do not prove that its
+            # currently installed catalog/account cannot incur charges.
+            # Require a separate, explicit activation AFTER external audit.
+            # This flag is an operational lock, not proof of free billing.
+            raise RuntimeError("go_router_inference_not_authorized")
         # Keep the user-facing language stable even when Router changes models.
         # This is guidance, not a guarantee: end-to-end tests still need to verify output.
         language_guidance = (
