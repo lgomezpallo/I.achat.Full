@@ -810,3 +810,29 @@ def test_persisted_chat_va_por_after_user_correction_abstains(monkeypatch):
     assert "no voy a afirmar ni negar" in response.json()["answer"]
     saved = app_module.store.get("va-por-corrected", "admin")
     assert saved[-1]["content"] == response.json()["answer"]
+
+
+def test_prior_bare_channel_reply_is_treated_as_a_claim_in_broadcast_context():
+    """A one-word earlier answer can contradict a later categorical denial."""
+    history = [
+        {"role": "user", "content": "¿Y en qué canal lo pasan?"},
+        {"role": "assistant", "content": "Telefe."},
+    ]
+    answer = "No, no va por Telefe."
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history, [],
+    )
+    assert "contradictoria" in guarded
+    assert "no voy a afirmar ni negar" in guarded
+
+
+def test_prior_bare_name_in_nonbroadcast_context_is_not_a_channel_claim():
+    """A spelling answer is not evidence about television transmission."""
+    history = [
+        {"role": "user", "content": "¿Cómo se escribe Telefe?"},
+        {"role": "assistant", "content": "Telefe."},
+    ]
+    answer = "No, no va por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history, [],
+    ) == answer
