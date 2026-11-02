@@ -408,11 +408,10 @@ def guard_unverified_broadcast_claim(
                 )
                 if value:
                     prior.append(value)
+        # Uncertainty is not a factual stance. A previous "no sé" must
+        # not block a later answer, nor erase an earlier actual contradiction.
         asserted = {value for value in prior if value in ("yes", "no")}
-        contradiction = (
-            len(asserted) > 1
-            or bool(prior and prior[-1] != stance)
-        )
+        contradiction = bool(asserted - {stance})
         for turn in history:
             if turn.get("role") != "user":
                 continue
