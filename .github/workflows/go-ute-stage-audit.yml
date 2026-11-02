@@ -1,0 +1,88 @@
+name: G.O. auditar segunda instancia Oracle sin cambios
+on:
+  push:
+    branches: ["audit/go-ute-stage-oracle-20261102"]
+    paths: [".github/workflows/go-ute-stage-audit.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Auditar acceso SSH de repositorio y estado laboral sin modificar servicios
+        shell: bash
+        env:
+          ORACLE_HOST: ${{ vars.ORACLE_SSH_HOST }}
+          ORACLE_USER: ${{ vars.ORACLE_SSH_USER }}
+          ORACLE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          ORACLE_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          for v in ORACLE_HOST ORACLE_USER ORACLE_KEY ORACLE_KNOWN_HOSTS; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::REPO_SSH_CREDENTIAL_UNAVAILABLE:${v} (no environment secret requested)"
+              exit 2
+            fi
+          done
+          install -d -m 700 ~/.ssh
+          keyfile="$(mktemp ~/.ssh/go-stage-key.XXXXXXXX)"
+          knownfile="$(mktemp ~/.ssh/go-stage-known.XXXXXXXX)"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_KEY" > "$keyfile"; chmod 600 "$keyfile"
+          printf '%s\n' "$ORACLE_KNOWN_HOSTS" > "$knownfile"; chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=12 \
+            "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo "GO_ORACLE_SSH=connected"
+          echo "GO_LEGACY_SERVICE=$(systemctl is-active go-ute 2>/dev/null || true)"
+          echo "GO_STAGE_SERVICE=$(systemctl is-active go-ute-iachat-stage 2>/dev/null || true)"
+          echo "GO_STAGE_UNIT=$(systemctl show -p LoadState --value go-ute-iachat-stage 2>/dev/null || true)"
+          if [ -d /opt/go-ute-iachat ]; then echo "GO_STAGE_CODE=present"; else echo "GO_STAGE_CODE=absent"; fi
+          if [ -d /var/lib/go-ute-iachat ]; then echo "GO_STAGE_STATE=present"; else echo "GO_STAGE_STATE=absent"; fi
+          if [ -f /etc/go-ute/iachat-stage.env ]; then echo "GO_STAGE_ENV=present"; else echo "GO_STAGE_ENV=absent"; fi
+          if [ -f /opt/go-ute-iachat/scripts/check_shared_iachat_profile.py ]; then
+            echo "GO_STAGE_PREFLIGHT=present"
+          else
+            echo "GO_STAGE_PREFLIGHT=absent"
+          fi
+          echo "GO_STAGE_PORT=$(ss -ltnH | awk '$4 ~ /:8021$/ {n++} END {print n+0}')"
+          echo "GO_STAGE_HEALTH_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8021/health || true)"
+          echo "GO_LEGACY_HEALTH_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8020/health || true)"
+          echo "GO_LEGACY_SHA=$(git -C /home/ubuntu/Proyecto/Aplicaciones/GestionObrasUTE rev-parse --short HEAD 2>/dev/null || echo unavailable)"
+          if sudo -n true 2>/dev/null; then
+            sudo -n python3 - <<'PY'
+          from pathlib import Path
+          import os, shlex
+          p=Path('/etc/go-ute/iachat-stage.env')
+          if not p.is_file():
+              print('GO_STAGE_ENV_ISOLATION=not_configured')
+          else:
+              cfg={}
+              for line in p.read_text().splitlines():
+                  s=line.strip()
+                  if not s or s.startswith('#'): continue
+                  if s.startswith('export '): s=s[7:]
+                  if '=' not in s: continue
+                  k,v=s.split('=',1)
+                  try: v=shlex.split(v,comments=False)[0]
+                  except (ValueError,IndexError): v=v.strip().strip('"').strip("'")
+                  cfg[k.strip()]=v
+              root=Path(cfg.get('GO_LABOR_STATE_DIR','/invalid'))
+              db=Path(cfg.get('IACHAT_DB','/invalid'))
+              try: isolated=(root==Path('/var/lib/go-ute-iachat') and root.resolve()==root and db.resolve().is_relative_to(root.resolve()) and db.resolve()!=root.resolve())
+              except Exception: isolated=False
+              forbidden=any(cfg.get(k) for k in ('GROQ_API_KEY','OPENROUTER_API_KEY','NVIDIA_API_KEY','CLOUDFLARE_API_TOKEN','GO_DATABASE_URL'))
+              enabled=cfg.get('GO_ROUTER_INFERENCE_ENABLED','0')!='0' or cfg.get('GO_WORK_WRITE_ENABLED','0')!='0'
+              auth=bool(cfg.get('IACHAT_AUTH_SECRET')) and bool(cfg.get('IACHAT_GOOGLE_ALLOWED_SUBS'))
+              print('GO_STAGE_ENV_ISOLATION='+('pass' if isolated and not forbidden and not enabled and auth else 'fail'))
+              print('GO_STAGE_PROFILE='+('labor' if cfg.get('IACHAT_PROFILE')=='go-ute' else 'mismatch'))
+              print('GO_STAGE_READONLY_DSN='+('present' if cfg.get('GO_WORK_READONLY_DSN') else 'absent'))
+          PY
+          else
+            echo "GO_STAGE_ENV_ISOLATION=unverified_no_sudo"
+          fi
+          echo "GO_STAGE_AUDIT=read_only_complete"
+          REMOTE
