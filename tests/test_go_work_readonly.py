@@ -107,7 +107,33 @@ def test_scoped_ledger_read_uses_parameterized_selects_only(monkeypatch):
         sql.startswith(("SET TRANSACTION READ ONLY", "SHOW transaction_read_only", "SELECT"))
         for sql, _ in connection.statements
     )
-    assert any("NOT EXISTS" in sql and "LIMIT 8" in sql for sql, _ in connection.statements)
+    assert any("NOT EXISTS" in sql and "LIMIT 9" in sql for sql, _ in connection.statements)
+
+
+
+def test_official_event_evidence_discloses_truncation_without_leaking_ninth_event(monkeypatch):
+    """Never present eight recent records as a complete official history."""
+    class NineEvents(FakeReadOnlyConnection):
+        def execute(self, sql, params=None):
+            if sql.startswith("SELECT e.id,e.tipo,e.version,e.datos"):
+                self.statements.append((sql, params))
+                return Result(many=[
+                    (f"event-{i}", "medicion", 2, {"horas": i})
+                    for i in range(9)
+                ])
+            return super().execute(sql, params)
+
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    connection = NineEvents()
+    evidence = work.official_context(
+        "¿Cuáles son todos los registros de obra 1093?",
+        connect=lambda *args, **kwargs: connection,
+    )
+    assert '"registros_limitados": true' in evidence
+    assert '"event-7"' in evidence
+    assert '"event-8"' not in evidence
+    assert any("LIMIT 9" in sql for sql, _ in connection.statements)
+
 
 
 def test_general_work_question_reads_bounded_official_overview(monkeypatch):
