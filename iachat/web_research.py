@@ -239,8 +239,8 @@ _BROADCAST_ALT_CHANNEL = re.compile(
     r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})",
 )
 _BROADCAST_QUESTION = re.compile(
-    r"\b(?:canal(?:es)?|transmisi[oó]n|transmiten|transmite|televisan|pasan|pasa|emiten|emite|dan)\b"
-    r"|\b(?:va|van)\s+por\b"
+    r"\b(?:canal(?:es)?|transmisi[oó]n|transmiten|transmite|televisan|pasan|emiten|emite|dan)\b"
+    r"|\b(?:lo|la)\s+pasa\b"\n    r"|\b(?:va|van)\s+por\b"
     r"|\bd[oó]nde\s+(?:ver|mirar|(?:(?:lo|la)\s+)?(?:pasan|transmiten|emiten))\b", re.I,
 )
 # Short replies are channel assertions only when the user's question is
