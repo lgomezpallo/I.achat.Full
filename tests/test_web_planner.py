@@ -611,3 +611,33 @@ def test_negated_channel_correction_is_not_a_new_event_anchor():
     changed = plan_web_lookup("¿Y el horario?", history)
     assert changed.reason == "unrelated_followup"
     assert "River-Boca" not in changed.query
+
+
+def test_persisted_480_turn_followup_keeps_event_and_correction_out_of_query():
+    """A day-later continuation must not lose the original match at 64 messages."""
+    history = [user("¿Cuándo es el próximo River-Boca?"), assistant("Sin fecha confirmada.")]
+    for _ in range(478):
+        history.extend([user("¿Y el horario?"), assistant("Todavía no confirmado.")])
+    history.extend([user("No, no lo pasan por Telefe."),
+                    assistant("No tengo el canal confirmado.")])
+    plan = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Telefe" not in plan.query
+
+    # The long scan must still stop at a new topic, even after 480 turns.
+    history.extend([user("Explicame las reglas del ajedrez."),
+                    assistant("Las piezas se mueven por turnos.")])
+    changed = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert changed.reason == "unrelated_followup"
+    assert "River-Boca" not in changed.query
+
+
+def test_planner_does_not_guess_subject_beyond_bounded_window():
+    history = [user("¿Cuándo es el próximo River-Boca?"), assistant("No confirmado.")]
+    for _ in range(520):
+        history.extend([user("¿Y el horario?"), assistant("Sin confirmar.")])
+    plan = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert plan.action == "answer"
+    assert plan.reason == "unrelated_followup"
+    assert "River-Boca" not in plan.query
