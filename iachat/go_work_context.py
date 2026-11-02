@@ -333,7 +333,7 @@ def _read_work(conn, budget: str) -> dict:
         "SELECT e.id,e.tipo,e.version,e.datos FROM go_record_events e "
         "WHERE e.obra_id=%s AND NOT EXISTS "
         "(SELECT 1 FROM go_record_events n WHERE n.reemplaza=e.id) "
-        "ORDER BY e.creado DESC,e.id DESC LIMIT 8",
+        "ORDER BY e.creado DESC,e.id DESC LIMIT 9",
         (work[0],),
     ).fetchall()
     return {
@@ -341,10 +341,11 @@ def _read_work(conn, budget: str) -> dict:
         "encontrada": True,
         "direccion": str(work[1])[:160],
         "estado": str(work[2])[:80],
+        "registros_limitados": len(rows) > 8,
         "registros": [
             {"id": str(event_id), "tipo": str(kind)[:48],
              "version": version, "datos": _summary(values)}
-            for event_id, kind, version, values in rows
+            for event_id, kind, version, values in rows[:8]
         ],
     }
 
