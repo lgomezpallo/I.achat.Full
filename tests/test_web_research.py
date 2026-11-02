@@ -947,3 +947,23 @@ def test_long_history_fixture_switch_keeps_disputes_separate():
     assert "contradictoria" in research.guard_unverified_broadcast_claim(
         "¿Qué canal transmite River-Boca?", answer, history, [],
     )
+
+
+def test_unpunctuated_user_denial_blocks_repeated_channel_claim():
+    """A user correction must count even if no comma follows 'No'."""
+    for correction in ("No lo pasan por Telefe.", "No va por Telefe.",
+                       "No es por Telefe."):
+        history = [
+            {"role": "user", "content": "¿Cuándo es River-Boca?"},
+            {"role": "assistant", "content": "Lo pasan por Telefe."},
+            {"role": "user", "content": correction},
+        ]
+        answer = "Lo pasan por Telefe."
+        guarded = research.guard_unverified_broadcast_claim(
+            "¿Y en qué canal lo pasan?", answer, history, [],
+        )
+        assert "no voy a afirmar ni negar" in guarded, correction
+    assert research.guard_unverified_broadcast_claim(
+        "¿Cómo funciona la TV?", "Lo pasan por Telefe.",
+        [{"role": "user", "content": "No lo pasan por Telefe."}], [],
+    ) == "Lo pasan por Telefe."
