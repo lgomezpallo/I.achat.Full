@@ -967,3 +967,42 @@ def test_unpunctuated_user_denial_blocks_repeated_channel_claim():
         "¿Cómo funciona la TV?", "Lo pasan por Telefe.",
         [{"role": "user", "content": "No lo pasan por Telefe."}], [],
     ) == "Lo pasan por Telefe."
+
+
+def test_prior_uncertainty_does_not_create_a_factual_contradiction():
+    """A prior abstention is not evidence against a later channel answer."""
+    history = [
+        {"role": "user", "content": "¿Qué canal pasa River-Boca?"},
+        {"role": "assistant", "content": "No sé si va por Telefe."},
+    ]
+    answer = "Lo pasan por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", answer, history, [],
+    ) == answer
+
+
+def test_uncertainty_does_not_erase_an_older_real_channel_conflict():
+    """A real negative assertion remains disputed despite later abstention."""
+    history = [
+        {"role": "user", "content": "¿Qué canal pasa River-Boca?"},
+        {"role": "assistant", "content": "No va por Telefe."},
+        {"role": "user", "content": "¿Y el canal?"},
+        {"role": "assistant", "content": "No sé si va por Telefe."},
+    ]
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+    )
+    assert "contradictoria" in guarded
+
+
+def test_prior_uncertainty_does_not_override_explicit_user_correction():
+    """A correction is still authoritative conversational conflict."""
+    history = [
+        {"role": "user", "content": "¿Qué canal pasa River-Boca?"},
+        {"role": "assistant", "content": "No sé si va por Telefe."},
+        {"role": "user", "content": "No lo pasan por Telefe."},
+    ]
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+    )
+    assert "contradictoria" in guarded
