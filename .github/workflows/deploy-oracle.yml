@@ -56,6 +56,12 @@ jobs:
                   with urllib.request.urlopen(request, timeout=15) as response:
                       return json.load(response)
 
+              # Refuse late workflow_run events for commits no longer at main HEAD.
+              main = github_json(f"https://api.github.com/repos/{repo}/branches/main")
+              main_sha = (main.get("commit") or {}).get("sha")
+              if not main_sha or main_sha != sha:
+                  raise SystemExit("stale_ci_sha_not_current_main")
+
               # Inspect the actual CI commit, not just PR metadata. If a
               # diagnostic path is present but the authorized PR cannot be
               # matched exactly, FAIL CLOSED instead of deploying it.
@@ -83,8 +89,8 @@ jobs:
                   paths = {item["filename"] for item in files}
                   if diagnostic <= paths <= permitted and changed_paths <= permitted:
                       deploy = False
-              if deploy and changed_paths & diagnostic:
-                  raise SystemExit("diagnostic_release_scope_unverified")
+              if deploy and changed_paths & permitted:
+                  raise SystemExit("protected_release_scope_unverified")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("deploy=" + str(deploy).lower() + "\n")
           print("RELEASE_SCOPE=" + ("DEPLOY" if deploy else "SKIP_DIAGNOSTIC_ONLY"))
