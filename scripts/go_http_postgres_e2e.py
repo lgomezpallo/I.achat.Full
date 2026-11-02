@@ -339,6 +339,24 @@ def main() -> None:
                 )
                 assert events_count() == 3
 
+                # A reporting month/year is not a street address. Check the
+                # real PostgreSQL evidence path through authenticated HTTP:
+                # no false mismatch, no proposal, and no official mutation.
+                dated = client.post("/api/chat", json={
+                    "text": "¿Qué pasó en obra 1093 en octubre 2026?",
+                })
+                assert dated.status_code == 200, dated.text
+                dated_evidence = [
+                    item["content"] for item in requests[-1]["conversation"]
+                    if item["role"] == "user"
+                    and "Datos oficiales G.O." in item["content"]
+                ]
+                assert dated_evidence
+                assert '"presupuesto": "1093"' in dated_evidence[-1]
+                assert '"encontrada": true' in dated_evidence[-1]
+                assert '"consulta": "direccion_presupuesto_incompatibles"' not in dated_evidence[-1]
+                assert events_count() == 3
+
                 # PostgreSQL 16 + authenticated HTTP chat: no work was
                 # identified in this new conversation. A fabricated budget
                 # from the simulated model must not even stage a proposal.
