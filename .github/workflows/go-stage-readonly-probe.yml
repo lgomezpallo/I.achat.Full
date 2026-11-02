@@ -1,0 +1,94 @@
+name: G.O. instancia laboral 8021 — auditoría solo lectura
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/go-stage-readonly-probe.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: oracle-production
+    steps:
+      - name: Auditar instancia laboral en Oracle protegido (sin escrituras)
+        shell: bash
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          keyfile="$(mktemp "$HOME/.ssh/go-prod-key.XXXXXXXX")"
+          knownfile="$(mktemp "$HOME/.ssh/go-prod-known.XXXXXXXX")"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          actual="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo "GO_AUDIT_MODE=read_only"
+          echo "GO_AUDIT_HOSTNAME=$(hostname)"
+          for unit in iachat router go-ute go-ute-iachat-stage; do
+            printf '%s_LOAD=' "$unit"
+            systemctl show "$unit" -p LoadState --value 2>/dev/null || true
+            printf '%s_ACTIVE=' "$unit"
+            systemctl is-active "$unit" 2>/dev/null || true
+          done
+          for port in 8000 8020 8021; do
+            printf 'PORT_%s_LISTEN=' "$port"
+            ss -ltnH | awk -v p=":$port" '$4 ~ (p "$") {found=1} END {print found+0}'
+            printf 'PORT_%s_HEALTH_HTTP=' "$port"
+            curl -s -o /dev/null -w '%{http_code}\n' --max-time 3 "http://127.0.0.1:$port/health" || true
+          done
+          for path in /opt/go-ute-iachat /var/lib/go-ute-iachat /opt/go-ute-iachat/scripts/check_shared_iachat_profile.py; do
+            case "$path" in
+              /opt/go-ute-iachat) name=GO_STAGE_CODE;;
+              /var/lib/go-ute-iachat) name=GO_STAGE_STATE;;
+              *) name=GO_STAGE_PREFLIGHT;;
+            esac
+            if test -e "$path"; then echo "$name=present"; else echo "$name=absent"; fi
+          done
+          if sudo -n test -f /etc/go-ute/iachat-stage.env 2>/dev/null; then
+            echo "GO_STAGE_ENV=present"
+            sudo -n python3 - <<'PY'
+          from pathlib import Path
+          import shlex
+          p=Path('/etc/go-ute/iachat-stage.env')
+          cfg={}
+          for line in p.read_text().splitlines():
+              s=line.strip()
+              if not s or s.startswith('#'): continue
+              if s.startswith('export '): s=s[7:]
+              if '=' not in s: continue
+              k,v=s.split('=',1)
+              try: v=shlex.split(v, comments=False)[0]
+              except (ValueError, IndexError): v=v.strip().strip('"').strip("'")
+              cfg[k.strip()]=v
+          root=Path('/var/lib/go-ute-iachat')
+          try:
+              state=Path(cfg.get('GO_LABOR_STATE_DIR','/invalid'))
+              db=Path(cfg.get('IACHAT_DB','/invalid'))
+              isolated=state==root and state.resolve()==root and db.resolve().is_relative_to(root.resolve()) and db.resolve()!=root.resolve()
+          except Exception:
+              isolated=False
+          print('GO_STAGE_STATE_ISOLATED='+str(isolated).lower())
+          print('GO_STAGE_PROFILE_MATCH='+str(cfg.get('IACHAT_PROFILE')=='go-ute').lower())
+          print('GO_STAGE_AUTH_CONFIGURED='+str(bool(cfg.get('IACHAT_AUTH_SECRET')) and bool(cfg.get('IACHAT_GOOGLE_ALLOWED_SUBS'))).lower())
+          print('GO_STAGE_INFERENCE_DISABLED='+str(cfg.get('GO_ROUTER_INFERENCE_ENABLED','0')=='0').lower())
+          print('GO_STAGE_WORK_WRITE_DISABLED='+str(cfg.get('GO_WORK_WRITE_ENABLED','0')=='0').lower())
+          print('GO_STAGE_READONLY_DSN_CONFIGURED='+str(bool(cfg.get('GO_WORK_READONLY_DSN'))).lower())
+          print('GO_STAGE_DIRECT_PROVIDER_KEYS_ABSENT='+str(not any(cfg.get(k) for k in ('GROQ_API_KEY','OPENROUTER_API_KEY','NVIDIA_API_KEY','CLOUDFLARE_API_TOKEN'))).lower())
+          PY
+          else
+            echo "GO_STAGE_ENV=absent_or_unreadable"
+          fi
+          echo "GO_AUDIT_COMPLETE=read_only"
+          REMOTE
