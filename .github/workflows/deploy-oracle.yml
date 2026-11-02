@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read  # release-scope reads PR #105 metadata and changed paths
   statuses: write
 
 concurrency:
@@ -16,8 +17,88 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  release-scope:
+    # A diagnostic-only merge must not redeploy production after green CI.
+    # Any unknown commit scope FAILS this gate rather than risking a deploy.
     if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      deploy: ${{ steps.scope.outputs.deploy }}
+    steps:
+      - id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          deploy = True
+          if os.environ["EVENT_NAME"] == "workflow_run":
+              repo = os.environ["REPO"]
+              sha = os.environ["RELEASE_SHA"]
+              if not sha or not os.environ["GH_TOKEN"]:
+                  raise SystemExit("release_scope_credentials_or_sha_missing")
+              def github_json(url):
+                  request = urllib.request.Request(
+                      url,
+                      headers={
+                          "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                          "Accept": "application/vnd.github+json",
+                          "User-Agent": "iachat-release-scope",
+                      },
+                  )
+                  with urllib.request.urlopen(request, timeout=15) as response:
+                      return json.load(response)
+
+              # Refuse late workflow_run events for commits no longer at main HEAD.
+              main = github_json(f"https://api.github.com/repos/{repo}/branches/main")
+              main_sha = (main.get("commit") or {}).get("sha")
+              if not main_sha or main_sha != sha:
+                  raise SystemExit("stale_ci_sha_not_current_main")
+
+              # Inspect the actual CI commit, not just PR metadata. If a
+              # diagnostic path is present but the authorized PR cannot be
+              # matched exactly, FAIL CLOSED instead of deploying it.
+              commit = github_json(
+                  f"https://api.github.com/repos/{repo}/commits/{sha}?per_page=100"
+              )
+              changed = commit.get("files")
+              if not isinstance(changed, list) or not changed or len(changed) >= 100:
+                  raise SystemExit("release_commit_scope_incomplete")
+              changed_paths = {item["filename"] for item in changed}
+              diagnostic = {
+                  ".github/workflows/iachat-one-turn.yml",
+                  "scripts/iachat_one_turn_probe.py",
+              }
+              permitted = diagnostic | {".github/workflows/deploy-oracle.yml"}
+
+              pr = github_json(f"https://api.github.com/repos/{repo}/pulls/105")
+              authorized = pr.get("merged") and pr.get("merge_commit_sha") == sha
+              if authorized:
+                  files = github_json(
+                      f"https://api.github.com/repos/{repo}/pulls/105/files?per_page=100"
+                  )
+                  if not isinstance(files, list) or not files or len(files) >= 100:
+                      raise SystemExit("diagnostic_pr_scope_incomplete")
+                  paths = {item["filename"] for item in files}
+                  if diagnostic <= paths <= permitted and changed_paths <= permitted:
+                      deploy = False
+              if deploy and changed_paths & permitted:
+                  raise SystemExit("protected_release_scope_unverified")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("deploy=" + str(deploy).lower() + "\n")
+          print("RELEASE_SCOPE=" + ("DEPLOY" if deploy else "SKIP_DIAGNOSTIC_ONLY"))
+          PY
+
+  deploy:
+    needs: [release-scope]
+    if: needs['release-scope'].outputs.deploy == 'true' && ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: oracle-production
