@@ -336,6 +336,16 @@ _EVENT_CUE = re.compile(
 _EVENT_VERSUS = re.compile(r"(?i:vs\.?|versus|contra)|[-–—]")
 
 
+# An explicit correction of the *topic* ends implicit fixture inheritance.
+# A later explicit fixture name can still revisit an earlier dispute.
+_TOPIC_RESET = re.compile(
+    r"^\s*(?:(?:no[,;:.!]?\s+){1,2}(?:era|hablaba(?:mos)?\s+de|me\s+refer[ií]a\s+a)\b|"
+    r"(?:cambiemos|cambiar)\s+de\s+tema\b|"
+    r"(?:ahora|mejor)\s+(?:hablemos|hablar)\s+de\b)", re.I,
+)
+
+
+
 def _broadcast_fixture(text: str) -> tuple[str, str] | None:
     match = _EVENT_PAIR.search(text)
     if not match or not (_EVENT_CUE.search(text) or _EVENT_VERSUS.search(match.group(0))):
@@ -358,15 +368,22 @@ def _current_fixture_history(question: str, history: list[dict]) -> list[dict]:
     segments: list[tuple[tuple[str, str], int, int]] = []
     active: tuple[str, str] | None = None
     start = 0
+    last_reset = 0
     for index, turn in enumerate(recent):
         if turn.get("role") != "user":
             continue
-        fixture = _broadcast_fixture(str(turn.get("content", "")))
+        text = str(turn.get("content", ""))
+        fixture = _broadcast_fixture(text)
         if fixture is not None and fixture != active:
             if active is not None:
                 segments.append((active, start, index))
             active = fixture
             start = index
+        elif fixture is None and _TOPIC_RESET.search(text):
+            if active is not None:
+                segments.append((active, start, index))
+            active = None
+            last_reset = index + 1
     if active is not None:
         segments.append((active, start, len(recent)))
     current = _broadcast_fixture(question)
@@ -374,9 +391,9 @@ def _current_fixture_history(question: str, history: list[dict]) -> list[dict]:
         matches = [recent[begin:end] for fixture, begin, end in segments if fixture == current]
         if matches:
             return [turn for segment in matches for turn in segment]
-        if active is not None:
+        if segments:
             return []
-    return recent[start:] if active is not None else recent
+    return recent[start:] if active is not None else recent[last_reset:]
 
 
 def guard_unverified_broadcast_claim(
