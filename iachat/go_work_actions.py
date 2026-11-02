@@ -181,18 +181,18 @@ def _safe_unconfirmed_reply(reply: str) -> str:
     import re
 
     claim = re.compile(
-        r"\\b(?:ya\\s+)?(?:lo\\s+|la\\s+|los\\s+|las\\s+)?"
+        r"\b(?:ya\s+)?(?:lo\s+|la\s+|los\s+|las\s+)?"
         r"(?:guard[eé]|registr[eé]|actualic[eé]|modifiqu[eé]|correg[ií]|"
-        r"asoci[eé]|confirm[eé]|elimin[eé]|borr[eé])\\b"
-        r"|\\bacabo\\s+de\\s+(?:guardar|registrar|actualizar|modificar|"
-        r"corregir|asociar|confirmar|eliminar|borrar)\\b"
-        r"|\\bqued[oó]\\s+(?:ya\\s+)?(?:guardad[oa]s?|registrad[oa]s?|"
-        r"actualizad[oa]s?|confirmad[oa]s?)\\b",
+        r"asoci[eé]|confirm[eé]|elimin[eé]|borr[eé])\b"
+        r"|\bacabo\s+de\s+(?:guardar|registrar|actualizar|modificar|"
+        r"corregir|asociar|confirmar|eliminar|borrar)\b"
+        r"|\bqued[oó]\s+(?:ya\s+)?(?:guardad[oa]s?|registrad[oa]s?|"
+        r"actualizad[oa]s?|confirmad[oa]s?)\b",
         re.I,
     )
     for match in claim.finditer(reply):
         before = reply[max(0, match.start() - 30):match.start()]
-        if re.search(r"\\b(?:no|nunca|jam[aá]s)\\s+(?:(?:lo|la|los|las)\\s+)?$", before, re.I):
+        if re.search(r"\b(?:no|nunca|jam[aá]s)\s+(?:(?:lo|la|los|las)\s+)?$", before, re.I):
             continue
         return (
             "No tengo una confirmación transaccional de ese cambio en los "
