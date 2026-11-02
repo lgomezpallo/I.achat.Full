@@ -903,3 +903,47 @@ def test_revisiting_older_fixture_retains_its_disputed_channel():
     assert "contradictoria" in research.guard_unverified_broadcast_claim(
         "¿En qué canal pasan River-Boca?", "Lo pasan por Telefe.", history, [],
     )
+
+
+def test_disputed_fixture_survives_480_persisted_messages():
+    """A correction must survive a long chain of ordinary follow-ups."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+    ]
+    for _ in range(240):
+        history.extend([
+            {"role": "user", "content": "¿Y el horario?"},
+            {"role": "assistant", "content": "Todavía no está confirmado."},
+        ])
+    answer = "Lo pasan por Telefe."
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿En qué canal pasan River-Boca?", answer, history, [],
+    )
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", answer, history, [],
+    )
+
+
+def test_long_history_fixture_switch_keeps_disputes_separate():
+    """An old River-Boca correction must not affect Boca-Racing."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "user", "content": "¿Cuándo es Boca-Racing?"},
+        {"role": "assistant", "content": "No tengo confirmación del canal."},
+    ]
+    for _ in range(240):
+        history.extend([
+            {"role": "user", "content": "¿Y el horario?"},
+            {"role": "assistant", "content": "Todavía sin confirmar."},
+        ])
+    answer = "Lo pasan por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Qué canal transmite Boca-Racing?", answer, history, [],
+    ) == answer
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Qué canal transmite River-Boca?", answer, history, [],
+    )
