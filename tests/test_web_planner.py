@@ -662,3 +662,16 @@ def test_unpunctuated_broadcast_denials_keep_old_event_anchor():
 
     history[-2] = user("No, era el Mundial.")
     assert plan_web_lookup("¿Y el horario?", history).reason == "unrelated_followup"
+
+
+def test_quien_lo_pasa_followup_keeps_original_fixture():
+    # A natural Argentine follow-up must not become a search without the match.
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("Todavía no tengo la fecha confirmada."),
+    ]
+    plan = plan_web_lookup("¿Y quién lo pasa?", history)
+    assert plan.action == "search"
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "quién lo pasa" in plan.query
