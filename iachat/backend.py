@@ -77,7 +77,11 @@ class RouterFirstBackend:
                 raise RuntimeError("router_transport_protocol") from exc
             except httpx.RequestError as exc:
                 raise RuntimeError("router_transport_other") from exc
-            if response.status_code not in (502, 503, 504) or attempt:
+            # G.O. must never submit the same work prompt twice after a
+            # gateway error: Router owns model-level fallback, and another
+            # /route request could consume additional free-tier quota.
+            # Preserve IAchat personal's existing cold-start retry.
+            if profile == "go-ute" or response.status_code not in (502, 503, 504) or attempt:
                 break
             # Wake the upstream without submitting the user message twice
             # until an explicit gateway error has already been received.
