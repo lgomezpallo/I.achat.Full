@@ -1098,3 +1098,34 @@ def test_channel_correction_is_not_mistaken_for_topic_reset():
     assert "contradictoria" in research.guard_unverified_broadcast_claim(
         "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
     )
+
+
+def test_outlet_first_user_denial_blocks_reaffirmation():
+    """A channel-first correction must not let a repeated Telefe claim through."""
+    for correction in (
+        "No, por Telefe no.",
+        "No, por Telefe no lo pasan.",
+        "Por Telefe no lo transmiten.",
+    ):
+        assert research._channel_stance(correction, "Telefe") == "no", correction
+        history = [
+            {"role": "user", "content": "¿Cuándo es River-Boca?"},
+            {"role": "assistant", "content": "Lo pasan por Telefe."},
+            {"role": "user", "content": correction},
+        ]
+        guarded = research.guard_unverified_broadcast_claim(
+            "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+        )
+        assert "no voy a afirmar ni negar" in guarded, correction
+
+
+def test_outlet_first_uncertain_phrase_is_not_a_factual_denial():
+    """'Por Telefe no creo' expresses doubt, not a confirmed negative."""
+    assert research._channel_stance("Por Telefe no creo.", "Telefe") is None
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "user", "content": "Por Telefe no creo."},
+    ]
+    assert research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+    ) == "Lo pasan por Telefe."
