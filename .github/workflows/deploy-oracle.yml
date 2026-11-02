@@ -56,23 +56,35 @@ jobs:
                   with urllib.request.urlopen(request, timeout=15) as response:
                       return json.load(response)
 
-              # Skip deploy ONLY for the authorized diagnostic PR #105 merge,
-              # regardless of squash, merge-commit or rebase strategy.
+              # Inspect the actual CI commit, not just PR metadata. If a
+              # diagnostic path is present but the authorized PR cannot be
+              # matched exactly, FAIL CLOSED instead of deploying it.
+              commit = github_json(
+                  f"https://api.github.com/repos/{repo}/commits/{sha}?per_page=100"
+              )
+              changed = commit.get("files")
+              if not isinstance(changed, list) or not changed or len(changed) >= 100:
+                  raise SystemExit("release_commit_scope_incomplete")
+              changed_paths = {item["filename"] for item in changed}
+              diagnostic = {
+                  ".github/workflows/iachat-one-turn.yml",
+                  "scripts/iachat_one_turn_probe.py",
+              }
+              permitted = diagnostic | {".github/workflows/deploy-oracle.yml"}
+
               pr = github_json(f"https://api.github.com/repos/{repo}/pulls/105")
-              if pr.get("merged") and pr.get("merge_commit_sha") == sha:
+              authorized = pr.get("merged") and pr.get("merge_commit_sha") == sha
+              if authorized:
                   files = github_json(
                       f"https://api.github.com/repos/{repo}/pulls/105/files?per_page=100"
                   )
                   if not isinstance(files, list) or not files or len(files) >= 100:
                       raise SystemExit("diagnostic_pr_scope_incomplete")
                   paths = {item["filename"] for item in files}
-                  diagnostic = {
-                      ".github/workflows/iachat-one-turn.yml",
-                      "scripts/iachat_one_turn_probe.py",
-                  }
-                  permitted = diagnostic | {".github/workflows/deploy-oracle.yml"}
-                  if diagnostic <= paths <= permitted:
+                  if diagnostic <= paths <= permitted and changed_paths <= permitted:
                       deploy = False
+              if deploy and changed_paths & diagnostic:
+                  raise SystemExit("diagnostic_release_scope_unverified")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("deploy=" + str(deploy).lower() + "\n")
           print("RELEASE_SCOPE=" + ("DEPLOY" if deploy else "SKIP_DIAGNOSTIC_ONLY"))
