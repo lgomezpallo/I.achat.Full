@@ -225,6 +225,8 @@ _UNCERTAIN_CHANNEL = re.compile(
 _USER_CORRECTION = re.compile(
     r"^\s*(?:(?:no[,;:.!]\s*){1,3}|corrijo\b|rectifico\b|"
     r"no\s+(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)\s+por|(?:va|van|es)\s+por)\b|"
+    r"por\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2}\s+no\b|"
     r"te\s+equivocaste\b|eso\s+est[aá]\s+mal\b)", re.I,
 )
 
@@ -308,6 +310,15 @@ def _channel_stance(
                       + name, sentence, re.I)
             or re.search(name + r"\s+no\s+(?:(?:lo|la)\s+)?(?:pasa|transmite|emite)\b", sentence, re.I)
             or re.search(r"\bno\s+es\s+por\s+" + name, sentence, re.I)
+            # Argentine colloquial corrections often put the outlet first:
+            # "No, por Telefe no" / "Por Telefe no lo pasan".
+            # Do not confuse "por Telefe no creo" with a factual denial.
+            or re.search(
+                r"\bpor\s+" + name
+                + r"\s+no\b(?=\s*(?:$|[,;:]|(?:(?:lo|la)\s+)?"
+                r"(?:pasan|transmiten|emiten|dan|va|van)\b))",
+                sentence, re.I,
+            )
         )
         if negative:
             return "no"
