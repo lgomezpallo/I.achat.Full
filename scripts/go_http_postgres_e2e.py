@@ -60,6 +60,12 @@ def main() -> None:
                               '"budget":"1093","values":{"horas":16}}\n```')
             elif "Registrá 15 horas ejecutadas en obra 1093" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":15}}'
+            elif "Registrá 4 horas en obra 1093" in last:
+                # The model omits the work ID, but the legacy stage() would
+                # recover it from the operator text. That must not bypass
+                # the verified PostgreSQL identity boundary.
+                model_text = ('{"go_intent":"v1","intent":"record",'
+                              '"record_type":"medicion","budget":null,"values":{"horas":4}}')
             elif "Registrá 99 horas en obra 1093" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1190","values":{"horas":99}}'
             elif "Registrá 7 horas en Rivadavia y Rodríguez Peña" in last:
@@ -301,6 +307,24 @@ def main() -> None:
                 assert mismatch.status_code == 200, mismatch.text
                 assert "no coincide" in mismatch.json()["answer"]
                 assert events_count() == 3
+
+                # Even with a valid official work, a model response omitting
+                # its budget must not be silently repaired by the legacy writer.
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    proposals_before_omission = conn.execute(
+                        "SELECT COUNT(*) FROM go_record_proposals"
+                    ).fetchone()[0]
+                omitted = client.post("/api/chat", json={
+                    "text": "Registrá 4 horas en obra 1093",
+                })
+                assert omitted.status_code == 200, omitted.text
+                assert "no identifica la obra" in omitted.json()["answer"]
+                assert "go_proposal_id" not in omitted.json()["history"][-1]
+                assert events_count() == 3
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    assert conn.execute(
+                        "SELECT COUNT(*) FROM go_record_proposals"
+                    ).fetchone()[0] == proposals_before_omission
 
                 # A model-invented budget cannot override a uniquely resolved
                 # PostgreSQL address even when the operator gave no work number.
