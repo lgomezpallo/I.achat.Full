@@ -60,6 +60,13 @@ def main() -> None:
                               '"budget":"1093","values":{"horas":16}}\n```')
             elif "Registrá 15 horas ejecutadas en obra 1093" in last:
                 model_text = '{"go_intent":"v1","intent":"record","record_type":"medicion","budget":"1093","values":{"horas":15}}'
+            elif "Registrá 2 horas en obra 1093" in last:
+                # The model invents a completed write in a conversation reply.
+                # The HTTP endpoint must never present that as a real mutation.
+                model_text = (
+                    '{"go_intent":"v1","intent":"conversation",'
+                    '"reply":"Ya registré 2 horas en la obra 1093."}'
+                )
             elif "Registrá 4 horas en obra 1093" in last:
                 # The model omits the work ID, but the legacy stage() would
                 # recover it from the operator text. That must not bypass
@@ -490,6 +497,28 @@ def main() -> None:
                 assert saved.status_code == 200, saved.text
                 # Includes the rejected correction request and its response.\n                assert len(saved.json()["history"]) == 18
                 assert events_count() == 3
+
+            # A hallucinated "already saved" reply must be rejected by the
+            # shared labor chat before it can mislead the operator. This is
+            # HTTP + authenticated session + real PostgreSQL, Router simulated.
+            with TestClient(app_module.app, base_url="https://go.test") as claim_client:
+                claim_client.cookies.set("iachat_session", cookie)
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    proposals_before_claim = conn.execute(
+                        "SELECT COUNT(*) FROM go_record_proposals"
+                    ).fetchone()[0]
+                claim = claim_client.post("/api/chat", json={
+                    "text": "Registrá 2 horas en obra 1093",
+                })
+                assert claim.status_code == 200, claim.text
+                assert "No tengo una confirmación transaccional" in claim.json()["answer"]
+                assert "go_proposal_id" not in claim.json()["history"][-1]
+                assert events_count() == 3
+                with psycopg.connect(os.environ["GO_CONTRACT_ADMIN_DSN"]) as conn:
+                    assert conn.execute(
+                        "SELECT COUNT(*) FROM go_record_proposals"
+                    ).fetchone()[0] == proposals_before_claim
+                print("GO_UNVERIFIED_WRITE_CLAIM=blocked_http_real_postgres_no_proposal_no_event")
 
             # End-to-end new category lifecycle, without DDL or hardcoded
             # business tables: same IAchat HTTP chat -> existing G.O. metadata
