@@ -888,3 +888,18 @@ def test_channel_names_are_not_misread_as_fixture():
     assert research._broadcast_fixture("¿Lo pasan por Telefe y ESPN?") is None
     assert research._broadcast_fixture("¿Cuándo juegan River y Boca?") == ("boca", "river")
     assert research._broadcast_fixture("¿Cuándo es River-Boca?") == ("boca", "river")
+
+
+def test_revisiting_older_fixture_retains_its_disputed_channel():
+    """Switching fixtures must not erase an earlier correction."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "user", "content": "¿Cuándo es Boca-Racing?"},
+        {"role": "assistant", "content": "No tengo el horario confirmado."},
+        {"role": "user", "content": "¿Cuándo juegan River y Boca?"},
+    ]
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿En qué canal pasan River-Boca?", "Lo pasan por Telefe.", history, [],
+    )
