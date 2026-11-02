@@ -1006,3 +1006,48 @@ def test_prior_uncertainty_does_not_override_explicit_user_correction():
         "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
     )
     assert "contradictoria" in guarded
+
+
+
+def test_tentative_channel_claims_do_not_create_false_conflicts():
+    """Speculation is not an earlier verified yes/no broadcast assertion."""
+    for tentative in (
+        "Quizás lo pasan por Telefe.",
+        "Tal vez lo pasan por Telefe.",
+        "Puede que lo pasen por Telefe.",
+        "Aparentemente lo pasan por Telefe.",
+        "No se sabe si lo pasan por Telefe.",
+        "No está claro si lo pasan por Telefe.",
+    ):
+        history = [
+            {"role": "user", "content": "¿Qué canal pasa River-Boca?"},
+            {"role": "assistant", "content": tentative},
+        ]
+        answer = "No lo pasan por Telefe."
+        assert research.guard_unverified_broadcast_claim(
+            "¿Y en qué canal lo pasan?", answer, history, [],
+        ) == answer, tentative
+
+
+def test_tentative_claim_does_not_erase_an_explicit_channel_correction():
+    """A later maybe cannot supersede a user's concrete correction."""
+    history = [
+        {"role": "user", "content": "¿Qué canal pasa River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No lo pasan por Telefe."},
+        {"role": "assistant", "content": "Quizás lo pasan por Telefe."},
+    ]
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+    )
+
+
+def test_no_se_transmite_stays_a_denial_not_uncertainty():
+    """The no-se-sabe rule must not swallow a real broadcast negation."""
+    history = [
+        {"role": "user", "content": "¿Qué canal pasa River-Boca?"},
+        {"role": "assistant", "content": "No se transmite por Telefe."},
+    ]
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+    )
