@@ -1051,3 +1051,50 @@ def test_no_se_transmite_stays_a_denial_not_uncertainty():
     assert "contradictoria" in research.guard_unverified_broadcast_claim(
         "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
     )
+
+
+def test_explicit_topic_correction_stops_implicit_broadcast_dispute():
+    """A correction to Mundial must not inherit the old River-Boca channel."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "Entendido, no está confirmado."},
+        {"role": "user", "content": "No, era el Mundial."},
+        {"role": "assistant", "content": "Hablamos entonces del Mundial."},
+    ]
+    answer = "Lo pasan por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", answer, history, [],
+    ) == answer
+    # The old fixture can still be revisited explicitly.
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Qué canal pasa River-Boca?", answer, history, [],
+    )
+
+
+def test_explicit_change_of_topic_does_not_leak_old_channel():
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "user", "content": "Cambiemos de tema: hablemos del Mundial."},
+        {"role": "assistant", "content": "De acuerdo."},
+    ]
+    assert research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+    ) == "Lo pasan por Telefe."
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿En qué canal pasan Boca-River?", "Lo pasan por Telefe.", history, [],
+    )
+
+
+def test_channel_correction_is_not_mistaken_for_topic_reset():
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, no lo pasan por Telefe."},
+    ]
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+    )
