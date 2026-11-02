@@ -1,6 +1,13 @@
 name: IAchat — one authenticated production turn (no deploy)
 on:
   workflow_dispatch:
+  # Runs once when an authorized merge introduces this diagnostic on main.
+  # No production deployment is performed by this workflow.
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/iachat-one-turn.yml
+      - scripts/iachat_one_turn_probe.py
 
 permissions:
   contents: read
