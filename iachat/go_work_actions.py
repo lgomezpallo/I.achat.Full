@@ -184,6 +184,8 @@ def _safe_unconfirmed_reply(reply: str) -> str:
         r"\b(?:ya\s+)?(?:lo\s+|la\s+|los\s+|las\s+)?"
         r"(?:guard[eé]|registr[eé]|actualic[eé]|modifiqu[eé]|correg[ií]|"
         r"asoci[eé]|confirm[eé]|elimin[eé]|borr[eé])\b"
+        r"|\b(?:he|hemos)\s+(?:guardado|registrado|actualizado|modificado|"
+        r"corregido|asociado|confirmado|eliminado|borrado)\b"
         r"|\bacabo\s+de\s+(?:guardar|registrar|actualizar|modificar|"
         r"corregir|asociar|confirmar|eliminar|borrar)\b"
         r"|\bqued[oó]\s+(?:ya\s+)?(?:guardad[oa]s?|registrad[oa]s?|"
