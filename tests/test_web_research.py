@@ -1129,3 +1129,23 @@ def test_outlet_first_uncertain_phrase_is_not_a_factual_denial():
     assert research.guard_unverified_broadcast_claim(
         "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
     ) == "Lo pasan por Telefe."
+
+
+def test_quien_lo_pasa_followup_does_not_repeat_disputed_telefe():
+    history = [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "No pude confirmar el horario."},
+        {"role": "user", "content": "¿Lo pasan por Telefe?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Lo pasan por Telefe."
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Y quién lo pasa?", answer, history, [],
+    )
+    assert guarded != answer
+    assert "contradictoria" in guarded
+    assert "Telefe" in guarded
+    assert research.guard_unverified_broadcast_claim(
+        "¿Y quién lo pasa?", answer, [], [],
+    ) == answer
