@@ -322,14 +322,14 @@ def _channel_stance(
 # the same conversation. Deliberately require two named sides and a sports
 # cue (or an explicit versus separator); ambiguous topics retain the guard.
 _EVENT_PAIR = re.compile(
-    r"\\b([A-ZÁÉÍÓÚÑ][\\wÁÉÍÓÚÑáéíóúñ]{2,})\\s*"
-    r"(?:(?i:vs\\.?|versus|contra)|[-–—]|(?i:y))\\s*"
-    r"([A-ZÁÉÍÓÚÑ][\\wÁÉÍÓÚÑáéíóúñ]{2,})\\b"
+    r"\b([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ]{2,})\s*"
+    r"(?:(?i:vs\.?|versus|contra)|[-–—]|(?i:y))\s*"
+    r"([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ]{2,})\b"
 )
 _EVENT_CUE = re.compile(
-    r"\\b(?:partido|juega|juegan|enfrentan|cl[aá]sico|final)\\b", re.I,
+    r"\b(?:partido|juega|juegan|enfrentan|cl[aá]sico|final)\b", re.I,
 )
-_EVENT_VERSUS = re.compile(r"(?i:vs\\.?|versus|contra)|[-–—]")
+_EVENT_VERSUS = re.compile(r"(?i:vs\.?|versus|contra)|[-–—]")
 
 
 def _broadcast_fixture(text: str) -> tuple[str, str] | None:
