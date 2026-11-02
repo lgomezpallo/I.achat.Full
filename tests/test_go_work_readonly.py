@@ -902,3 +902,24 @@ def test_work_budget_in_long_natural_update_is_not_an_address(monkeypatch):
     assert '"presupuesto": "1093"' in evidence
     assert '"encontrada": true' in evidence
     assert '"consulta": "direccion_presupuesto_incompatibles"' not in evidence
+
+def test_reporting_month_and_year_never_conflict_with_explicit_work(monkeypatch):
+    """A reporting period is not a street/house-number identity."""
+    monkeypatch.setenv("GO_WORK_READONLY_DSN", "test-only")
+    for message in (
+        "Registrá 3 horas en obra 1093 en octubre 2026",
+        "¿Qué pasó en obra 1093 en el mes de noviembre de 2026?",
+        "¿Qué pasó en obra 1093 en setiembre 2026?",
+    ):
+        assert work._address_references(message) == []
+        connection = FakeReadOnlyConnection()
+        evidence = work.official_context(
+            message, connect=lambda *args, **kwargs: connection,
+        )
+        assert '"presupuesto": "1093"' in evidence
+        assert '"encontrada": true' in evidence
+        assert '"consulta": "direccion_presupuesto_incompatibles"' not in evidence
+    # A real address still triggers the separate official identity check.
+    assert work._address_references(
+        "Registrá 3 horas en obra 1093 en Alsina 354"
+    ) == ["Alsina 354"]
