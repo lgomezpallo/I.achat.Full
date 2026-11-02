@@ -37,6 +37,15 @@ jobs:
             "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
           set -euo pipefail
           echo "GO_ORACLE_SSH=connected"
+          echo "IAchat_SERVICE=$(systemctl is-active iachat 2>/dev/null || true)"
+          echo "Router_SERVICE=$(systemctl is-active router 2>/dev/null || true)"
+          echo "Prisma_SERVICE=$(systemctl is-active prisma 2>/dev/null || true)"
+          echo "IAchat_HEALTH_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8000/health || true)"
+          echo "Router_HEALTH_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8010/health || true)"
+          echo "IAchat_CODE=$(test -f /home/ubuntu/Proyecto/Aplicaciones/IAchat/iachat/app.py && echo present || echo absent)"
+          echo "GO_LEGACY_OPT=$(test -d /opt/go-ute && echo present || echo absent)"
+          echo "GO_LEGACY_CONFIG=$(test -f /etc/go-ute/app.env && echo present || echo absent)"
+          echo "GO_LEGACY_UNIT=$(systemctl show -p LoadState --value go-ute 2>/dev/null || true)"
           echo "GO_LEGACY_SERVICE=$(systemctl is-active go-ute 2>/dev/null || true)"
           echo "GO_STAGE_SERVICE=$(systemctl is-active go-ute-iachat-stage 2>/dev/null || true)"
           echo "GO_STAGE_UNIT=$(systemctl show -p LoadState --value go-ute-iachat-stage 2>/dev/null || true)"
