@@ -95,6 +95,20 @@ jobs:
                   print('COLUMN',table,column,kind,nullable)
               assert {'obras','go_record_types','go_record_proposals',
                       'go_record_events'}.issubset(present), 'required_work_tables_missing'
+              proposal_columns = {column for table,column,_,_ in rows
+                                  if table == 'go_record_proposals'}
+              scoped = {'creado_por','origen_conversacion','decidido_por'}
+              print('GO_DB_ACTOR_SCOPE_COLUMNS=' +
+                    ('present' if scoped.issubset(proposal_columns) else 'missing'))
+              # This is the CURRENT G.O. app role, not the proposed separate
+              # SELECT-only IAchat role. A READ ONLY transaction alone is
+              # not proof that the account lacks write privileges.
+              writer = conn.execute(
+                  "SELECT has_table_privilege(current_user,'go_record_events','INSERT')"
+              ).fetchone()[0]
+              print('GO_DB_LEGACY_APP_ROLE_WRITE_GRANT=' +
+                    ('present' if writer else 'absent'))
+              print('GO_DB_IA_WORK_READONLY_ROLE=not_audited')
               print('GO_DB_READONLY_SCHEMA=verified')
           PY
           DB
