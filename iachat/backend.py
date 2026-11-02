@@ -21,6 +21,18 @@ class RouterFirstBackend:
         token = (self.token if self.token is not None else os.getenv("ROUTER_TOKEN", "")).strip()
         if not url or not token:
             raise RuntimeError("router_not_configured")
+        profile = os.getenv("IACHAT_PROFILE", "personal").strip().lower()
+        if profile == "go-ute" and url not in (
+            "http://127.0.0.1:8010", "http://localhost:8010"
+        ):
+            # Never send a labor-instance bearer or work context off Oracle.
+            raise RuntimeError("go_router_requires_local_endpoint")
+        if profile == "go-ute" and os.getenv("GO_ROUTER_INFERENCE_ENABLED") != "1":
+            # A local Router URL and a valid token do not prove that its
+            # currently installed catalog/account cannot incur charges.
+            # Require a separate, explicit activation AFTER external audit.
+            # This flag is an operational lock, not proof of free billing.
+            raise RuntimeError("go_router_inference_not_authorized")
         # Keep the user-facing language stable even when Router changes models.
         # This is guidance, not a guarantee: end-to-end tests still need to verify output.
         language_guidance = (
@@ -50,10 +62,12 @@ class RouterFirstBackend:
                         "conversation": conversation,
                         "required_capabilities": ["chat", "vision"] if images else ["chat"],
                         "images": images or [],
-                        "application_name": "iachat",
+                        "application_name": "go-ute" if profile == "go-ute" else "iachat",
                         # Router decides automatically whether decomposition is useful.
                     },
                     timeout=max(self.timeout_s, 90.0) if attempt == 0 else self.timeout_s,
+                    follow_redirects=False,
+                    trust_env=profile != "go-ute",
                 )
             except httpx.TimeoutException as exc:
                 raise RuntimeError("router_transport_timeout") from exc
@@ -63,12 +77,17 @@ class RouterFirstBackend:
                 raise RuntimeError("router_transport_protocol") from exc
             except httpx.RequestError as exc:
                 raise RuntimeError("router_transport_other") from exc
-            if response.status_code not in (502, 503, 504) or attempt:
+            # G.O. must never submit the same work prompt twice after a
+            # gateway error: Router owns model-level fallback, and another
+            # /route request could consume additional free-tier quota.
+            # Preserve IAchat personal's existing cold-start retry.
+            if profile == "go-ute" or response.status_code not in (502, 503, 504) or attempt:
                 break
             # Wake the upstream without submitting the user message twice
             # until an explicit gateway error has already been received.
             try:
-                httpx.get(url + "/health", timeout=65.0)
+                httpx.get(url + "/health", timeout=65.0, follow_redirects=False,
+                          trust_env=profile != "go-ute")
             except httpx.RequestError:
                 pass
         if response.status_code in (401, 403):
