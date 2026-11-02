@@ -171,6 +171,37 @@ def _official_budget_guard(proposal: dict, evidence: str | None) -> str | None:
     return None
 
 
+def _safe_unconfirmed_reply(reply: str) -> str:
+    """A model's conversational text is never proof of an official write.
+
+    Keep historical statements and explicit denials intact, but reject
+    first-person/completed-action claims that the model could hallucinate
+    even when it failed to return the structured proposal protocol.
+    """
+    import re
+
+    claim = re.compile(
+        r"\\b(?:ya\\s+)?(?:lo\\s+|la\\s+|los\\s+|las\\s+)?"
+        r"(?:guard[eé]|registr[eé]|actualic[eé]|modifiqu[eé]|correg[ií]|"
+        r"asoci[eé]|confirm[eé]|elimin[eé]|borr[eé])\\b"
+        r"|\\bacabo\\s+de\\s+(?:guardar|registrar|actualizar|modificar|"
+        r"corregir|asociar|confirmar|eliminar|borrar)\\b"
+        r"|\\bqued[oó]\\s+(?:ya\\s+)?(?:guardad[oa]s?|registrad[oa]s?|"
+        r"actualizad[oa]s?|confirmad[oa]s?)\\b",
+        re.I,
+    )
+    for match in claim.finditer(reply):
+        before = reply[max(0, match.start() - 30):match.start()]
+        if re.search(r"\\b(?:no|nunca|jam[aá]s)\\s+(?:(?:lo|la|los|las)\\s+)?$", before, re.I):
+            continue
+        return (
+            "No tengo una confirmación transaccional de ese cambio en los "
+            "registros oficiales. Para registrar o corregir información "
+            "debo preparar una propuesta y esperar tu aprobación."
+        )
+    return reply
+
+
 def interpret_model_answer(raw: str, message: str, *, actor: str, conversation_id: str,
                            attachments: bool = False, official_evidence: str | None = None) -> tuple[str, str | None]:
     """Use the *same* IAchat model response to propose, never to commit.
@@ -194,14 +225,14 @@ def interpret_model_answer(raw: str, message: str, *, actor: str, conversation_i
     try:
         parsed = json.loads(payload)
     except (TypeError, ValueError):
-        return raw, None
+        return _safe_unconfirmed_reply(raw) if isinstance(raw, str) else raw, None
     if not isinstance(parsed, dict) or parsed.get("go_intent") != "v1":
-        return raw, None
+        return _safe_unconfirmed_reply(raw) if isinstance(raw, str) else raw, None
     intent = parsed.get("intent")
     if intent == "conversation":
         reply = parsed.get("reply")
         if isinstance(reply, str) and 0 < len(reply.strip()) <= 4000:
-            return reply, None
+            return _safe_unconfirmed_reply(reply), None
         return "Necesito una aclaración para responder; no modifiqué registros.", None
     if intent not in {"record", "correct", "define_type"}:
         return "No pude interpretar una propuesta segura. No se modificaron registros.", None
