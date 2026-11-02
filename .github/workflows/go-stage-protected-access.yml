@@ -1,0 +1,86 @@
+name: G.O. stage 8021 - protected access and prerequisites (read only)
+on:
+  push:
+    branches: [audit/go-stage-protected-access-20261102]
+    paths: [.github/workflows/go-stage-protected-access.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: oracle-production
+    steps:
+      - name: Check protected Oracle installation prerequisites without reading secret values
+        shell: bash
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          keyfile="$(mktemp "$HOME/.ssh/go-stage-key.XXXXXXXX")"
+          knownfile="$(mktemp "$HOME/.ssh/go-stage-host.XXXXXXXX")"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test "$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo GO_STAGE_PROBE=protected_environment_readonly
+          echo "GO_STAGE_HOST=$(hostname)"
+          if sudo -n true 2>/dev/null; then
+            echo GO_STAGE_SUDO_NONINTERACTIVE=available
+          else
+            echo GO_STAGE_SUDO_NONINTERACTIVE=unavailable
+          fi
+          if sudo -n test -f /etc/go-ute/iachat-stage.env 2>/dev/null; then
+            echo GO_STAGE_ENV_FILE=present
+            if sudo -n python3 - <<'PY'
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          import shlex
+          import os
+          p=Path("/etc/go-ute/iachat-stage.env")
+          s=p.stat()
+          cfg={}
+          for line in p.read_text().splitlines():
+              line=line.strip()
+              if not line or line.startswith("#"): continue
+              if line.startswith("export "): line=line[7:]
+              key,sep,value=line.partition("=")
+              if not sep: continue
+              try: parsed=shlex.split(value)
+              except ValueError: continue
+              if len(parsed)==1: cfg[key.strip()]=parsed[0]
+          db=urlsplit(cfg.get("GO_WORK_READONLY_DSN",""))
+          expected="/var/lib/go-ute-iachat"
+          print("GO_STAGE_ENV_ROOT_OWNED="+str(s.st_uid==0).lower())
+          print("GO_STAGE_ENV_MODE_SAFE="+str((s.st_mode & 0o777) in (0o600,0o640)).lower())
+          print("GO_STAGE_PROFILE_ISOLATED="+str(cfg.get("IACHAT_PROFILE")=="go-ute").lower())
+          print("GO_STAGE_STATE_ISOLATED="+str(cfg.get("GO_LABOR_STATE_DIR")==expected and cfg.get("IACHAT_DB","").startswith(expected+"/")).lower())
+          print("GO_STAGE_AUTH_PRESENT="+str(bool(cfg.get("IACHAT_AUTH_SECRET")) and bool(cfg.get("IACHAT_GOOGLE_CLIENT_ID")) and bool(cfg.get("IACHAT_GOOGLE_CLIENT_SECRET")) and bool(cfg.get("IACHAT_GOOGLE_ALLOWED_SUBS"))).lower())
+          print("GO_STAGE_READER_DSN_LOCAL="+str(db.hostname in ("127.0.0.1","localhost","::1") and bool(db.username) and db.username not in ("postgres","root")).lower())
+          print("GO_STAGE_ROUTER_INFERENCE_OFF="+str(cfg.get("GO_ROUTER_INFERENCE_ENABLED","0")=="0").lower())
+          print("GO_STAGE_WRITES_OFF="+str(cfg.get("GO_WORK_WRITE_ENABLED","0")=="0").lower())
+          print("GO_STAGE_PROVIDER_KEYS_ABSENT="+str(not any(cfg.get(k) for k in ("GROQ_API_KEY","OPENROUTER_API_KEY","NVIDIA_API_KEY","CLOUDFLARE_API_TOKEN"))).lower())
+          PY
+            then
+              echo GO_STAGE_ENV_INSPECT=success
+            else
+              echo GO_STAGE_ENV_INSPECT=permission_denied_or_parse_error
+            fi
+          else
+            echo GO_STAGE_ENV_FILE=missing_or_sudo_denied
+          fi
+          if id go-ute >/dev/null 2>&1; then
+            echo GO_STAGE_SERVICE_USER=present
+          else
+            echo GO_STAGE_SERVICE_USER=missing
+          fi
+          echo GO_STAGE_PROBE_COMPLETE=read_only
+          REMOTE
