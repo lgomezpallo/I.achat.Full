@@ -67,6 +67,9 @@ BROADCAST_CORRECTION = re.compile(
     r"|(?:no[,;:.!]?\s+){1,2}(?:no\s+)?(?:lo|la)\s+"
     r"(?:pasa|pasan|transmite|transmiten|emite|emiten)\s+(?:por|en)\s+"
     r"[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*\b"
+    r"|(?:no[,;:.!]?\s+){1,2}(?:no\s+)?"
+    r"(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)|(?:va|van|es))\s+(?:por|en)\s+"
+    r"[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*\b"
     r"|(?:te\s+equivocaste|eso\s+est[aá]\s+mal)\s+"
     r"(?:con\s+)?(?:el\s+)?canal\b)",
     re.IGNORECASE,
