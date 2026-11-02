@@ -207,6 +207,20 @@ def interpret_model_answer(raw: str, message: str, *, actor: str, conversation_i
         return "No pude interpretar una propuesta segura. No se modificaron registros.", None
     if attachments:
         return "Analicé el adjunto, pero su asociación o registro requiere una confirmación documental específica; no modifiqué registros.", None
+    if intent == "record" and parsed.get("budget") is None:
+        # The model may omit a budget even when the operator explicitly named
+        # a work. The legacy ledger would then recover the number from the
+        # message and stage a work-scoped proposal WITHOUT the read-only
+        # identity check. Never let an omitted JSON field bypass that gate.
+        from .go_work_context import (WorkContextUnavailable, contextual_address,
+                                      explicit_budgets)
+        try:
+            work_mentioned = bool(explicit_budgets(message) or contextual_address(message))
+        except WorkContextUnavailable:
+            work_mentioned = True  # Ambiguous references must fail closed.
+        if work_mentioned:
+            return ("La propuesta no identifica la obra mencionada. "
+                    "Pedí aclaración antes de registrar; no se modificaron registros oficiales."), None
     identity_error = _official_budget_guard(parsed, official_evidence) if intent in {"record", "correct"} else None
     if identity_error:
         return identity_error + " No se modificaron registros oficiales.", None
