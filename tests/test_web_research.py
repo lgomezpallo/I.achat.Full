@@ -836,3 +836,55 @@ def test_prior_bare_name_in_nonbroadcast_context_is_not_a_channel_claim():
     assert research.guard_unverified_broadcast_claim(
         "¿Lo pasan por Telefe?", answer, history, [],
     ) == answer
+
+
+def test_channel_conflict_does_not_leak_from_river_boca_to_boca_racing():
+    """A corrected outlet for one match is not a correction for another."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No va por Telefe."},
+        {"role": "user", "content": "¿Cuándo juegan Boca y Racing?"},
+        {"role": "assistant", "content": "Todavía no confirmé la fecha."},
+    ]
+    answer = "Lo pasan por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", answer, history, [],
+    ) == answer
+    assert research.guard_unverified_broadcast_claim(
+        "¿En qué canal pasan Boca-Racing?", answer, history, [],
+    ) == answer
+
+
+def test_channel_conflict_survives_repeat_of_same_fixture():
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "user", "content": "¿Cuándo juegan Boca y River?"},
+    ]
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+    )
+
+
+def test_explicit_new_fixture_resets_old_dispute_but_not_same_fixture():
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Lo pasan por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Qué canal transmite Argentina-Brasil?", answer, history, [],
+    ) == answer
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Qué canal transmite Boca-River?", answer, history, [],
+    )
+
+
+def test_channel_names_are_not_misread_as_fixture():
+    assert research._broadcast_fixture("¿Lo pasan por Telefe y ESPN?") is None
+    assert research._broadcast_fixture("¿Cuándo juegan River y Boca?") == ("boca", "river")
+    assert research._broadcast_fixture("¿Cuándo es River-Boca?") == ("boca", "river")
