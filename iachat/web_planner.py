@@ -13,6 +13,9 @@ from typing import Literal, Mapping, Sequence
 from .web_search import needs_current_information
 
 MAX_SEARCH_QUERY = 300
+# Keep the planner's bounded window aligned with the long-history broadcast guard.
+# Older anchors outside this window fail closed rather than guessing a topic.
+MAX_FOLLOWUP_HISTORY_MESSAGES = 1000
 
 # An explicit request to search is valid even for timeless documentation.
 EXPLICIT_SEARCH = re.compile(
@@ -224,9 +227,9 @@ def plan_web_lookup(
     # messages never count as a source of user search intent.
     users = [
         turn.get("content", "").strip()
-        # Scan more than six user follow-ups, but remain bounded; a new
+        # Scan long persisted conversations, but remain bounded; a new
         # topic still breaks inheritance in the loop below.
-        for turn in history[-64:]
+        for turn in history[-MAX_FOLLOWUP_HISTORY_MESSAGES:]
         if turn.get("role") == "user" and isinstance(turn.get("content"), str)
     ]
     if not users:
