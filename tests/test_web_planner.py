@@ -641,3 +641,24 @@ def test_planner_does_not_guess_subject_beyond_bounded_window():
     assert plan.action == "answer"
     assert plan.reason == "unrelated_followup"
     assert "River-Boca" not in plan.query
+
+
+def test_unpunctuated_broadcast_denials_keep_old_event_anchor():
+    """Channel corrections without a comma must not erase River-Boca."""
+    for correction in ("No lo pasan por Telefe.", "No va por Telefe.",
+                       "No es por Telefe.", "No, no lo dan por Telefe."):
+        history = [
+            user("¿Cuándo es el próximo River-Boca?"),
+            assistant("No está confirmado."),
+            user("¿Y en qué canal lo pasan?"),
+            assistant("Lo pasan por Telefe."),
+            user(correction),
+            assistant("No pude confirmar el canal."),
+        ]
+        plan = plan_web_lookup("¿Y a qué hora?", history)
+        assert plan.reason == "contextual_followup", correction
+        assert "River-Boca" in plan.query
+        assert "Telefe" not in plan.query
+
+    history[-2] = user("No, era el Mundial.")
+    assert plan_web_lookup("¿Y el horario?", history).reason == "unrelated_followup"
