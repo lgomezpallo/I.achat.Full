@@ -399,3 +399,266 @@ def test_two_independent_schedule_questions_split_without_duplication():
     assert split_independent_search_questions(
         "Probando si anda IAchat con mi cuenta de mail"
     ) == ["Probando si anda IAchat con mi cuenta de mail"]
+
+
+def test_broadcast_followups_keep_user_subject_without_semantic_rewrite():
+    """River-Boca must not become Mundial or a different match."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class MisleadingClassifier:
+        def answer(self, messages):
+            raise AssertionError("user-anchored follow-up must not be rewritten")
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("La fecha no está confirmada."),
+    ]
+    plan = plan_web_lookup_semantic("¿Y en qué canal lo pasan?", history, MisleadingClassifier())
+    assert plan.action == "search"
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Mundial" not in plan.query
+
+    history.extend([
+        user("¿Y en qué canal lo pasan?"),
+        assistant("No pude confirmar el canal."),
+    ])
+    confirmation = plan_web_lookup_semantic("¿Lo pasan por Telefe?", history, MisleadingClassifier())
+    assert confirmation.action == "search"
+    assert confirmation.reason == "contextual_followup"
+    assert "River-Boca" in confirmation.query
+    assert "Telefe" in confirmation.query
+
+
+def test_broadcast_confirmation_does_not_inherit_unrelated_topic():
+    from iachat.web_planner import plan_web_lookup
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("No confirmado."),
+        user("Explicá cómo se hace una torta."),
+        assistant("Mezclá los ingredientes."),
+    ]
+    assert plan_web_lookup("¿Lo pasan por Telefe?", history).action == "answer"
+
+
+def test_third_and_fourth_followups_retain_original_user_subject():
+    """A chain of channel questions must not drift from River-Boca to Mundial."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class MisleadingClassifier:
+        def answer(self, messages):
+            raise AssertionError("An anchored follow-up must not be rewritten")
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("No está confirmado."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("No pude confirmarlo."),
+        user("¿Lo pasan por Telefe?"),
+        assistant("Sigue sin confirmarse."),
+    ]
+    plan = plan_web_lookup_semantic("¿Y el horario?", history, MisleadingClassifier())
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Mundial" not in plan.query
+
+    history.extend([user("¿Y el horario?"), assistant("Todavía no hay horario.")])
+    later = plan_web_lookup_semantic("¿Y dónde lo pasan?", history, MisleadingClassifier())
+    assert later.reason == "contextual_followup"
+    assert "River-Boca" in later.query
+
+
+def test_followup_chain_stops_at_an_intervening_new_subject():
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("Sin fecha confirmada."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("Sin canal confirmado."),
+        user("Explicame cómo preparar pizza casera."),
+        assistant("Prepará la masa."),
+    ]
+    plan = plan_web_lookup("¿Y el horario?", history)
+    assert plan.reason == "unrelated_followup"
+    assert "River-Boca" not in plan.query
+
+
+def test_broadcast_correction_keeps_event_anchor_for_later_followup():
+    """A channel correction must not silently turn River-Boca into Mundial."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class NoRewrite:
+        def answer(self, messages):
+            raise AssertionError("An anchored follow-up must bypass rewriting")
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("Sin fecha confirmada."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("Lo pasan por Telefe."),
+        user("No, Telefe no lo pasa."),
+        assistant("Tenés razón, no está confirmado."),
+    ]
+    plan = plan_web_lookup_semantic("¿Y el horario?", history, NoRewrite())
+    assert plan.action == "search"
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Mundial" not in plan.query
+    assert "Telefe" not in plan.query
+
+    # The same conservative continuity applies to an explicit correction
+    # without a channel name. No assistant message becomes a search anchor.
+    history[-2] = user("Te equivocaste con el canal.")
+    plan = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+
+    # A correction mentioning "hoy" must not become the search anchor.
+    history[-2] = user("No, Telefe no lo pasa hoy.")
+    plan = plan_web_lookup("¿Y el horario?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Telefe" not in plan.query
+
+
+def test_explicit_event_correction_breaks_stale_broadcast_anchor():
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("No confirmado."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("No confirmado."),
+        user("No, me refería al Mundial."),
+        assistant("Entendido."),
+    ]
+    plan = plan_web_lookup("¿Y el horario?", history)
+    assert plan.reason == "unrelated_followup"
+    assert "River-Boca" not in plan.query
+
+
+def test_freshness_word_in_short_followup_does_not_drop_original_event():
+    """'¿Y a qué hora?' must use River-Boca, not a standalone web search."""
+    from iachat.web_planner import plan_web_lookup_semantic
+
+    class NoRewrite:
+        def answer(self, messages):
+            raise AssertionError("The model must not replace an anchored event")
+
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("No confirmado."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("No confirmado."),
+    ]
+    plan = plan_web_lookup_semantic("¿Y a qué hora?", history, NoRewrite())
+    assert plan.action == "search"
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "a qué hora" in plan.query
+
+    # Once the time question is in history, the following channel question
+    # must still refer to River-Boca, not the bare phrase "a qué hora".
+    history.extend([user("¿Y a qué hora?"), assistant("Sin horario confirmado.")])
+    chained = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert chained.reason == "contextual_followup"
+    assert "River-Boca" in chained.query
+
+    # Without an anchor, keep the previous current-question behavior.
+    standalone = plan_web_lookup("¿Y a qué hora?")
+    assert standalone.action == "search"
+    assert standalone.reason == "current_question"
+
+    # A clear topic change must not revive the old match.
+    history.extend([user("Explicame las reglas del ajedrez."),
+                    assistant("Son varias.")])
+    unrelated = plan_web_lookup("¿Y a qué hora?", history)
+    assert unrelated.action == "search"
+    assert unrelated.reason == "current_question"
+    assert "River-Boca" not in unrelated.query
+
+
+def test_long_uninterrupted_followup_chain_keeps_event_beyond_six_user_turns():
+    """A chat with many follow-ups must not silently switch to a new event."""
+    history = [user("¿Cuándo es el próximo River-Boca?"), assistant("Sin fecha confirmada.")]
+    for _ in range(9):
+        history.extend([user("¿Y el horario?"), assistant("Todavía sin confirmar.")])
+    plan = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+
+    # An explicit new topic still prevents stale context inheritance.
+    history.extend([user("Explicame cómo cocinar arroz."), assistant("Usá agua.")])
+    changed = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert changed.reason == "unrelated_followup"
+    assert "River-Boca" not in changed.query
+
+
+def test_negated_channel_correction_is_not_a_new_event_anchor():
+    history = [
+        user("¿Cuándo es el próximo River-Boca?"),
+        assistant("Sin fecha confirmada."),
+        user("¿Y en qué canal lo pasan?"),
+        assistant("Lo pasan por Telefe."),
+        user("No, no lo pasan por Telefe."),
+        assistant("No tengo confirmación del canal."),
+    ]
+    plan = plan_web_lookup("¿Y a qué hora?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Telefe" not in plan.query
+
+    # Explicitly changing the event must never preserve the old match.
+    history[-2] = user("No, me refería al Mundial.")
+    changed = plan_web_lookup("¿Y el horario?", history)
+    assert changed.reason == "unrelated_followup"
+    assert "River-Boca" not in changed.query
+
+
+def test_persisted_480_turn_followup_keeps_event_and_correction_out_of_query():
+    """A day-later continuation must not lose the original match at 64 messages."""
+    history = [user("¿Cuándo es el próximo River-Boca?"), assistant("Sin fecha confirmada.")]
+    for _ in range(478):
+        history.extend([user("¿Y el horario?"), assistant("Todavía no confirmado.")])
+    history.extend([user("No, no lo pasan por Telefe."),
+                    assistant("No tengo el canal confirmado.")])
+    plan = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert plan.reason == "contextual_followup"
+    assert "River-Boca" in plan.query
+    assert "Telefe" not in plan.query
+
+    # The long scan must still stop at a new topic, even after 480 turns.
+    history.extend([user("Explicame las reglas del ajedrez."),
+                    assistant("Las piezas se mueven por turnos.")])
+    changed = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert changed.reason == "unrelated_followup"
+    assert "River-Boca" not in changed.query
+
+
+def test_planner_does_not_guess_subject_beyond_bounded_window():
+    history = [user("¿Cuándo es el próximo River-Boca?"), assistant("No confirmado.")]
+    for _ in range(520):
+        history.extend([user("¿Y el horario?"), assistant("Sin confirmar.")])
+    plan = plan_web_lookup("¿Y dónde lo pasan?", history)
+    assert plan.action == "answer"
+    assert plan.reason == "unrelated_followup"
+    assert "River-Boca" not in plan.query
+
+
+def test_unpunctuated_broadcast_denials_keep_old_event_anchor():
+    """Channel corrections without a comma must not erase River-Boca."""
+    for correction in ("No lo pasan por Telefe.", "No va por Telefe.",
+                       "No es por Telefe.", "No, no lo dan por Telefe."):
+        history = [
+            user("¿Cuándo es el próximo River-Boca?"),
+            assistant("No está confirmado."),
+            user("¿Y en qué canal lo pasan?"),
+            assistant("Lo pasan por Telefe."),
+            user(correction),
+            assistant("No pude confirmar el canal."),
+        ]
+        plan = plan_web_lookup("¿Y a qué hora?", history)
+        assert plan.reason == "contextual_followup", correction
+        assert "River-Boca" in plan.query
+        assert "Telefe" not in plan.query
+
+    history[-2] = user("No, era el Mundial.")
+    assert plan_web_lookup("¿Y el horario?", history).reason == "unrelated_followup"

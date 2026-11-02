@@ -11,7 +11,11 @@ import re
 import unicodedata
 
 _RULES = (
-    ("cambio", re.compile(r"^(?:corrijo|correcci[oó]n\s*:|rectifico|en realidad\b|cambiamos\b|cambi[eé]\b)", re.I)),
+    ("cambio", re.compile(r"^(?:corrijo|correcci[oó]n\s*:|rectifico|en realidad\b|cambiamos\b|cambi[eé]\b|"
+     r"(?:no[,;:.!]\s*){1,3}(?=\S)|"
+     r"no\s+(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)\s+por|(?:va|van|es)\s+por)\b|"
+     r"eso\s+(?:no\s+es\s+(?:as[ií]|correcto)|est[aá]\s+mal)\b|"
+     r"te\s+equivocaste\b|est[aá]s\s+equivocado\b)", re.I)),
     ("decisión", re.compile(r"^(?:decid[ií]\b|decidimos\b|queda definido\b|la decisi[oó]n es\b|confirmo que\b|vamos a usar\b|usaremos\b)", re.I)),
     ("pendiente", re.compile(r"^(?:falta\b|queda pendiente\b|pendiente\s*:|tenemos que\b|hay que\b|necesitamos\b)", re.I)),
     ("hecho declarado", re.compile(r"^(?:mi\s+\w+\s+es\b|mis\s+\w+\s+son\b|tengo\b|uso\b|trabajo en\b)", re.I)),

@@ -498,3 +498,472 @@ def test_web_answer_with_no_sources_does_not_invent_citations():
     assert "https://" not in ground_web_answer_urls(
         "Busqué pero no hay datos: https://inventado.example.org/", []
     )
+
+
+def test_broadcast_guard_blocks_reversal_without_new_page_evidence():
+    history = [
+        {"role": "user", "content": "¿Lo pasan por Telefe?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Sí, lo pasan por Telefe."
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history, [],
+    )
+    assert "contradictoria" in guarded
+    assert "no voy a afirmar ni negar" in guarded
+    assert guarded != answer
+    # RSS snippets alone do not settle a previously disputed channel.
+    assert research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history,
+        [{"url": "https://example.com/rss", "evidence_type": "rss_snippet"}],
+    ) == guarded
+    # Reading an unrelated page is transport success, not corroboration.
+    # The guard must not let the model flip its claim just because a page loaded.
+    assert research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history,
+        [{"url": "https://example.com/unrelated", "evidence_type": "page_read"}],
+    ) == guarded
+
+
+def test_broadcast_guard_does_not_change_unrelated_or_uncertain_answers():
+    history = [{"role": "assistant", "content": "No, ESPN no lo pasa."}]
+    assert research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por ESPN?", "No pude confirmar si lo pasan por ESPN.", history, [],
+    ) == "No pude confirmar si lo pasan por ESPN."
+    assert research.guard_unverified_broadcast_claim(
+        "Explicá qué es una variable", "Sí, lo pasan por ESPN.", history, [],
+    ) == "Sí, lo pasan por ESPN."
+
+
+def test_chat_broadcast_guard_persists_safe_answer(monkeypatch):
+    from types import SimpleNamespace
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    monkeypatch.setattr(
+        "iachat.web_planner.plan_web_lookup_semantic",
+        lambda *args: SimpleNamespace(action="answer"),
+    )
+
+    class ContradictoryBackend:
+        def answer(self, messages):
+            return "Sí, lo pasan por Telefe."
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: ContradictoryBackend())
+    app_module.store.put("channel", [
+        {"role": "user", "content": "¿Lo pasan por Telefe?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No, Telefe no lo pasa."},
+    ], "admin", "")
+    response = TestClient(app_module.app, base_url="https://testserver").post(
+        "/api/chat", json={"conversation_id": "channel", "text": "¿Lo pasan por Telefe?"}
+    )
+    assert response.status_code == 200
+    assert "no voy a afirmar ni negar" in response.json()["answer"]
+    saved = app_module.store.get("channel", "admin")
+    assert saved[-1]["content"] == response.json()["answer"]
+
+
+def test_broadcast_channel_parser_does_not_swallow_lowercase_connectors():
+    # With global IGNORECASE, [A-Z] incorrectly swallowed "o por" as a
+    # capitalized channel suffix and silently disabled the conflict guard.
+    assert research._BROADCAST_CHANNEL.search(
+        "¿Lo pasan por Telefe o por ESPN?"
+    ).group(1) == "Telefe"
+    assert research._BROADCAST_CHANNEL.search(
+        "¿lo pasan por TyC Sports hoy?"
+    ).group(1) == "TyC Sports"
+    assert research._BROADCAST_CHANNEL.search(
+        "¿LO PASAN POR ESPN Premium?"
+    ).group(1) == "ESPN Premium"
+
+
+def test_broadcast_guard_still_abstains_when_question_names_two_channels():
+    history = [
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Sí, lo pasan por Telefe."
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe o por ESPN?", answer, history, [],
+    )
+    assert "contradictoria" in guarded
+    assert "no voy a afirmar ni negar" in guarded
+
+
+def test_generic_broadcast_followup_catches_repeated_disputed_channel():
+    history = [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "Todavía no está confirmada la fecha."},
+        {"role": "user", "content": "¿Lo pasan por Telefe?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Sí, lo pasan por Telefe."
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", answer, history, [],
+    )
+    assert "contradictoria" in guarded
+    assert "Telefe" in guarded
+    assert guarded != answer
+    assert research._broadcast_channels(
+        "¿Y en qué canal lo pasan?", answer,
+    ) == ["Telefe"]
+
+
+def test_second_channel_in_alternative_question_is_not_ignored():
+    history = [
+        {"role": "assistant", "content": "Sí, lo pasan por ESPN."},
+        {"role": "user", "content": "No, ESPN no lo pasa."},
+        {"role": "assistant", "content": "No, ESPN no lo pasa."},
+    ]
+    question = "¿Lo pasan por Telefe o por ESPN?"
+    assert research._broadcast_channels(question, "Sí, lo pasan por ESPN.") == [
+        "Telefe", "ESPN",
+    ]
+    guarded = research.guard_unverified_broadcast_claim(
+        question, "Sí, lo pasan por ESPN.", history, [],
+    )
+    assert "ESPN" in guarded
+    assert "no voy a afirmar ni negar" in guarded
+
+
+def test_generic_broadcast_question_without_conflict_preserves_answer():
+    answer = "Lo pasan por TyC Sports."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Qué canal lo pasa?", answer,
+        [{"role": "assistant", "content": "Sí, lo pasan por TyC Sports."}], [],
+    ) == answer
+    assert research.guard_unverified_broadcast_claim(
+        "¿Qué canal lo pasa?", "Telefe lo pasa.", [], [],
+    ) == "Telefe lo pasa."
+    assert research.guard_unverified_broadcast_claim(
+        "Explicame cómo funciona la TV.", "Lo pasan por Telefe.",
+        [{"role": "assistant", "content": "No, Telefe no lo pasa."}], [],
+    ) == "Lo pasan por Telefe."
+
+
+def test_chat_generic_broadcast_followup_persists_conflict_guard(monkeypatch):
+    from types import SimpleNamespace
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    monkeypatch.setattr(
+        "iachat.web_planner.plan_web_lookup_semantic",
+        lambda *args: SimpleNamespace(action="answer"),
+    )
+
+    class RepeatingBackend:
+        def answer(self, messages):
+            return "Sí, lo pasan por Telefe."
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: RepeatingBackend())
+    app_module.store.put("generic-channel", [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "Sin confirmar."},
+        {"role": "user", "content": "¿Lo pasan por Telefe?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No, Telefe no lo pasa."},
+    ], "admin", "")
+    response = TestClient(app_module.app, base_url="https://testserver").post(
+        "/api/chat", json={
+            "conversation_id": "generic-channel",
+            "text": "¿Y en qué canal lo pasan?",
+        },
+    )
+    assert response.status_code == 200
+    assert "no voy a afirmar ni negar" in response.json()["answer"]
+    assert app_module.store.get("generic-channel", "admin")[-1]["content"] == (
+        response.json()["answer"]
+    )
+
+
+def test_short_broadcast_reply_does_not_repeat_disputed_telefe():
+    history = [
+        {"role": "user", "content": "¿Cuándo juegan River y Boca?"},
+        {"role": "assistant", "content": "No pude confirmar el horario."},
+        {"role": "user", "content": "¿Lo pasan por Telefe?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No, Telefe no lo pasa."},
+    ]
+    for answer in ("Telefe.", "Por Telefe.", "Es por Telefe.", "Va por Telefe"):
+        guarded = research.guard_unverified_broadcast_claim(
+            "¿Y en qué canal lo pasan?", answer, history, [],
+        )
+        assert "contradictoria" in guarded
+        assert "Telefe" in guarded
+        assert guarded != answer
+
+
+def test_short_channel_reply_without_conflict_is_not_modified():
+    for answer in ("Telefe.", "Por Telefe.", "TyC Sports.", "ESPN Premium."):
+        assert research.guard_unverified_broadcast_claim(
+            "¿Y en qué canal lo pasan?", answer, [], [],
+        ) == answer
+    # Do not classify arbitrary capitalized text as a channel claim outside
+    # the broadcast-question context.
+    assert research.guard_unverified_broadcast_claim(
+        "¿Cómo se escribe Telefe?", "Telefe.",
+        [{"role": "assistant", "content": "No, Telefe no lo pasa."}], [],
+    ) == "Telefe."
+
+
+def test_short_channel_answer_guard_on_donde_followup():
+    history = [
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Por Telefe"
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Y dónde lo pasan?", answer, history, [],
+    )
+
+
+def test_broadcast_guard_catches_va_por_correction_and_short_reply():
+    """'¿Va por Telefe?' used to bypass the channel-question guard entirely."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Sí, va por Telefe."},
+        {"role": "user", "content": "No, no va por Telefe."},
+        {"role": "assistant", "content": "No va por Telefe."},
+    ]
+    answer = "Va por Telefe."
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Va por Telefe?", answer, history, [],
+    )
+    assert "contradictoria" in guarded
+    assert "Telefe" in guarded
+    assert guarded != answer
+    assert research.guard_unverified_broadcast_claim(
+        "¿Va por Telefe?", answer, [], [],
+    ) == answer
+
+
+def test_broadcast_guard_catches_lo_dan_por_and_se_transmite_por():
+    """Equivalent Spanish broadcast verbs must not evade a user correction."""
+    for question, correction, answer in [
+        ("¿Lo dan por Telefe?", "No, no lo dan por Telefe.", "Lo dan por Telefe."),
+        ("¿Se transmite por Telefe?", "No, no se transmite por Telefe.", "Se transmite por Telefe."),
+    ]:
+        history = [
+            {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+            {"role": "user", "content": correction},
+        ]
+        guarded = research.guard_unverified_broadcast_claim(
+            question, answer, history, [],
+        )
+        assert "contradictoria" in guarded, question
+        assert guarded != answer
+    assert research._broadcast_channels(
+        "¿Se transmite por TyC Sports?", "Se transmite por TyC Sports."
+    ) == ["TyC Sports"]
+
+
+def test_no_se_transmite_is_negation_but_no_se_accented_is_uncertainty():
+    assert research._channel_stance("No, no se transmite por Telefe.", "Telefe") == "no"
+    assert research._channel_stance("No sé si lo pasan por Telefe.", "Telefe") == "unknown"
+
+
+def test_non_broadcast_question_remains_outside_channel_guard():
+    history = [{"role": "user", "content": "No, no va por Telefe."}]
+    answer = "Va por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "Explicame cómo funciona un televisor", answer, history, [],
+    ) == answer
+
+
+def test_persisted_chat_va_por_after_user_correction_abstains(monkeypatch):
+    """The HTTP conversation must persist the guarded reply after a restart."""
+    from types import SimpleNamespace
+
+    app_module.store = ConversationStore(":memory:")
+    monkeypatch.setattr(app_module, "_signed_user", lambda cookie: "admin")
+    monkeypatch.setattr(
+        "iachat.web_planner.plan_web_lookup_semantic",
+        lambda *args: SimpleNamespace(action="answer"),
+    )
+
+    class RepeatingBackend:
+        def answer(self, messages):
+            return "Va por Telefe."
+
+    monkeypatch.setattr(app_module, "get_backend", lambda: RepeatingBackend())
+    app_module.store.put("va-por-corrected", [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "Todavía no está confirmada la fecha."},
+        {"role": "user", "content": "¿Va por Telefe?"},
+        {"role": "assistant", "content": "Sí, va por Telefe."},
+        {"role": "user", "content": "No, no va por Telefe."},
+        {"role": "assistant", "content": "No va por Telefe."},
+    ], "admin", "")
+    response = TestClient(app_module.app, base_url="https://testserver").post(
+        "/api/chat", json={
+            "conversation_id": "va-por-corrected",
+            "text": "¿Va por Telefe?",
+        },
+    )
+    assert response.status_code == 200
+    assert "no voy a afirmar ni negar" in response.json()["answer"]
+    saved = app_module.store.get("va-por-corrected", "admin")
+    assert saved[-1]["content"] == response.json()["answer"]
+
+
+def test_prior_bare_channel_reply_is_treated_as_a_claim_in_broadcast_context():
+    """A one-word earlier answer can contradict a later categorical denial."""
+    history = [
+        {"role": "user", "content": "¿Y en qué canal lo pasan?"},
+        {"role": "assistant", "content": "Telefe."},
+    ]
+    answer = "No, no va por Telefe."
+    guarded = research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history, [],
+    )
+    assert "contradictoria" in guarded
+    assert "no voy a afirmar ni negar" in guarded
+
+
+def test_prior_bare_name_in_nonbroadcast_context_is_not_a_channel_claim():
+    """A spelling answer is not evidence about television transmission."""
+    history = [
+        {"role": "user", "content": "¿Cómo se escribe Telefe?"},
+        {"role": "assistant", "content": "Telefe."},
+    ]
+    answer = "No, no va por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Lo pasan por Telefe?", answer, history, [],
+    ) == answer
+
+
+def test_channel_conflict_does_not_leak_from_river_boca_to_boca_racing():
+    """A corrected outlet for one match is not a correction for another."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No va por Telefe."},
+        {"role": "user", "content": "¿Cuándo juegan Boca y Racing?"},
+        {"role": "assistant", "content": "Todavía no confirmé la fecha."},
+    ]
+    answer = "Lo pasan por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", answer, history, [],
+    ) == answer
+    assert research.guard_unverified_broadcast_claim(
+        "¿En qué canal pasan Boca-Racing?", answer, history, [],
+    ) == answer
+
+
+def test_channel_conflict_survives_repeat_of_same_fixture():
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "user", "content": "¿Cuándo juegan Boca y River?"},
+    ]
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", "Lo pasan por Telefe.", history, [],
+    )
+
+
+def test_explicit_new_fixture_resets_old_dispute_but_not_same_fixture():
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+    ]
+    answer = "Lo pasan por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Qué canal transmite Argentina-Brasil?", answer, history, [],
+    ) == answer
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Qué canal transmite Boca-River?", answer, history, [],
+    )
+
+
+def test_channel_names_are_not_misread_as_fixture():
+    assert research._broadcast_fixture("¿Lo pasan por Telefe y ESPN?") is None
+    assert research._broadcast_fixture("¿Cuándo juegan River y Boca?") == ("boca", "river")
+    assert research._broadcast_fixture("¿Cuándo es River-Boca?") == ("boca", "river")
+
+
+def test_revisiting_older_fixture_retains_its_disputed_channel():
+    """Switching fixtures must not erase an earlier correction."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "user", "content": "¿Cuándo es Boca-Racing?"},
+        {"role": "assistant", "content": "No tengo el horario confirmado."},
+        {"role": "user", "content": "¿Cuándo juegan River y Boca?"},
+    ]
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿En qué canal pasan River-Boca?", "Lo pasan por Telefe.", history, [],
+    )
+
+
+def test_disputed_fixture_survives_480_persisted_messages():
+    """A correction must survive a long chain of ordinary follow-ups."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+    ]
+    for _ in range(240):
+        history.extend([
+            {"role": "user", "content": "¿Y el horario?"},
+            {"role": "assistant", "content": "Todavía no está confirmado."},
+        ])
+    answer = "Lo pasan por Telefe."
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿En qué canal pasan River-Boca?", answer, history, [],
+    )
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Y en qué canal lo pasan?", answer, history, [],
+    )
+
+
+def test_long_history_fixture_switch_keeps_disputes_separate():
+    """An old River-Boca correction must not affect Boca-Racing."""
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "user", "content": "¿Cuándo es Boca-Racing?"},
+        {"role": "assistant", "content": "No tengo confirmación del canal."},
+    ]
+    for _ in range(240):
+        history.extend([
+            {"role": "user", "content": "¿Y el horario?"},
+            {"role": "assistant", "content": "Todavía sin confirmar."},
+        ])
+    answer = "Lo pasan por Telefe."
+    assert research.guard_unverified_broadcast_claim(
+        "¿Qué canal transmite Boca-Racing?", answer, history, [],
+    ) == answer
+    assert "contradictoria" in research.guard_unverified_broadcast_claim(
+        "¿Qué canal transmite River-Boca?", answer, history, [],
+    )
+
+
+def test_unpunctuated_user_denial_blocks_repeated_channel_claim():
+    """A user correction must count even if no comma follows 'No'."""
+    for correction in ("No lo pasan por Telefe.", "No va por Telefe.",
+                       "No es por Telefe."):
+        history = [
+            {"role": "user", "content": "¿Cuándo es River-Boca?"},
+            {"role": "assistant", "content": "Lo pasan por Telefe."},
+            {"role": "user", "content": correction},
+        ]
+        answer = "Lo pasan por Telefe."
+        guarded = research.guard_unverified_broadcast_claim(
+            "¿Y en qué canal lo pasan?", answer, history, [],
+        )
+        assert "no voy a afirmar ni negar" in guarded, correction
+    assert research.guard_unverified_broadcast_claim(
+        "¿Cómo funciona la TV?", "Lo pasan por Telefe.",
+        [{"role": "user", "content": "No lo pasan por Telefe."}], [],
+    ) == "Lo pasan por Telefe."

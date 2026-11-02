@@ -349,3 +349,51 @@ def test_unlabeled_credentials_never_enter_versioned_memory_ledger():
     rendered = render_summary(summary)
     assert "sk-" not in rendered
     assert "4321" not in rendered
+
+
+def test_natural_language_user_corrections_survive_summary_and_restart(tmp_path):
+    """Corrections need not start with the literal word 'Corrijo'."""
+    store = ConversationStore(str(tmp_path / "corrections.db"))
+    history = [
+        {"role": "user", "content": "Decidimos usar Telefe como canal."},
+        {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+        {"role": "user", "content": "No, no, Telefe no lo pasa."},
+        {"role": "assistant", "content": "Entendido, quedó sin confirmar."},
+        {"role": "user", "content": "Te equivocaste: todavía no está confirmado."},
+    ]
+    store.put("broadcast", history, "alice", "Deportes")
+    reopened = ConversationStore(str(tmp_path / "corrections.db"))
+    summary = reopened.get_summary("broadcast", "alice")
+    corrections = [item["quote"] for item in summary["items"] if item["kind"] == "cambio"]
+    assert corrections == [
+        "No, no, Telefe no lo pasa.",
+        "Te equivocaste: todavía no está confirmado.",
+    ]
+    rendered = render_summary(summary, question="¿Lo pasan por Telefe?")
+    assert "No, no, Telefe no lo pasa." in rendered
+    assert "Sí, lo pasan por Telefe." not in rendered
+
+
+def test_plain_negative_without_correction_signal_is_not_ledger_change():
+    summary = build_summary([{"role": "user", "content": "No quiero ver esa película."}])
+    assert summary["items"] == []
+
+
+def test_unpunctuated_channel_correction_persists_after_reopen(tmp_path):
+    """Explicit broadcast denials are durable even without 'No,'."""
+    path = str(tmp_path / "broadcast-correction.db")
+    store = ConversationStore(path)
+    history = [
+        {"role": "user", "content": "¿Cuándo es River-Boca?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No lo pasan por Telefe."},
+        {"role": "assistant", "content": "No tengo confirmación."},
+        {"role": "user", "content": "No va por Telefe."},
+    ]
+    store.put("c", history, "alice", "Deportes")
+    summary = ConversationStore(path).get_summary("c", "alice")
+    assert [x["quote"] for x in summary["items"] if x["kind"] == "cambio"] == [
+        "No lo pasan por Telefe.", "No va por Telefe.",
+    ]
+    assert "No lo pasan por Telefe." in render_summary(summary, question="Telefe")
+    assert ConversationStore(path).get_summary("c", "bob") is None
