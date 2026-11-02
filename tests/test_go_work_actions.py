@@ -62,6 +62,35 @@ def test_strict_json_only_and_document_never_stage(monkeypatch):
 
 
 
+@pytest.mark.parametrize("raw", [
+    "Ya registré 4 horas en obra 1093.",
+    "Acabo de actualizar los registros oficiales.",
+    '{"go_intent":"v1","intent":"conversation","reply":"La novedad quedó guardada correctamente."}',
+])
+def test_unverified_model_write_claim_never_appears_as_confirmed(monkeypatch, raw):
+    """No model text may impersonate a completed official PostgreSQL write."""
+    _work(monkeypatch)
+    monkeypatch.setattr(actions, "_ledger", lambda: pytest.fail(
+        "Conversation-only replies must never touch the official ledger"
+    ))
+    reply, proposal = _interpret(raw, "¿Qué pasó con la novedad?")
+    assert proposal is None
+    assert "No tengo una confirmación transaccional" in reply
+    assert "esperar tu aprobación" in reply
+
+
+@pytest.mark.parametrize("raw", [
+    "No registré nada; falta tu aprobación.",
+    "Según el historial oficial, se registró ayer.",
+    '{"go_intent":"v1","intent":"conversation","reply":"No guardé ninguna novedad."}',
+])
+def test_unverified_write_guard_preserves_denials_and_historical_reading(monkeypatch, raw):
+    _work(monkeypatch)
+    reply, proposal = _interpret(raw, "¿Qué pasó?")
+    assert proposal is None
+    assert reply == ("No guardé ninguna novedad." if raw.startswith("{") else raw)
+
+
 def test_whole_response_json_fence_stages_only_a_pending_proposal(monkeypatch):
     """Free-model formatting must not silently disable the approval flow."""
     _work(monkeypatch)
