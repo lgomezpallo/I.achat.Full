@@ -65,7 +65,7 @@ jobs:
               if diagnostic <= paths <= permitted:
                   deploy = False
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write("deploy=" + str(deploy).lower() + "\\n")
+              output.write("deploy=" + str(deploy).lower() + "\n")
           print("RELEASE_SCOPE=" + ("DEPLOY" if deploy else "SKIP_DIAGNOSTIC_ONLY"))
           PY
 
