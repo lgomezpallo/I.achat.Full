@@ -221,6 +221,7 @@ _UNCERTAIN_CHANNEL = re.compile(
 )
 _USER_CORRECTION = re.compile(
     r"^\s*(?:(?:no[,;:.!]\s*){1,3}|corrijo\b|rectifico\b|"
+    r"no\s+(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)\s+por|(?:va|van|es)\s+por)\b|"
     r"te\s+equivocaste\b|eso\s+est[aá]\s+mal\b)", re.I,
 )
 
