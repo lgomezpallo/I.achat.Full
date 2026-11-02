@@ -90,6 +90,15 @@ _PSEUDO_ADDRESS = re.compile(
     r"(?:(?:la|el|del)\s+)?(?:obra|presupuesto|pto\.?|p)\s*"
     r"(?:n(?:ro|úmero|º|°)?\.?\s*)?\d{3,6}", re.I
 )
+# A month followed by a year is a reporting period, not a street address.
+# Otherwise "en octubre 2026" is greedily parsed as a street/house number
+# and can incorrectly conflict with an explicit official work budget.
+_MONTH_YEAR = re.compile(
+    r"(?:(?:el\s+)?mes\s+de\s+)?"
+    r"(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
+    r"septiembre|setiembre|octubre|noviembre|diciembre)"
+    r"(?:\s+de)?\s+(?:19|20|21)\d{2}", re.I
+)
 
 
 def _is_work_reference_not_address(candidate: str) -> bool:
@@ -100,7 +109,8 @@ def _is_work_reference_not_address(candidate: str) -> bool:
     budget, not a conflicting street. Real addresses such as "Alsina 354"
     still qualify for the independent PostgreSQL identity check.
     """
-    return bool(_PSEUDO_ADDRESS.fullmatch(candidate) or _WORK.search(candidate))
+    return bool(_MONTH_YEAR.fullmatch(candidate) or
+                _PSEUDO_ADDRESS.fullmatch(candidate) or _WORK.search(candidate))
 
 
 def _address_references(message: str) -> list[str]:
