@@ -65,6 +65,7 @@ def test_strict_json_only_and_document_never_stage(monkeypatch):
 @pytest.mark.parametrize("raw", [
     "Ya registré 4 horas en obra 1093.",
     "Acabo de actualizar los registros oficiales.",
+    "He guardado el parte diario en PostgreSQL.",
     '{"go_intent":"v1","intent":"conversation","reply":"La novedad quedó guardada correctamente."}',
 ])
 def test_unverified_model_write_claim_never_appears_as_confirmed(monkeypatch, raw):
@@ -81,6 +82,7 @@ def test_unverified_model_write_claim_never_appears_as_confirmed(monkeypatch, ra
 
 @pytest.mark.parametrize("raw", [
     "No registré nada; falta tu aprobación.",
+    "No he guardado nada; necesito confirmación.",
     "Según el historial oficial, se registró ayer.",
     '{"go_intent":"v1","intent":"conversation","reply":"No guardé ninguna novedad."}',
 ])
