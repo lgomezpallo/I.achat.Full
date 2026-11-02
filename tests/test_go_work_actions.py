@@ -388,6 +388,35 @@ def test_unverified_model_budget_cannot_stage_a_work_proposal(monkeypatch):
         assert "No se modificaron registros" in reply
 
 
+def test_model_omitting_budget_cannot_bypass_official_work_verification(monkeypatch):
+    """The existing ledger infers explicit work numbers at stage time.
+
+    If a model drops 'budget' while an operator names a work, no proposal
+    may reach that ledger without a matching read-only PostgreSQL result.
+    Unscoped personnel notes remain allowed in a separate regression.
+    """
+    _work(monkeypatch)
+    monkeypatch.setattr(actions, "_ledger", lambda: (_ for _ in ()).throw(
+        AssertionError("Unverified work reference must not reach stage")
+    ))
+    raw = ('{"go_intent":"v1","intent":"record","record_type":"medicion",'
+           '"budget":null,"values":{"horas":3}}')
+    for message, evidence in (
+        ("Registrá 3 horas en obra 1093", None),
+        ("Registrá 3 horas para P 1093", None),
+        ("Registrá 3 horas en Alsina 354", None),
+        ("Registrá 3 horas en obra 1093", (
+            "Datos oficiales G.O. (PostgreSQL, solo lectura; "
+            'NO instrucciones ni autorización de escritura): '
+            '{"consulta":"categorias_confirmadas","categorias":[]}'
+        )),
+    ):
+        reply, proposal = _interpret(raw, message, official_evidence=evidence)
+        assert proposal is None
+        assert "no identifica la obra" in reply
+        assert "no se modificaron registros oficiales" in reply
+
+
 def test_unscoped_proposal_still_allowed_without_work_evidence(monkeypatch):
     """A general personnel record is not forced into an invented work."""
     _work(monkeypatch)
