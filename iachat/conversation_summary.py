@@ -13,6 +13,7 @@ import unicodedata
 _RULES = (
     ("cambio", re.compile(r"^(?:corrijo|correcci[oó]n\s*:|rectifico|en realidad\b|cambiamos\b|cambi[eé]\b|"
      r"(?:no[,;:.!]\s*){1,3}(?=\S)|"
+     r"no\s+(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)\s+por|(?:va|van|es)\s+por)\b|"
      r"eso\s+(?:no\s+es\s+(?:as[ií]|correcto)|est[aá]\s+mal)\b|"
      r"te\s+equivocaste\b|est[aá]s\s+equivocado\b)", re.I)),
     ("decisión", re.compile(r"^(?:decid[ií]\b|decidimos\b|queda definido\b|la decisi[oó]n es\b|confirmo que\b|vamos a usar\b|usaremos\b)", re.I)),
