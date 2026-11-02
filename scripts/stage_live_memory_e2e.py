@@ -371,6 +371,61 @@ def child(private: Path) -> None:
             if restored.status_code != 200 or len(restored.json().get("history", [])) != 484:
                 raise AssertionError("rollback_http_history_mismatch")
         print("STAGE_ISOLATED_ROLLBACK_RESTART: PASS", flush=True)
+
+        # Real free-provider regression through the same disposable HTTP server.
+        # A 3-day-old River-Boca topic and a user correction must survive 480
+        # stored messages. This never accesses an actual user's transcript.
+        from iachat.web_planner import plan_web_lookup
+        fixture_history = [
+            {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+            {"role": "assistant", "content": "No pude confirmar la fecha."},
+            {"role": "user", "content": "¿Lo pasan por Telefe?"},
+            {"role": "assistant", "content": "Sí, lo pasan por Telefe."},
+            {"role": "user", "content": "No, Telefe no lo pasa."},
+            {"role": "assistant", "content": "No tengo confirmación del canal."},
+        ]
+        for _ in range(237):
+            fixture_history.extend([
+                {"role": "user", "content": "¿Y el horario?"},
+                {"role": "assistant", "content": "No pude confirmarlo."},
+            ])
+        if len(fixture_history) != 480:
+            raise AssertionError("fixture_seed_length_mismatch")
+        plan = plan_web_lookup("¿Y quién lo pasa?", fixture_history)
+        if (plan.action != "search" or "River-Boca" not in plan.query
+                or "Mundial" in plan.query or "Telefe" in plan.query):
+            raise AssertionError("day_later_fixture_search_context_lost")
+        fixture_id = "fixture-" + secrets.token_hex(8)
+        fixture_store = ConversationStore(str(db_path))
+        try:
+            fixture_store.put(fixture_id, fixture_history, owner, "Atlas")
+        finally:
+            fixture_store._db.close()
+        with sqlite3.connect(db_path) as connection:
+            connection.execute(
+                "UPDATE conversation_index SET updated_at=updated_at-3*86400 "
+                "WHERE id=? AND owner=?", (fixture_id, owner))
+        with httpx.Client(base_url=base, timeout=160, follow_redirects=False) as client:
+            login = client.post("/auth/login", json={"username": owner, "password": password})
+            if login.status_code != 200:
+                raise AssertionError("fixture_authentication_failed")
+            client.headers["Cookie"] = "iachat_session=" + login.cookies["iachat_session"]
+            response = client.post("/api/chat", json={
+                "conversation_id": fixture_id, "project": "Atlas",
+                "text": ("¿Y quién lo pasa? Decime a qué partido me refiero "
+                         "y no inventes el canal si no está confirmado."),
+            })
+            data = response.json() if response.status_code == 200 else {}
+            answer = data.get("answer", "")
+            if (response.status_code != 200 or not isinstance(answer, str)
+                    or not answer.strip() or "mundial" in answer.casefold()):
+                raise AssertionError("day_later_live_fixture_followup_failed")
+            saved = client.get("/api/conversations/" + fixture_id)
+            if (saved.status_code != 200
+                    or len(saved.json().get("history", [])) != 482
+                    or saved.json()["history"][-1].get("content") != answer):
+                raise AssertionError("day_later_live_fixture_not_persisted")
+        print("STAGE_DAY_LATER_RIVER_BOCA_480_REAL_HTTP: PASS", flush=True)
     finally:
         if process is not None:
             stop(process)
