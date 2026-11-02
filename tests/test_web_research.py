@@ -1149,3 +1149,7 @@ def test_quien_lo_pasa_followup_does_not_repeat_disputed_telefe():
     assert research.guard_unverified_broadcast_claim(
         "¿Y quién lo pasa?", answer, [], [],
     ) == answer
+    # The singular verb alone is not a broadcast cue ("¿Qué pasa?").
+    assert research.guard_unverified_broadcast_claim(
+        "¿Qué pasa?", answer, history, [],
+    ) == answer
