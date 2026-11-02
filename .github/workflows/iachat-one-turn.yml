@@ -1,0 +1,59 @@
+name: IAchat — one authenticated production turn (no deploy)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iachat-one-turn-probe
+  cancel-in-progress: false
+
+jobs:
+  one-turn:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: oracle-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify pinned Oracle host and prepare ephemeral SSH key
+        shell: bash
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts
+          actual="$(ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          chmod 600 ~/.ssh/known_hosts
+      - name: One authenticated HTTPS request, independent DB readback, cleanup
+        shell: bash
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15"
+          scp $SSH_OPTS scripts/iachat_one_turn_probe.py \
+            "$ORACLE_USER@$ORACLE_HOST:/tmp/iachat-one-turn-${GITHUB_RUN_ID}.py"
+          ssh $SSH_OPTS "$ORACLE_USER@$ORACLE_HOST" "bash -se -- ${GITHUB_RUN_ID}" <<'REMOTE'
+          set -euo pipefail
+          id="$1"
+          script="/tmp/iachat-one-turn-${id}.py"
+          trap 'rm -f -- "$script"' EXIT
+          chmod 644 "$script"
+          sudo -n /usr/bin/python3 "$script" --launch
+          REMOTE
+      - name: Delete runner SSH material
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
