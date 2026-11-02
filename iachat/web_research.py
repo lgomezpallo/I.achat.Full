@@ -340,26 +340,36 @@ def _broadcast_fixture(text: str) -> tuple[str, str] | None:
 
 
 def _current_fixture_history(question: str, history: list[dict]) -> list[dict]:
-    """Use only the latest explicitly identified fixture for channel conflicts.
+    """Scope a channel dispute to its fixture, without losing older corrections.
 
-    A question naming a different fixture starts a new topic. Bare follow-ups
-    inherit the last named fixture. Without an identifiable fixture, retain
-    the conservative previous behavior rather than guessing a topic switch.
+    A bare follow-up uses the latest named fixture. An explicit fixture query
+    can revisit an older fixture and recover its corrections even after a
+    different match was discussed. Unknown fixture identity keeps the old
+    conservative behavior instead of inventing a match.
     """
     recent = history[-20:]
-    active = None
+    segments: list[tuple[tuple[str, str], int, int]] = []
+    active: tuple[str, str] | None = None
     start = 0
     for index, turn in enumerate(recent):
         if turn.get("role") != "user":
             continue
         fixture = _broadcast_fixture(str(turn.get("content", "")))
         if fixture is not None and fixture != active:
+            if active is not None:
+                segments.append((active, start, index))
             active = fixture
             start = index
+    if active is not None:
+        segments.append((active, start, len(recent)))
     current = _broadcast_fixture(question)
-    if current is not None and active is not None and current != active:
-        return []
-    return recent[start:]
+    if current is not None:
+        matches = [recent[begin:end] for fixture, begin, end in segments if fixture == current]
+        if matches:
+            return [turn for segment in matches for turn in segment]
+        if active is not None:
+            return []
+    return recent[start:] if active is not None else recent
 
 
 def guard_unverified_broadcast_claim(
