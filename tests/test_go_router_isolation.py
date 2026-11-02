@@ -218,3 +218,34 @@ def test_work_readiness_rejects_unreachable_router_even_when_opted_in(monkeypatc
     assert readiness.json()["detail"] == "router_unavailable"
     assert status.json()["reachable"] is False
     assert status.json()["routing_verified"] is False
+
+
+@pytest.mark.parametrize("gateway_status", [502, 503, 504])
+def test_go_profile_never_retries_route_after_gateway_error(monkeypatch, gateway_status):
+    """One labor request means one Router dispatch, even on a gateway outage.
+
+    Router owns per-model fallback. Retrying /route at the client could
+    consume another free-tier request and duplicate a work prompt.
+    """
+    monkeypatch.setenv("IACHAT_PROFILE", "go-ute")
+    monkeypatch.setenv("GO_ROUTER_INFERENCE_ENABLED", "1")
+    calls = []
+
+    class GatewayResponse:
+        status_code = gateway_status
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return GatewayResponse()
+
+    monkeypatch.setattr("iachat.backend.httpx.post", fake_post)
+    monkeypatch.setattr(
+        "iachat.backend.httpx.get",
+        lambda *args, **kwargs: pytest.fail("G.O. must not wake/retry Router"),
+    )
+    backend = RouterFirstBackend(url="http://127.0.0.1:8010", token="test-only")
+    with pytest.raises(RuntimeError, match=rf"^router_http_{gateway_status}$"):
+        backend.answer([{"role": "user", "content": "Novedad laboral de prueba"}])
+    assert len(calls) == 1
+    assert calls[0][0] == "http://127.0.0.1:8010/route"
+    assert calls[0][1]["json"]["application_name"] == "go-ute"
