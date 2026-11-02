@@ -35,7 +35,7 @@ REFERENTIAL_FOLLOWUP = re.compile(
     r"(?:lo|la)\s+(?:pasan|transmiten)\s+por\b|"
     r"d[oó]nde\b|"
     r"c[oó]mo\s+(?:sali[oó]|termin[oó]|qued[oó])\b|"
-    r"qui[eé]n\s+(?:gan[oó]|juega|transmite)\b|"
+    r"qui[eé]n\s+(?:(?:lo|la)\s+)?(?:gan[oó]|juega|transmite|pasa|emite)\b|"
     r"(?:el|la|los|las)\s+(?:canal|horario|resultado|transmisi[oó]n|"
     r"formaci[oó]n|fecha|partido)\b|"
     r"qu[eé]\s+pas[oó]\s+(?:al\s+final|despu[eé]s)\b"
