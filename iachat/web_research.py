@@ -332,11 +332,23 @@ def guard_unverified_broadcast_claim(
         stance = _channel_stance(answer, channel, allow_short_answer=True)
         if stance not in ("yes", "no"):
             continue
-        prior = [
-            _channel_stance(str(turn.get("content", "")), channel)
-            for turn in history[-20:] if turn.get("role") == "assistant"
-        ]
-        prior = [value for value in prior if value]
+        # A previous bare reply ("Telefe.") is a channel assertion only
+        # when it answered an actual broadcast question. Without the
+        # preceding user turn, treating any proper noun as a channel claim
+        # would contaminate unrelated discussions.
+        prior: list[str] = []
+        previous_user = ""
+        for turn in history[-20:]:
+            role = turn.get("role")
+            if role == "user":
+                previous_user = str(turn.get("content", ""))
+            elif role == "assistant":
+                value = _channel_stance(
+                    str(turn.get("content", "")), channel,
+                    allow_short_answer=bool(_BROADCAST_QUESTION.search(previous_user)),
+                )
+                if value:
+                    prior.append(value)
         asserted = {value for value in prior if value in ("yes", "no")}
         contradiction = (
             len(asserted) > 1
