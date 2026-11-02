@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read  # release-scope reads PR #105 metadata and changed paths
   statuses: write
 
 concurrency:
