@@ -29,6 +29,38 @@ jobs:
           python -m py_compile scripts/stage_live_memory_e2e.py
           pytest -q tests/test_stage_live_memory_e2e.py
 
+      - name: Read-only probe of installed public IAchat (no authentication)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import urllib.request
+          import urllib.error
+          import json
+          base = "https://ia-chat.duckdns.org"
+          statuses = {}
+          for path in ("/health", "/ready", "/auth/status", "/api/conversations"):
+              request = urllib.request.Request(base + path, headers={"User-Agent": "IAchat-readonly-stage-probe"})
+              try:
+                  with urllib.request.urlopen(request, timeout=12) as response:
+                      code = response.status
+                      payload = response.read(1200)
+              except urllib.error.HTTPError as error:
+                  code = error.code
+                  payload = error.read(1200)
+              except Exception as error:
+                  print("INSTALLED_PROBE_NETWORK_ERROR:", path, type(error).__name__, flush=True)
+                  raise
+              statuses[path] = code
+              print("INSTALLED_PROBE_HTTP:", path, code, flush=True)
+              if path == "/ready" and code == 200:
+                  data = json.loads(payload)
+                  print("INSTALLED_BACKEND_MODE:", str(data.get("mode", "unknown"))[:30], flush=True)
+          if statuses["/health"] != 200 or statuses["/auth/status"] != 200:
+              raise SystemExit("installed_public_health_or_auth_status_unavailable")
+          if statuses["/api/conversations"] != 401:
+              raise SystemExit("installed_private_api_not_protected")
+          PY
+
   isolated-live-memory:
     needs: preflight
     runs-on: ubuntu-latest
