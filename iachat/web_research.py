@@ -347,7 +347,10 @@ def _current_fixture_history(question: str, history: list[dict]) -> list[dict]:
     different match was discussed. Unknown fixture identity keeps the old
     conservative behavior instead of inventing a match.
     """
-    recent = history[-20:]
+    # Keep fixture identities across long-lived conversations. The old 20-turn
+    # window silently discarded corrections after ordinary follow-ups.
+    # Bound the scan to protect chat latency on exceptionally long histories.
+    recent = history[-1000:]
     segments: list[tuple[tuple[str, str], int, int]] = []
     active: tuple[str, str] | None = None
     start = 0
@@ -393,7 +396,7 @@ def guard_unverified_broadcast_claim(
         # would contaminate unrelated discussions.
         prior: list[str] = []
         previous_user = ""
-        for turn in history[-20:]:
+        for turn in history:
             role = turn.get("role")
             if role == "user":
                 previous_user = str(turn.get("content", ""))
@@ -409,7 +412,7 @@ def guard_unverified_broadcast_claim(
             len(asserted) > 1
             or bool(prior and prior[-1] != stance)
         )
-        for turn in history[-20:]:
+        for turn in history:
             if turn.get("role") != "user":
                 continue
             text = str(turn.get("content", ""))
