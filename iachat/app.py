@@ -548,6 +548,12 @@ def chat(message: MessageInput, request: Request, background_tasks: BackgroundTa
             chosen_names = [p["filename"] for p in prior] + chosen_names
         if wants_previous and not previous_images and not wants_comparison:
             chosen_images = [] if not images else chosen_images
+        # The Router transport accepts at most five images in total. IAchat
+        # can combine five new uploads with stored comparison images, so fail
+        # explicitly before dispatch rather than sending an invalid request
+        # or silently dropping a photo the user asked to compare.
+        if len(chosen_images) > 5:
+            raise HTTPException(422, "too_many_images_for_comparison")
         model_started = time.monotonic()
         if chosen_images:
             visual_labels = "\n".join(f"Imagen {i+1}: {name}" for i,name in enumerate(chosen_names))

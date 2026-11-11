@@ -145,6 +145,23 @@ assert env["IACHAT_GOOGLE_CLIENT_SECRET"] == web.get("client_secret"), "google_c
 assert "https://ia-chat.duckdns.org/auth/google/callback" in web.get("redirect_uris", []), "google_redirect_mismatch"
 print("GOOGLE_OIDC_PREFLIGHT: files present, root 0600, values and redirect consistent (secrets withheld)")
 PY
+# Read the currently serving backend mode before changing code. This is a
+# local readiness probe only: no inference, credentials or provider requests.
+# Never silently turn an operator-selected Router backend into integrated.
+backend_mode="$("$app/.venv/bin/python" - <<'PY'
+import json
+import urllib.request
+try:
+    with urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=8) as response:
+        payload = json.load(response)
+        if (response.status != 200 or payload.get("status") != "ready"
+                or payload.get("mode") not in ("integrated", "router")):
+            raise ValueError("unexpected_backend_readiness")
+        print(payload["mode"])
+except Exception:
+    raise SystemExit("existing_backend_readiness_unavailable")
+PY
+)"
 deployed=1
 rsync -a --checksum --exclude='.git/' --exclude='.venv/' --exclude='*.db' --exclude='*.db-*' --exclude='*.sqlite' --exclude='*.sqlite-*' --exclude='*.sqlite3' --exclude='*.sqlite3-*' --exclude='.env' --exclude='.env.*' \
   "$stage/" "$app/"
@@ -159,19 +176,20 @@ for candidate in /etc/router-providers.env "$HOME/.config/router/providers.env";
     break
   fi
 done
-if [[ -z "$provider_file" ]]; then
-  echo "::error::No provider credential file found on Oracle."
-  exit 1
-fi
 sudo -n install -d -m 755 /etc/systemd/system/iachat.service.d
-# This file changes service behavior and must be reverted together with code.
-# The private staging directory is removed by the EXIT trap; never log content.
+# Existing configuration is owned by the operator: preserve it byte-for-byte,
+# including Router credentials and any explicitly selected backend mode.
+# The deploy may create the initial integrated drop-in, never replace one.
 if sudo -n test -e "$dropin"; then
+  sudo -n test -s "$dropin" || { echo "::error::Existing backend drop-in is empty."; exit 1; }
   sudo -n cp -p "$dropin" "$dropin_backup"
   dropin_existed=1
+else
+  [[ "$backend_mode" == "integrated" ]] || { echo "::error::Router backend has no preserved drop-in."; exit 1; }
+  [[ -n "$provider_file" ]] || { echo "::error::No provider credential file found on Oracle."; exit 1; }
+  dropin_changed=1
+  printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=/etc/iachat/google-oidc.env\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
 fi
-dropin_changed=1
-printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=/etc/iachat/google-oidc.env\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart iachat
 sudo -n systemctl is-active --quiet iachat
@@ -192,11 +210,12 @@ else:
     raise SystemExit("IAchat health check failed")
 PY
 # Readiness must verify that credentials reached IAchat, not only process health.
-curl -fsS --max-time 10 http://127.0.0.1:8000/ready | grep -q '"mode":"integrated"'
+curl -fsS --max-time 10 http://127.0.0.1:8000/ready | grep -Fq "\"mode\":\"$backend_mode\""
 test "$(curl -fsS http://127.0.0.1:8000/ | grep -c 'id="projectScope"')" -ge 1 || { echo "Project selector missing from served app"; exit 1; }
-# Explicit postdeploy checks: ensure the configured integrated minirouter is active.
-"$app/.venv/bin/python" - <<'PY'
+# Explicit postdeploy checks: preserve the previously serving backend mode.
+IACHAT_EXPECTED_BACKEND_MODE="$backend_mode" "$app/.venv/bin/python" - <<'PY'
 import json
+import os
 import urllib.error
 import urllib.request
 base = "http://127.0.0.1:8000"
@@ -207,14 +226,14 @@ def probe(path):
     except urllib.error.HTTPError as exc:
         return exc.code, None
 # /api/router/status is private by design. Use public /ready for
-# integrated-backend configuration; never bypass authentication for a smoke.
+# backend-mode verification; never bypass authentication for a smoke.
 code, status = probe("/ready")
-assert code == 200 and status.get("mode") == "integrated" and status.get("status") == "ready", "Integrated providers unavailable"
+assert code == 200 and status.get("mode") == os.environ["IACHAT_EXPECTED_BACKEND_MODE"] and status.get("status") == "ready", "Backend readiness changed"
 code, _ = probe("/api/router/status")
 assert code == 401, "Private router status API not protected"
 code, _ = probe("/api/conversations")
 assert code == 401, "Private conversations API not protected"
-print("Postdeploy: integrated readiness and private API protection OK (inference not verified)")
+print("Postdeploy: preserved backend readiness and private API protection OK (inference not verified)")
 PY
 # Report Google configuration without printing any credentials or claiming consent completed.
 "$app/.venv/bin/python" - <<'PY'
