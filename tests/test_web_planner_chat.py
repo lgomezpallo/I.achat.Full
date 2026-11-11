@@ -243,3 +243,89 @@ def test_semantic_web_rewrite_with_zero_sources_retries_original(monkeypatch):
     assert response.status_code == 200
     assert searches == ["novedades institucionales ambiguas", question]
     assert response.json()["web_sources"][0]["url"] == "https://example.com/anses"
+
+
+def test_day_later_broadcast_followup_uses_persisted_user_topic(monkeypatch):
+    """The date gap must not change River-Boca into an unrelated event."""
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    app_module.store.put("river-day-old", [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "No pude confirmar la fecha.",
+         "completed_at": "2026-10-31T16:00:00+00:00"},
+    ], "admin", "")
+
+    response = client.post("/api/chat", json={
+        "conversation_id": "river-day-old",
+        "text": "¿Y en qué canal lo pasan?",
+    })
+    assert response.status_code == 200
+    assert len(searches) == 1
+    assert "River-Boca" in searches[0]
+    assert "Mundial" not in searches[0]
+    assert "canal" in searches[0]
+
+    confirmation = client.post("/api/chat", json={
+        "conversation_id": "river-day-old",
+        "text": "¿Lo pasan por Telefe?",
+    })
+    assert confirmation.status_code == 200
+    assert len(searches) == 2
+    assert "River-Boca" in searches[1]
+    assert "Telefe" in searches[1]
+    assert all("Mundial" not in query for query in searches)
+
+
+def test_day_later_followup_after_channel_correction_keeps_event(monkeypatch):
+    """Persisted user corrections must not erase the original search topic."""
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    app_module.store.put("river-corrected", [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "No confirmado.",
+         "completed_at": "2026-10-30T16:00:00+00:00"},
+        {"role": "user", "content": "¿Y en qué canal lo pasan?"},
+        {"role": "assistant", "content": "Lo pasan por Telefe."},
+        {"role": "user", "content": "No, Telefe no lo pasa."},
+        {"role": "assistant", "content": "No puedo confirmar el canal."},
+    ], "admin", "")
+
+    response = client.post("/api/chat", json={
+        "conversation_id": "river-corrected",
+        "text": "¿Y el horario?",
+    })
+    assert response.status_code == 200
+    assert len(searches) == 1
+    assert "River-Boca" in searches[0]
+    assert "Mundial" not in searches[0]
+    assert "Telefe" not in searches[0]
+
+
+def test_day_later_long_chain_with_negated_channel_keeps_original_event(monkeypatch):
+    """Persisted history survives many follow-ups and a channel correction."""
+    messages, searches = [], []
+    client = _client(monkeypatch, messages, searches)
+    history = [
+        {"role": "user", "content": "¿Cuándo es el próximo River-Boca?"},
+        {"role": "assistant", "content": "No confirmado.",
+         "completed_at": "2026-10-29T16:00:00+00:00"},
+    ]
+    for _ in range(9):
+        history.extend([
+            {"role": "user", "content": "¿Y el horario?"},
+            {"role": "assistant", "content": "Sin confirmar."},
+        ])
+    history.extend([
+        {"role": "user", "content": "No, no lo pasan por Telefe."},
+        {"role": "assistant", "content": "No tengo confirmación del canal."},
+    ])
+    app_module.store.put("river-long-negation", history, "admin", "")
+    response = client.post("/api/chat", json={
+        "conversation_id": "river-long-negation",
+        "text": "¿Y dónde lo pasan?",
+    })
+    assert response.status_code == 200
+    assert len(searches) == 1
+    assert "River-Boca" in searches[0]
+    assert "Telefe" not in searches[0]
+    assert "Mundial" not in searches[0]

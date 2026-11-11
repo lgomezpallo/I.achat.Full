@@ -28,6 +28,8 @@ REFERENTIAL_FOLLOWUP = re.compile(
     r"^\s*[¿¡]?\s*(?:y\s+)?(?:"
     r"a\s+qu[eé]\s+hora\b|"
     r"(?:qu[eé]|cu[aá]l)\s+(?:canal|horario|resultado|fecha|d[ií]a)\b|"
+    r"(?:en|por)\s+qu[eé]\s+canal\b|"
+    r"(?:lo|la)\s+(?:pasan|transmiten)\s+por\b|"
     r"d[oó]nde\b|"
     r"c[oó]mo\s+(?:sali[oó]|termin[oó]|qued[oó])\b|"
     r"qui[eé]n\s+(?:gan[oó]|juega|transmite)\b|"
@@ -35,6 +37,35 @@ REFERENTIAL_FOLLOWUP = re.compile(
     r"formaci[oó]n|fecha|partido)\b|"
     r"qu[eé]\s+pas[oó]\s+(?:al\s+final|despu[eé]s)\b"
     r")",
+    re.IGNORECASE,
+)
+
+
+
+
+# "¿Y a qué hora?" is itself a current-information phrase, but without an
+# event name it cannot be the anchor for the *next* follow-up.
+BARE_TIME_FOLLOWUP = re.compile(
+    r"^\s*[¿¡]?\s*(?:y\s+)?a\s+qu[eé]\s+hora"
+    r"(?:\s+(?:lo|la)\s+(?:pasan|transmiten|emiten))?\s*[?!.]*$",
+    re.IGNORECASE,
+)
+
+
+# A user's correction about a broadcast outlet is still part of the same
+# event discussion. It is not a new topic, but it must never be used as the
+# search anchor. Keep this intentionally narrow: "No, era el Mundial" is a
+# topic change and must stop inheritance of River-Boca.
+BROADCAST_CORRECTION = re.compile(
+    r"^\s*(?:(?:no[,;:.!]?\s+){1,3}"
+    r"[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2}"
+    r"\s+no\s+(?:lo|la)\s+(?:pasa|pasan|transmite|transmiten|emite|emiten)\b"
+    r"|(?:no[,;:.!]?\s+){1,2}(?:no\s+)?(?:lo|la)\s+"
+    r"(?:pasa|pasan|transmite|transmiten|emite|emiten)\s+(?:por|en)\s+"
+    r"[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*\b"
+    r"|(?:te\s+equivocaste|eso\s+est[aá]\s+mal)\s+"
+    r"(?:con\s+)?(?:el\s+)?canal\b)",
     re.IGNORECASE,
 )
 
@@ -174,36 +205,53 @@ def plan_web_lookup(
         needs_current_information(question) or EXPLICIT_SEARCH.search(question)
     ):
         return WebLookupPlan("answer", reason="conversational_check")
-    if needs_current_information(question):
+    # "¿Y a qué hora?" contains a freshness phrase but is also a
+    # referential question. Resolve its event first, rather than searching
+    # the bare words and losing the subject of the conversation.
+    current = needs_current_information(question)
+    referential = bool(REFERENTIAL_FOLLOWUP.match(question) and len(question) <= 180)
+    if current and not (referential and history):
         return WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "current_question")
     if EXPLICIT_SEARCH.search(question):
         return WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "explicit_search")
     clarification = _clarification_query(question, history)
     if clarification:
         return WebLookupPlan("search", clarification, "clarification_followup")
-    if not REFERENTIAL_FOLLOWUP.match(question) or len(question) > 180:
+    if not referential:
         return WebLookupPlan("answer", reason="no_web_signal")
 
     # Restrict context to recent turns in the SAME conversation. Assistant
     # messages never count as a source of user search intent.
     users = [
         turn.get("content", "").strip()
-        for turn in history[-8:]
+        # Scan more than six user follow-ups, but remain bounded; a new
+        # topic still breaks inheritance in the loop below.
+        for turn in history[-64:]
         if turn.get("role") == "user" and isinstance(turn.get("content"), str)
     ]
     if not users:
-        return WebLookupPlan("answer", reason="no_recent_context")
+        return (WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "current_question")
+                if current else WebLookupPlan("answer", reason="no_recent_context"))
+    # Walk a short, uninterrupted chain of referential USER questions back
+    # to the original fresh-information request. A third follow-up must not
+    # lose the entity (e.g. River-Boca) and let a semantic rewrite invent a
+    # different match. Any intervening new topic breaks the chain.
     context = ""
-    if needs_current_information(users[-1]) or EXPLICIT_SEARCH.search(users[-1]):
-        context = users[-1]
-    elif (
-        len(users) >= 2
-        and REFERENTIAL_FOLLOWUP.match(users[-1])
-        and (needs_current_information(users[-2]) or EXPLICIT_SEARCH.search(users[-2]))
-    ):
-        context = users[-2]
+    for prior in reversed(users):
+        if BARE_TIME_FOLLOWUP.match(prior):
+            continue
+        if BROADCAST_CORRECTION.match(prior):
+            # A correction does not erase the event anchor, even when it
+            # contains "hoy". It is never a fresh-information search anchor.
+            continue
+        if needs_current_information(prior) or EXPLICIT_SEARCH.search(prior):
+            context = prior
+            break
+        if not REFERENTIAL_FOLLOWUP.match(prior):
+            break
     if not context:
-        return WebLookupPlan("answer", reason="unrelated_followup")
+        return (WebLookupPlan("search", question[:MAX_SEARCH_QUERY], "current_question")
+                if current else WebLookupPlan("answer", reason="unrelated_followup"))
     query = f"{context} {question}"[:MAX_SEARCH_QUERY]
     return WebLookupPlan("search", query, "contextual_followup")
 
@@ -248,6 +296,12 @@ def plan_web_lookup_semantic(
     No source text, attachments, secrets or tool results enter this prompt.
     """
     fallback = plan_web_lookup(message, history, has_attachments=has_attachments)
+    # A referential follow-up already has a user-authored search anchor.
+    # Do not let an unreliable free-model rewrite replace River/Boca (or any
+    # other subject) with an unrelated topic. This also holds after a day:
+    # timestamps never invalidate a continuation of the same conversation.
+    if fallback.reason == "contextual_followup":
+        return fallback
     if (has_attachments or not message.strip()
             or fallback.reason in ("self_contained_text", "explicit_search", "conversational_check")):
         return fallback
