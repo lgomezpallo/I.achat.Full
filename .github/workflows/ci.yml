@@ -1,7 +1,7 @@
 name: IAchat CI
 on:
   push:
-    branches: [main, desarrollo/iachat-full]
+    branches: [main, desarrollo/iachat-full, feat/go-ute-second-instance-guard-20261030]
   pull_request:
 permissions:
   contents: read

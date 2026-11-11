@@ -116,6 +116,14 @@ class ConversationStore:
         salt, expected = row[0].split(":", 1)
         return secrets.compare_digest(self._digest(password, salt), expected)
 
+    def google_subject_for_user(self, username: str) -> str | None:
+        """Read the bound Google subject without enrolling or changing an account."""
+        row = self._db.execute(
+            "SELECT subject FROM oidc_identities WHERE provider=? AND username=?",
+            ("google", username),
+        ).fetchone()
+        return row[0] if row else None
+
     def get_user(self, username: str) -> dict | None:
         row = self._db.execute("SELECT username, enabled, admin FROM users WHERE username=?", (username,)).fetchone()
         return {"username": row[0], "enabled": bool(row[1]), "admin": bool(row[2])} if row else None
@@ -179,6 +187,16 @@ class ConversationStore:
                 completed = item.get("completed_at")
                 if isinstance(completed, str) and len(completed) <= 40 and "T" in completed:
                     record["completed_at"] = completed
+                # G.O. approval capability is scoped to the server-owned
+                # conversation; retain only a canonical UUID across reloads.
+                proposal = item.get("go_proposal_id")
+                if isinstance(proposal, str):
+                    from uuid import UUID
+                    try:
+                        if str(UUID(proposal)) == proposal:
+                            record["go_proposal_id"] = proposal
+                    except ValueError:
+                        pass
             history.append(record)
         return history
 
