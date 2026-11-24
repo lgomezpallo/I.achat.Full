@@ -32,7 +32,11 @@ El instalador valida permisos, URL loopback y presencia del token **sin imprimir
 
 ## Operación
 
-Entrar a **Actions** → **Desplegar IAchat en Oracle** → **Run workflow**, rama `main`.
+Un merge a `main` **no despliega**. El orden es:
+
+1. Ejecutar **Router — verificar servicio y puerto 8010 (solo lectura)** y confirmar `PORT_8010_LISTEN=1`, `PORT_8010_NON_LOOPBACK=0` y `ROUTER_HEALTH_HTTP=200`.
+2. Entrar a **Actions** → **Desplegar IAchat en Oracle** → **Run workflow**, rama `main`.
+
 Primero se ejecutan `pytest` y `compileall`. Sólo tras aprobar las pruebas y existir los secretos se intenta conectar a la VM.
 
 El instalador respalda archivos antes de reemplazarlos, preserva `.git`, `.venv` y archivos SQLite, actualiza dependencias, reinicia el servicio y comprueba `/health`. Si falla intenta revertir. **Esto todavía requiere una prueba real**; no equivale a una garantía absoluta de rollback de base de datos o migraciones de esquema.

@@ -8,25 +8,20 @@ WORKFLOW = (
 )
 
 
-def test_oracle_deploy_requires_successful_main_ci_or_manual_dispatch():
+def test_oracle_deploy_is_manual_only():
+    """Merging to main must never deploy production without the Router audit."""
     text = WORKFLOW.read_text(encoding="utf-8")
     triggers = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
     assert "  workflow_dispatch:" in triggers
-    assert "  workflow_run:" in triggers
-    assert 'workflows: ["IAchat CI"]' in triggers
-    assert "types: [completed]" in triggers
-    for event in ("  push:", "  pull_request:", "  schedule:"):
+    for event in ("  push:", "  pull_request:", "  schedule:", "  workflow_run:"):
         assert event not in triggers
+    assert "workflow_run" not in text
 
 
-def test_oracle_deploy_is_gated_to_main_success_and_explicit_environment():
+def test_oracle_deploy_is_gated_to_main_and_explicit_environment():
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in text
-    assert "github.event.workflow_run.event == 'push'" in text
-    assert "github.event.workflow_run.head_branch == 'main'" in text
-    assert "github.event.workflow_run.conclusion == 'success'" in text
     assert "environment: oracle-production" in text
-    assert "github.event.workflow_run.head_sha || github.sha" in text
     assert "persist-credentials: false" in text
     assert "python -m pytest -q" in text
 

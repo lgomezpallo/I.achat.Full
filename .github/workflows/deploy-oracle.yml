@@ -1,11 +1,9 @@
 name: Desplegar IAchat en Oracle
-# Deploy a tested main commit automatically after IAchat CI succeeds.
-# Manual dispatch remains available for an authorized retry.
+# Production changes only on an explicit, authorized dispatch.
+# A merge to main must never deploy by itself: run the read-only Router
+# audit first and dispatch this workflow only after it is green.
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["IAchat CI"]
-    types: [completed]
 
 permissions:
   contents: read
@@ -17,14 +15,14 @@ concurrency:
 
 jobs:
   deploy:
-    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success')
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: oracle-production
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -74,7 +72,7 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          RELEASE_SHA: ${{ github.sha }}
           JOB_STATUS: ${{ job.status }}
         run: |
           set -eu
