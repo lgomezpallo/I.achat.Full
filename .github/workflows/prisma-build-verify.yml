@@ -58,7 +58,7 @@ jobs:
           chmod 600 "$key"
           ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$known"
           actual="$(ssh-keygen -lf "$known" -E sha256 | awk '{print $2}' | head -1)"
-          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI' || { echo "::error::Host identity mismatch"; exit 1; }
+          test "$actual" = 'SHA256:UDVMx6HCL8d412N+TaY4O0Ob1rGVTWI6vKmz0Dm3yyY' || { echo "::error::Host identity mismatch"; exit 1; }
           ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$known" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           echo "Prisma service:"

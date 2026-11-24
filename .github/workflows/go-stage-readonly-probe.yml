@@ -30,7 +30,7 @@ jobs:
           chmod 600 "$keyfile"
           ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
           actual="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
-          test "$actual" = 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI'
+          test "$actual" = 'SHA256:UDVMx6HCL8d412N+TaY4O0Ob1rGVTWI6vKmz0Dm3yyY'
           chmod 600 "$knownfile"
           ssh -i "$keyfile" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
           set -euo pipefail

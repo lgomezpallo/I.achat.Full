@@ -1,0 +1,57 @@
+name: Router — verificar servicio y puerto 8010 (solo lectura)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: oracle-production
+    steps:
+      - name: Auditar router.service y 127.0.0.1:8010 sin escribir
+        shell: bash
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          keyfile="$(mktemp "$HOME/.ssh/router-probe-key.XXXXXXXX")"
+          knownfile="$(mktemp "$HOME/.ssh/router-probe-known.XXXXXXXX")"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test -s "$knownfile"
+          actual="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:UDVMx6HCL8d412N+TaY4O0Ob1rGVTWI6vKmz0Dm3yyY' || {
+            echo "::error::La huella SSH no coincide con la VM esperada. No se audita."
+            exit 1
+          }
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo "ROUTER_AUDIT_MODE=read_only"
+          echo "ROUTER_AUDIT_HOSTNAME=$(hostname)"
+          echo "ROUTER_LOAD=$(systemctl show router -p LoadState --value 2>/dev/null || echo unknown)"
+          echo "ROUTER_ACTIVE=$(systemctl is-active router 2>/dev/null || true)"
+          echo "ROUTER_SUBSTATE=$(systemctl show router -p SubState --value 2>/dev/null || echo unknown)"
+          echo "ROUTER_SINCE=$(systemctl show router -p ActiveEnterTimestamp --value 2>/dev/null || echo unknown)"
+          echo "PORT_8010_LISTEN=$(ss -ltnH | awk '$4 ~ /:8010$/ {found=1} END {print found+0}')"
+          echo "PORT_8010_BIND=$(ss -ltnH | awk '$4 ~ /:8010$/ {print $4}' | paste -sd, -)"
+          echo "PORT_8010_NON_LOOPBACK=$(ss -ltnH | awk '$4 ~ /:8010$/ && $4 !~ /^(127\.0\.0\.1|\[::1\]):8010$/ {found=1} END {print found+0}')"
+          echo "ROUTER_HEALTH_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8010/health || true)"
+          echo "IACHAT_SERVICE_ACTIVE=$(systemctl is-active iachat 2>/dev/null || true)"
+          echo "IACHAT_READY_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8000/ready || true)"
+          echo "IACHAT_READY_MODE=$(curl -fsS --max-time 5 http://127.0.0.1:8000/ready 2>/dev/null | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p' || true)"
+          if sudo -n test -s /etc/iachat/router.env 2>/dev/null; then
+            echo "IACHAT_ROUTER_ENV=present"
+          else
+            echo "IACHAT_ROUTER_ENV=absent_or_unreadable"
+          fi
+          echo "ROUTER_AUDIT_COMPLETE=read_only"
+          REMOTE

@@ -19,6 +19,17 @@ El despliegue usa `rsync`, `tar`, `python`, entorno `.venv` ya existente, y `sud
 
 Ruta esperada: `~/Proyecto/Aplicaciones/IAchat`. Servicio: `iachat.service`. API local: `127.0.0.1:8000/health`.
 
+### Backend Router (obligatorio)
+
+IAchat no recibe claves de proveedores: toda la inferencia pasa por Router. Crear en la VM `/etc/iachat/router.env` (`root:root`, `0600`):
+
+```ini
+ROUTER_URL=http://127.0.0.1:8010
+ROUTER_TOKEN=TOKEN_DE_IACHAT
+```
+
+El instalador valida permisos, URL loopback y presencia del token **sin imprimir valores**, comprueba `http://127.0.0.1:8010/health` (sin inferencia) y recién entonces reinicia `iachat` con `IACHAT_BACKEND=router`. Si Router no responde o el archivo falta, el despliegue se aborta y se revierte; no vuelve al backend integrado.
+
 ## Operación
 
 Entrar a **Actions** → **Desplegar IAchat en Oracle** → **Run workflow**, rama `main`.

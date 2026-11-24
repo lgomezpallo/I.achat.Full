@@ -36,7 +36,7 @@ def test_postdeploy_checks_public_readiness_without_exposing_router_status():
     deploy = Path(__file__).resolve().parents[1] / "scripts" / "deploy_oracle.sh"
     script = deploy.read_text(encoding="utf-8")
     assert 'code, status = probe("/ready")' in script
-    assert 'status.get("mode") == "integrated"' in script
+    assert 'status.get("mode") == "router"' in script
     assert 'status.get("status") == "ready"' in script
     assert 'code, _ = probe("/api/router/status")' in script
     assert 'code, _ = probe("/api/conversations")' in script
@@ -44,20 +44,32 @@ def test_postdeploy_checks_public_readiness_without_exposing_router_status():
     assert 'code, status = probe("/api/router/status")' not in script
 
 
-def test_postdeploy_endpoint_contract_with_integrated_backend(monkeypatch):
+def test_deploy_selects_router_backend_without_direct_provider_keys():
+    """IAchat must receive Router credentials, never provider API keys."""
+    deploy = Path(__file__).resolve().parents[1] / "scripts" / "deploy_oracle.sh"
+    script = deploy.read_text(encoding="utf-8")
+    assert "Environment=IACHAT_BACKEND=router" in script
+    assert "Environment=IACHAT_BACKEND=integrated" not in script
+    assert "/etc/router-providers.env" not in script
+    assert "/etc/iachat/router.env" in script
+    assert "router_url_not_loopback" in script
+    assert "http://127.0.0.1:8010/health" in script
+
+
+def test_postdeploy_endpoint_contract_with_router_backend(monkeypatch):
     """Reproduce the release preflight offline, without credentials or inference."""
     from fastapi.testclient import TestClient
     from iachat import app as app_module
-    from iachat.backend import ProviderBackend
 
-    monkeypatch.setenv("IACHAT_BACKEND", "integrated")
-    monkeypatch.setattr(ProviderBackend, "configured", classmethod(lambda cls: True))
+    monkeypatch.setenv("IACHAT_BACKEND", "router")
+    monkeypatch.setenv("ROUTER_URL", "http://127.0.0.1:8010")
+    monkeypatch.setenv("ROUTER_TOKEN", "offline-test-token")
     monkeypatch.setattr(app_module, "_signed_user", lambda cookie: None)
     client = TestClient(app_module.app, base_url="https://testserver")
 
     ready = client.get("/ready")
     assert ready.status_code == 200
-    assert ready.json()["mode"] == "integrated"
+    assert ready.json()["mode"] == "router"
     assert ready.json()["status"] == "ready"
     assert client.get("/api/router/status").status_code == 401
     assert client.get("/api/conversations").status_code == 401

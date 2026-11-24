@@ -18,6 +18,7 @@ backup="$recovery_dir/backup"
 mkdir -m 700 "$stage" "$backup"
 deployed=0
 # Keep the previous systemd override for a real configuration rollback.
+# The file name is historical: this drop-in now selects the Router backend.
 dropin="/etc/systemd/system/iachat.service.d/20-integrated-providers.conf"
 dropin_backup="$stage/.env.iachat-systemd-rollback"
 dropin_existed=0
@@ -150,19 +151,47 @@ rsync -a --checksum --exclude='.git/' --exclude='.venv/' --exclude='*.db' --excl
   "$stage/" "$app/"
 "$app/.venv/bin/python" -m pip install -e "$app" --disable-pip-version-check -q
 "$app/.venv/bin/python" -m compileall -q "$app/iachat"
-# Load existing provider credentials directly into IAchat (never echo secrets).
+# Point IAchat at Router only (never echo credentials).
 # A literal newline, not a backslash-n, is required in a systemd drop-in.
-provider_file=""
-for candidate in /etc/router-providers.env "$HOME/.config/router/providers.env"; do
+# IAchat talks only to Router: it must never receive direct provider keys.
+router_env=""
+for candidate in /etc/iachat/router.env /etc/router-iachat.env; do
   if sudo -n test -s "$candidate"; then
-    provider_file="$candidate"
+    router_env="$candidate"
     break
   fi
 done
-if [[ -z "$provider_file" ]]; then
-  echo "::error::No provider credential file found on Oracle."
+if [[ -z "$router_env" ]]; then
+  echo "::error::No Router credential file found (/etc/iachat/router.env)."
   exit 1
 fi
+# Validate permissions and required keys without printing secret values.
+sudo -n python3 - "$router_env" <<'PY'
+import stat
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+assert stat.S_IMODE(path.stat().st_mode) == 0o600, "router_env_permissions_invalid"
+cfg = {}
+for raw in path.read_text().splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    if line.startswith("export "):
+        line = line[7:]
+    key, sep, value = line.partition("=")
+    assert sep, "router_env_format_invalid"
+    cfg[key.strip()] = value.strip().strip('"').strip("'")
+url = cfg.get("ROUTER_URL", "").rstrip("/")
+assert url in ("http://127.0.0.1:8010", "http://localhost:8010"), "router_url_not_loopback"
+assert cfg.get("ROUTER_TOKEN"), "router_token_missing"
+print("ROUTER_PREFLIGHT: loopback URL and token present (values withheld)")
+PY
+# Router must be healthy before IAchat is pointed at it. No inference is sent.
+curl -fsS --max-time 5 http://127.0.0.1:8010/health >/dev/null || {
+  echo "::error::Router health check failed; IAchat was not switched."
+  exit 1
+}
 sudo -n install -d -m 755 /etc/systemd/system/iachat.service.d
 # This file changes service behavior and must be reverted together with code.
 # The private staging directory is removed by the EXIT trap; never log content.
@@ -171,7 +200,7 @@ if sudo -n test -e "$dropin"; then
   dropin_existed=1
 fi
 dropin_changed=1
-printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=/etc/iachat/google-oidc.env\nEnvironment=IACHAT_BACKEND=integrated\n' "$provider_file" | sudo -n tee "$dropin" >/dev/null
+printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=/etc/iachat/google-oidc.env\nEnvironment=IACHAT_BACKEND=router\n' "$router_env" | sudo -n tee "$dropin" >/dev/null
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart iachat
 sudo -n systemctl is-active --quiet iachat
@@ -192,9 +221,9 @@ else:
     raise SystemExit("IAchat health check failed")
 PY
 # Readiness must verify that credentials reached IAchat, not only process health.
-curl -fsS --max-time 10 http://127.0.0.1:8000/ready | grep -q '"mode":"integrated"'
+curl -fsS --max-time 10 http://127.0.0.1:8000/ready | grep -q '"mode":"router"'
 test "$(curl -fsS http://127.0.0.1:8000/ | grep -c 'id="projectScope"')" -ge 1 || { echo "Project selector missing from served app"; exit 1; }
-# Explicit postdeploy checks: ensure the configured integrated minirouter is active.
+# Explicit postdeploy checks: ensure the configured Router backend is active.
 "$app/.venv/bin/python" - <<'PY'
 import json
 import urllib.error
@@ -207,9 +236,9 @@ def probe(path):
     except urllib.error.HTTPError as exc:
         return exc.code, None
 # /api/router/status is private by design. Use public /ready for
-# integrated-backend configuration; never bypass authentication for a smoke.
+# Router-backend configuration; never bypass authentication for a smoke.
 code, status = probe("/ready")
-assert code == 200 and status.get("mode") == "integrated" and status.get("status") == "ready", "Integrated providers unavailable"
+assert code == 200 and status.get("mode") == "router" and status.get("status") == "ready", "Router backend unavailable"
 code, _ = probe("/api/router/status")
 assert code == 401, "Private router status API not protected"
 code, _ = probe("/api/conversations")

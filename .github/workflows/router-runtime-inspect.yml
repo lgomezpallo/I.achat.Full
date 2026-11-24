@@ -24,7 +24,7 @@ jobs:
           chmod 600 "$HOME/.ssh/id_ed25519"
           ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$HOME/.ssh/known_hosts"
           actual="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" -E sha256 | awk '{print $2}' | head -1)"
-          test "$actual" = "SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI"
+          test "$actual" = "SHA256:UDVMx6HCL8d412N+TaY4O0Ob1rGVTWI6vKmz0Dm3yyY"
           ssh -o StrictHostKeyChecking=yes -o BatchMode=yes "$ORACLE_USER@$ORACLE_HOST" 'bash -s' <<'REMOTE'
           set -e
           for unit in router.service r-outer.service router-ia.service router-full.service; do
