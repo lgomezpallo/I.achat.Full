@@ -34,7 +34,7 @@ El instalador valida permisos, URL loopback y presencia del token **sin imprimir
 
 Un merge a `main` **no despliega**. El orden es:
 
-1. Ejecutar **Router — verificar servicio y puerto 8010 (solo lectura)** y confirmar `PORT_8010_LISTEN=1`, `PORT_8010_NON_LOOPBACK=0` y `ROUTER_HEALTH_HTTP=200`.
+1. Ejecutar **Router — verificar servicio y puerto 8010 (solo lectura)** y confirmar `PORT_8010_LISTEN=1`, `PORT_8010_NON_LOOPBACK=0`, `ROUTER_HEALTH_HTTP=200` y `ROUTER_AUTH_PROBE=ok_no_inference` (prueba de autenticación con cuerpo inválido, sin ejecutar modelos).
 2. Entrar a **Actions** → **Desplegar IAchat en Oracle** → **Run workflow**, rama `main`.
 
 Primero se ejecutan `pytest` y `compileall`. Sólo tras aprobar las pruebas y existir los secretos se intenta conectar a la VM.

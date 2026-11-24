@@ -52,6 +52,51 @@ jobs:
             echo "IACHAT_ROUTER_ENV=present"
           else
             echo "IACHAT_ROUTER_ENV=absent_or_unreadable"
+            echo "ROUTER_AUTH_PROBE=unavailable"
+            exit 1
           fi
+          # Auth contract only: an invalid body must be rejected before any model
+          # runs. The IAchat token is read as root and never printed or passed as
+          # an argument, so it cannot leak into the job log or process list.
+          sudo -n python3 - <<'PYAUTH'
+          import urllib.request
+          from pathlib import Path
+          from urllib.error import HTTPError
+
+          cfg = {}
+          for raw in Path("/etc/iachat/router.env").read_text().splitlines():
+              line = raw.strip()
+              if not line or line.startswith("#"):
+                  continue
+              if line.startswith("export "):
+                  line = line[7:]
+              key, sep, value = line.partition("=")
+              if sep:
+                  cfg[key.strip()] = value.strip().strip('"').strip("'")
+          token = cfg.get("ROUTER_TOKEN", "")
+          base = cfg.get("ROUTER_URL", "http://127.0.0.1:8010").rstrip("/")
+
+          def invalid_body_status(bearer=None):
+              headers = {"Content-Type": "application/json"}
+              if bearer:
+                  headers["Authorization"] = "Bearer " + bearer
+              request = urllib.request.Request(
+                  base + "/route", data=b"{}", headers=headers, method="POST")
+              try:
+                  with urllib.request.urlopen(request, timeout=5) as response:
+                      return response.status
+              except HTTPError as error:
+                  return error.code
+              except Exception:
+                  return 0
+
+          anonymous = invalid_body_status()
+          authorized = invalid_body_status(token) if token else 0
+          print("ROUTER_AUTH_PROBE anonymous_http=" + str(anonymous)
+                + " iachat_http=" + str(authorized) + " inferences=0")
+          assert anonymous in (401, 403), "Router did not reject an unauthenticated request"
+          assert authorized in (400, 422), "IAchat token was not accepted by Router"
+          print("ROUTER_AUTH_PROBE=ok_no_inference")
+          PYAUTH
           echo "ROUTER_AUDIT_COMPLETE=read_only"
           REMOTE
