@@ -1,10 +1,12 @@
 """Targeted offline checks for the explicitly approved release recovery path."""
 from pathlib import Path
+import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'scripts' / 'rollback_oracle.sh'
 WORKFLOW = ROOT / '.github' / 'workflows' / 'rollback-oracle.yml'
+DEPLOY_WORKFLOW = ROOT / '.github' / 'workflows' / 'deploy-oracle.yml'
 DEPLOY = ROOT / 'scripts' / 'deploy_oracle.sh'
 
 
@@ -24,7 +26,11 @@ def test_rollback_is_manual_main_only_with_protected_environment():
     assert "inputs.confirmation == 'ROLLBACK'" in workflow
     assert 'environment: oracle-production' in workflow
     assert 'StrictHostKeyChecking=yes' in workflow
-    assert 'SHA256:JCUGOZrLtlE+FkPv+evyeSAdxDs5iYqLk7hteTpOBHI' in workflow
+    # La huella del host se declara en el deploy; el rollback debe usar la misma,
+    # sin una segunda copia que pueda quedar desactualizada.
+    pinned = re.search(r"expected=['\"](SHA256:[A-Za-z0-9+/=]+)['\"]", DEPLOY_WORKFLOW.read_text())
+    assert pinned, 'deploy-oracle.yml must pin the Oracle host key'
+    assert pinned.group(1) in workflow
 
 
 def test_rollback_requires_clean_release_and_preserves_private_data():
