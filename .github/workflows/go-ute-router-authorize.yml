@@ -12,6 +12,7 @@ jobs:
     environment: oracle-production
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
       - name: Crear token exclusivo G.O. en Router sin mostrar credenciales
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -20,6 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           install -d -m 700 ~/.ssh
           k="$(mktemp ~/.ssh/go-auth-key.XXXXXXXX)"
           h="$(mktemp ~/.ssh/go-auth-host.XXXXXXXX)"

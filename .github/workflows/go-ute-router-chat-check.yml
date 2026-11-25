@@ -9,6 +9,7 @@ jobs:
     environment: oracle-production
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
       - name: Verificar autenticación y contrato local sin invocar modelos
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -17,6 +18,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           install -d -m 700 ~/.ssh
           keyfile="$(mktemp ~/.ssh/go-router-key.XXXXXXXX)"
           knownfile="$(mktemp ~/.ssh/go-router-host.XXXXXXXX)"

@@ -38,6 +38,7 @@ jobs:
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
           install -d -m 700 "$HOME/.ssh"
           printf '%s\n' "$ORACLE_SSH_KEY" > "$HOME/.ssh/id_ed25519"

@@ -24,7 +24,9 @@ jobs:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
           ORACLE_USER: ${{ secrets.ORACLE_USER }}
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
-        run: bash scripts/diagnostico_oracle.sh
+        run: |
+          bash scripts/oracle_ssh_preflight.sh --connect
+          bash scripts/diagnostico_oracle.sh
       - name: Publicar salud de Oracle
         if: always() && github.event_name == 'push'
         env:

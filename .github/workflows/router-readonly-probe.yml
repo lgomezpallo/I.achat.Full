@@ -9,6 +9,7 @@ jobs:
     timeout-minutes: 5
     environment: oracle-production
     steps:
+      - uses: actions/checkout@v4
       - name: Auditar router.service y 127.0.0.1:8010 sin escribir
         shell: bash
         env:
@@ -17,6 +18,7 @@ jobs:
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
           install -d -m 700 "$HOME/.ssh"
           keyfile="$(mktemp "$HOME/.ssh/router-probe-key.XXXXXXXX")"

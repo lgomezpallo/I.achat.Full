@@ -12,6 +12,7 @@ jobs:
     environment: oracle-production
     timeout-minutes: 12
     steps:
+      - uses: actions/checkout@v4
       - name: Instalar G.O. en 127.0.0.1 sin abrir Caddy
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -20,6 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           install -d -m 700 ~/.ssh
           keyfile="$(mktemp ~/.ssh/go-deploy-key.XXXXXXXX)"
           knownfile="$(mktemp ~/.ssh/go-deploy-host.XXXXXXXX)"

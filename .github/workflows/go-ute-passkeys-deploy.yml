@@ -19,6 +19,7 @@ jobs:
     environment: oracle-production
     timeout-minutes: 12
     steps:
+      - uses: actions/checkout@v4
       - name: Migrar WebAuthn y publicar acceso seguro
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -27,6 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           install -d -m 700 ~/.ssh
           k="$(mktemp ~/.ssh/go-webauthn-key.XXXXXXXX)"
           h="$(mktemp ~/.ssh/go-webauthn-host.XXXXXXXX)"

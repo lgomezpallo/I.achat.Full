@@ -39,6 +39,7 @@ jobs:
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
         run: |
           set -eu
+          bash scripts/oracle_ssh_preflight.sh --connect
           test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY" || {
             echo "::error::Falta configurar acceso a Oracle en los secretos del entorno oracle-production."
             exit 1
