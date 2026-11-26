@@ -104,6 +104,39 @@ jobs:
           echo "PORT_8001_READY=$(curl -s --max-time 5 http://127.0.0.1:8001/ready 2>/dev/null | head -c 200 || true)"
           echo "PUBLIC_HTTPS_READY=$(curl -sk --max-time 8 --resolve ia-chat.duckdns.org:443:127.0.0.1 https://ia-chat.duckdns.org/ready 2>/dev/null | head -c 200 || true)"
           echo "CADDY_TARGETS=$(sudo -n grep -hoE 'reverse_proxy[^#]*' /etc/caddy/Caddyfile 2>/dev/null | head -3 | tr '\n' ';' || true)"
+          # Readiness de acceso: presencia de configuración y conteo de cuentas.
+          # Sólo nombres de variables; nunca valores ni hashes.
+          ipid=$(systemctl show iachat -p MainPID --value 2>/dev/null || true)
+          echo "IACHAT_MAIN_PID_SET=$([ -n "$ipid" ] && [ "$ipid" != "0" ] && echo yes || echo no)"
+          if [ -n "$ipid" ] && [ "$ipid" != "0" ]; then
+            echo "IACHAT_PROC_ENV_KEYS=$(sudo -n cat "/proc/$ipid/environ" 2>/dev/null | tr '\0' '\n' | sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' | grep -E '^(IACHAT_|ROUTER_)' | sort -u | paste -sd, - || true)"
+            echo "IACHAT_PROC_CWD=$(sudo -n readlink "/proc/$ipid/cwd" 2>/dev/null || true)"
+          fi
+          echo "IACHAT_UNIT_ENV_FILES=$(systemctl show iachat -p EnvironmentFiles --value 2>/dev/null || true)"
+          echo "IACHAT_GOOGLE_ENV_PRESENT=$(sudo -n test -s /etc/iachat/google-oidc.env 2>/dev/null && echo yes || echo no)"
+          echo "IACHAT_GOOGLE_JSON_PRESENT=$(sudo -n test -s /etc/iachat/google-client.json 2>/dev/null && echo yes || echo no)"
+          echo "IACHAT_GOOGLE_ENV_KEYS=$(sudo -n sed -nE 's/^(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' /etc/iachat/google-oidc.env 2>/dev/null | sort -u | paste -sd, - || true)"
+          echo "IACHAT_AUTH_STATUS=$(curl -s --max-time 5 http://127.0.0.1:8001/auth/status 2>/dev/null | head -c 300 || true)"
+          idb=""
+          if [ -n "$ipid" ] && [ "$ipid" != "0" ]; then
+            icwd="$(sudo -n readlink "/proc/$ipid/cwd" 2>/dev/null || true)"
+            for cand in "$icwd/iachat.db" "/home/ubuntu/Proyecto/Aplicaciones/IAchat/iachat.db"; do
+              if sudo -n test -s "$cand" 2>/dev/null; then idb="$cand"; break; fi
+            done
+          fi
+          echo "IACHAT_DB_PRESENT=$([ -n "$idb" ] && echo yes || echo no)"
+          if [ -n "$idb" ]; then
+            sudo -n python3 - "$idb" <<'PYUSERS'
+          import sqlite3
+          import sys
+          try:
+              con = sqlite3.connect("file:%s?mode=ro" % sys.argv[1], uri=True)
+              print("IACHAT_USERS_TOTAL=%d" % con.execute("select count(*) from users").fetchone()[0])
+              print("IACHAT_ADMINS_ENABLED=%d" % con.execute("select count(*) from users where admin=1 and enabled=1").fetchone()[0])
+          except Exception as exc:
+              print("IACHAT_USERS_TOTAL=error:%s" % type(exc).__name__)
+          PYUSERS
+          fi
           # El contrato vigente en la VM es /etc/iachat-router.env (EnvironmentFiles
           # del unit). Se acepta también la ruta documentada por compatibilidad.
           ROUTER_ENV_FILE=""
