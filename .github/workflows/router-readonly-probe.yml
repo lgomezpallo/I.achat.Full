@@ -50,6 +50,28 @@ jobs:
           echo "IACHAT_SERVICE_ACTIVE=$(systemctl is-active iachat 2>/dev/null || true)"
           echo "IACHAT_READY_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8000/ready || true)"
           echo "IACHAT_READY_MODE=$(curl -fsS --max-time 5 http://127.0.0.1:8000/ready 2>/dev/null | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p' || true)"
+          # Inventario del Router: sólo nombres de claves de proveedor, nunca valores.
+          echo "SUDO_NOPASSWD=$(sudo -n true 2>/dev/null && echo yes || echo no)"
+          echo "LISTEN_PORTS=$(ss -ltnH | awk '{print $4}' | sort -u | paste -sd, -)"
+          echo "PUBLIC_SELF_READY=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H 'Host: ia-chat.duckdns.org' http://127.0.0.1/ready || true)"
+          echo "PUBLIC_SELF_READY_BODY=$(curl -s --max-time 5 -H 'Host: ia-chat.duckdns.org' http://127.0.0.1/ready 2>/dev/null | head -c 200 || true)"
+          echo "PROXY_TARGETS=$(sudo -n grep -rhoE 'proxy_pass[[:space:]]+[^;]+' /etc/nginx /etc/caddy 2>/dev/null | sort -u | paste -sd, - || true)"
+          ruser=$(systemctl show router -p User --value 2>/dev/null || true)
+          ruser=${ruser:-root}
+          rhome=$(getent passwd "$ruser" | cut -d: -f6 || true)
+          rhome=${rhome:-/root}
+          penv="$rhome/.config/router/providers.env"
+          if sudo -n test -s "$penv" 2>/dev/null; then
+            echo "ROUTER_PROVIDERS_FILE=present"
+            echo "ROUTER_PROVIDERS_COUNT=$(sudo -n awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/{n++} END{print n+0}' "$penv")"
+            echo "ROUTER_PROVIDERS_KEYS=$(sudo -n awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/{print $1}' "$penv" | sort -u | paste -sd, -)"
+          else
+            echo "ROUTER_PROVIDERS_FILE=absent_or_unreadable"
+            echo "ROUTER_PROVIDERS_COUNT=0"
+            echo "ROUTER_PROVIDERS_KEYS="
+          fi
+          echo "ROUTER_CATALOG_HTTP=$(curl -s -o /tmp/router-catalog.json -w '%{http_code}' --max-time 5 http://127.0.0.1:8010/catalog || true)"
+          echo "ROUTER_CATALOG=$(head -c 900 /tmp/router-catalog.json 2>/dev/null | tr '\n\r' '  ' || true)"
           if sudo -n test -s /etc/iachat/router.env 2>/dev/null; then
             echo "IACHAT_ROUTER_ENV=present"
           else
