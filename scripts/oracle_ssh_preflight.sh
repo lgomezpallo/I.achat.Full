@@ -7,12 +7,15 @@
 #
 # Uso:
 #   scripts/oracle_ssh_preflight.sh [--connect] [--host-only] [--any-host-key]
+#                                   [--print-public-key]
 #
 #   --connect       además intenta un login real (`id -un`) para distinguir
 #                   "huella correcta pero clave no autorizada".
 #   --host-only     solo valida ORACLE_HOST y la clave pública del servidor
 #                   (para workflows que no usan ORACLE_USER/ORACLE_SSH_KEY).
 #   --any-host-key  no compara contra la huella fijada; solo la informa.
+#   --print-public-key  imprime la clave pública derivada de ORACLE_SSH_KEY
+#                   (nunca la privada) para poder autorizarla en authorized_keys.
 #
 # Códigos de salida:
 #   0  acceso correcto
@@ -28,6 +31,7 @@ EXPECTED_FINGERPRINT_DEFAULT='SHA256:UDVMx6HCL8d412N+TaY4O0Ob1rGVTWI6vKmz0Dm3yyY
 EXPECTED_FINGERPRINT="$EXPECTED_FINGERPRINT_DEFAULT"
 MODE_CONNECT=0
 MODE_HOST_ONLY=0
+MODE_PRINT_PUBLIC=0
 COMPARE_FINGERPRINT=1
 
 for arg in "$@"; do
@@ -35,8 +39,9 @@ for arg in "$@"; do
     --connect) MODE_CONNECT=1 ;;
     --host-only) MODE_HOST_ONLY=1 ;;
     --any-host-key) COMPARE_FINGERPRINT=0 ;;
+    --print-public-key) MODE_PRINT_PUBLIC=1 ;;
     --expected-fingerprint=*) EXPECTED_FINGERPRINT="${arg#*=}" ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
     *) echo "::error::Argumento desconocido: $arg"; exit 7 ;;
   esac
 done
@@ -112,6 +117,20 @@ if [ "$MODE_HOST_ONLY" -eq 0 ]; then
   chmod 600 "$keyfile"
   if ! ssh-keygen -y -f "$keyfile" </dev/null >/dev/null 2>&1; then
     fail 3 "ORACLE_SSH_KEY no se puede leer como clave privada OpenSSH: puede tener passphrase (el runner no puede desbloquearla), estar en formato PEM antiguo o tener líneas partidas por el copiado."
+  fi
+  if [ "$MODE_PRINT_PUBLIC" -eq 1 ]; then
+    public="$(ssh-keygen -y -f "$keyfile" </dev/null)"
+    printf 'ORACLE_SSH_PUBLIC_KEY=%s\n' "$public"
+    printf 'ORACLE_SSH_PUBLIC_FINGERPRINT=%s\n' \
+      "$(printf '%s\n' "$public" | ssh-keygen -lf - -E sha256 | awk '{print $2}')"
+    summary "### Clave pública derivada de \`ORACLE_SSH_KEY\`"
+    summary ""
+    summary "Si el login falla con \`Permission denied (publickey)\`, esta es la línea que falta en \`~/.ssh/authorized_keys\` del usuario \`$USER_NAME\`:"
+    summary ""
+    summary "\`\`\`"
+    summary "$public"
+    summary "\`\`\`"
+    exit 0
   fi
 fi
 

@@ -98,3 +98,27 @@ def test_oci_run_command_script_is_read_only_and_never_prints_values():
     # Solo nombres de variables del env file, nunca el token.
     assert "ROUTER_TOKEN]" not in text
     assert text.count("/etc/iachat/router.env") >= 1
+
+
+def test_print_public_key_derives_only_the_public_half(tmp_path):
+    """`--print-public-key` existe para poder autorizar la clave del secreto sin verla."""
+    key = tmp_path / "id_ed25519"
+    subprocess.run(
+        ["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "preflight@test", "-q", "-f", str(key)],
+        check=True,
+    )
+    private = key.read_text()
+    expected_public = (tmp_path / "id_ed25519.pub").read_text().split()
+    result = run_preflight({
+        "ORACLE_HOST": "144.22.213.171",
+        "ORACLE_USER": "ubuntu",
+        "ORACLE_SSH_KEY": private,
+    }, "--print-public-key")
+    assert result.returncode == 0
+    assert "ORACLE_SSH_PUBLIC_KEY=ssh-ed25519 " in result.stdout
+    assert "ORACLE_SSH_PUBLIC_FINGERPRINT=SHA256:" in result.stdout
+    assert expected_public[1] in result.stdout
+    # La mitad privada nunca sale: ni el encabezado ni el cuerpo base64.
+    printed = result.stdout + result.stderr
+    assert "BEGIN OPENSSH PRIVATE KEY" not in printed
+    assert "".join(private.strip().splitlines()[1:-1])[:80] not in printed

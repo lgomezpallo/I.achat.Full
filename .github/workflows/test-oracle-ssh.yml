@@ -12,6 +12,16 @@ jobs:
     environment: oracle-production
     steps:
       - uses: actions/checkout@v4
+      - name: Mostrar la clave pública del secreto (para autorizarla en la VM)
+        # Solo la mitad pública: el secreto privado nunca se imprime.
+        continue-on-error: true
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -uo pipefail
+          bash scripts/oracle_ssh_preflight.sh --print-public-key
       - name: Verificar conexión SSH sin modificar Oracle
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
