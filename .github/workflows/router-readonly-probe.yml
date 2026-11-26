@@ -72,6 +72,15 @@ jobs:
           fi
           echo "ROUTER_CATALOG_HTTP=$(curl -s -o /tmp/router-catalog.json -w '%{http_code}' --max-time 5 http://127.0.0.1:8010/catalog || true)"
           echo "ROUTER_CATALOG=$(head -c 900 /tmp/router-catalog.json 2>/dev/null | tr '\n\r' '  ' || true)"
+          echo "ROUTER_UNIT_USER=$(systemctl show router -p User --value 2>/dev/null || true)"
+          echo "ROUTER_UNIT_ENV_FILES=$(systemctl show router -p EnvironmentFiles --value 2>/dev/null || true)"
+          echo "ROUTER_UNIT_EXEC=$(systemctl show router -p ExecStart --value 2>/dev/null | head -c 300 || true)"
+          echo "ROUTER_ENV_FILES_FOUND=$(sudo -n find /etc /opt /root /home -maxdepth 6 -name 'providers.env' 2>/dev/null | paste -sd, - || true)"
+          echo "ROUTER_UNIT_KEY_NAMES=$(sudo -n grep -hoE '[A-Za-z0-9_]+_API_KEY' /etc/systemd/system/router.service.d/*.conf /etc/systemd/system/router.service /etc/router/*.env 2>/dev/null | sort -u | paste -sd, - || true)"
+          echo "IACHAT_UNIT_EXEC=$(systemctl show iachat -p ExecStart --value 2>/dev/null | head -c 300 || true)"
+          echo "PORT_8001_READY=$(curl -s --max-time 5 http://127.0.0.1:8001/ready 2>/dev/null | head -c 200 || true)"
+          echo "PUBLIC_HTTPS_READY=$(curl -sk --max-time 8 --resolve ia-chat.duckdns.org:443:127.0.0.1 https://ia-chat.duckdns.org/ready 2>/dev/null | head -c 200 || true)"
+          echo "CADDY_TARGETS=$(sudo -n grep -hoE 'reverse_proxy[^#]*' /etc/caddy/Caddyfile 2>/dev/null | head -3 | tr '\n' ';' || true)"
           if sudo -n test -s /etc/iachat/router.env 2>/dev/null; then
             echo "IACHAT_ROUTER_ENV=present"
           else
