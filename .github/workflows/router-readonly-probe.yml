@@ -79,6 +79,11 @@ jobs:
           echo "ROUTER_UNIT_WORKDIR=$(systemctl show router -p WorkingDirectory -p StateDirectory -p ReadWritePaths --value 2>/dev/null | paste -sd, - || true)"
           echo "ROUTER_CONFIG_TREE=$(sudo -n find "$rhome/.config/router" -maxdepth 2 -printf '%M %u %f;' 2>/dev/null | head -c 600 || true)"
           echo "ROUTER_VAR_LIB=$(sudo -n ls -la /var/lib/router 2>/dev/null | head -8 | tr '\n' ';' || true)"
+          wd="$(systemctl show router -p WorkingDirectory --value 2>/dev/null || true)"
+          if [ -n "$wd" ]; then
+            echo "ROUTER_STATE_FILES=$(sudo -n find "$wd" -maxdepth 3 \( -name '*.db' -o -name '*.sqlite*' -o -name 'data' -o -name '.data' -o -name '*.env' -o -name 'config*' \) -not -path '*/.venv/*' -not -path '*/.git/*' 2>/dev/null | sed "s|$wd|<wd>|" | head -25 | paste -sd, - || true)"
+            echo "ROUTER_WD_LISTING=$(sudo -n ls -la "$wd" 2>/dev/null | awk '{print $1" "$9}' | head -25 | paste -sd';' - || true)"
+          fi
           echo "ROUTER_UNIT_KEY_NAMES=$(sudo -n grep -hoE '[A-Za-z0-9_]+_API_KEY' /etc/systemd/system/router.service.d/*.conf /etc/systemd/system/router.service /etc/router/*.env 2>/dev/null | sort -u | paste -sd, - || true)"
           echo "IACHAT_UNIT_EXEC=$(systemctl show iachat -p ExecStart --value 2>/dev/null | head -c 300 || true)"
           echo "PORT_8001_READY=$(curl -s --max-time 5 http://127.0.0.1:8001/ready 2>/dev/null | head -c 200 || true)"
