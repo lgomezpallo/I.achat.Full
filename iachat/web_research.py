@@ -201,3 +201,266 @@ def ground_web_answer_urls(answer: str, sources: list[dict[str, str]]) -> str:
         return raw[len(candidate):]
 
     return re.sub(r"https?://[^\s)<>]+", replace, answer)
+
+
+# Narrow, deterministic safety net for conflicting broadcast-channel claims.
+# This does not infer the true channel and does not call another provider.
+_BROADCAST_CHANNEL = re.compile(
+    # Case-insensitive verb, but keep capitalized channel suffixes strict:
+    # "Telefe o por ESPN" must not be parsed as channel "Telefe o por".
+    r"(?i:\b(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)\s+|"
+    r"(?:va|van)\s+|(?:se\s+)?(?:transmite|emite)\s+)por\s+)"
+    r"([A-Za-zÁÉÍÓÚÑáéíóúñ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})",
+)
+_UNCERTAIN_CHANNEL = re.compile(
+    r"\b(?:no\s+(?:pude|puedo)\s+confirmar|sin\s+confirmar|"
+    r"no\s+est[aá]\s+confirmado|no\s+sé|"
+    # Uncertainty must not be promoted into an affirmative channel claim.
+    # Keep "no se transmite" distinct: it is an explicit denial.
+    r"no\s+se\s+sabe|no\s+est[aá]\s+claro|"
+    r"quiz[aá]s|tal\s+vez|puede\s+que|aparentemente|"
+    r"no\s+(?:tengo|hay)\s+confirmaci[oó]n)\b", re.I,
+)
+_USER_CORRECTION = re.compile(
+    r"^\s*(?:(?:no[,;:.!]\s*){1,3}|corrijo\b|rectifico\b|"
+    r"no\s+(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)\s+por|(?:va|van|es)\s+por)\b|"
+    r"por\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2}\s+no\b|"
+    r"te\s+equivocaste\b|eso\s+est[aá]\s+mal\b)", re.I,
+)
+
+
+_BROADCAST_ALT_CHANNEL = re.compile(
+    # Only alternatives in an already recognized broadcast question. Do not
+    # accidentally treat a lowercase connector as part of a channel name.
+    r"(?i:\b(?:o|y)\s+por\s+)"
+    r"([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})",
+)
+_BROADCAST_QUESTION = re.compile(
+    r"\b(?:canal(?:es)?|transmisi[oó]n|transmiten|transmite|televisan|pasan|emiten|emite|dan)\b"
+    r"|\b(?:lo|la)\s+pasa\b"
+    r"|\b(?:va|van)\s+por\b"
+    r"|\bd[oó]nde\s+(?:ver|mirar|(?:(?:lo|la)\s+)?(?:pasan|transmiten|emiten))\b", re.I,
+)
+# Short replies are channel assertions only when the user's question is
+# explicitly about a broadcast. Do not treat an arbitrary proper noun in a
+# longer answer as a station name.
+_BROADCAST_SHORT_ANSWER = re.compile(
+    r"\s*(?:(?i:(?:es|va)\s+por|por)\s+)?"
+    r"([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})"
+    r"\s*[.!]?\s*"
+)
+_BROADCAST_REVERSE_CHANNEL = re.compile(
+    r"\b(?!(?i:se\s+(?:transmite|emite)\b))([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*"
+    r"(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.-]*){0,2})"
+    r"\s+(?:(?:no\s+)?(?:lo|la)\s+)?(?:pasa|transmite|emite)\b",
+)
+
+
+def _broadcast_channels(question: str, answer: str) -> list[str]:
+    """Select channels from a broadcast question or its explicit answer.
+
+    A generic follow-up ("¿Qué canal lo pasa?") contains no channel name,
+    but must still detect a repeated unsupported answer ("Telefe"). Search
+    only syntactic channel assertions, never arbitrary proper nouns.
+    """
+    if not _BROADCAST_QUESTION.search(question):
+        return []
+    candidates = [
+        *(m.group(1) for m in _BROADCAST_CHANNEL.finditer(question)),
+        *(m.group(1) for m in _BROADCAST_ALT_CHANNEL.finditer(question)),
+        *(m.group(1) for m in _BROADCAST_CHANNEL.finditer(answer)),
+        *(m.group(1) for m in _BROADCAST_REVERSE_CHANNEL.finditer(answer)),
+    ]
+    short_answer = _BROADCAST_SHORT_ANSWER.fullmatch(answer)
+    if short_answer:
+        candidates.append(short_answer.group(1))
+    channels: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        name = re.sub(r"\s+(?:hoy|ma[nñ]ana)$", "", raw, flags=re.I).strip().rstrip(".,;:!?")
+        if not name or len(name) > 60 or name.casefold() in seen:
+            continue
+        seen.add(name.casefold())
+        channels.append(name)
+        if len(channels) >= 6:
+            break
+    return channels
+
+
+def _channel_stance(
+    text: str, channel: str, *, allow_short_answer: bool = False,
+) -> str | None:
+    """Classify explicit assertions, allowing a bare name only in a channel answer."""
+    if allow_short_answer:
+        short = _BROADCAST_SHORT_ANSWER.fullmatch(text)
+        if short and short.group(1).rstrip(".,;:!?").casefold() == channel.casefold():
+            return "yes"
+    name = r"\b" + re.escape(channel) + r"\b"
+    for sentence in re.split(r"[\n.!?]+", text):
+        if not re.search(name, sentence, re.I):
+            continue
+        if _UNCERTAIN_CHANNEL.search(sentence):
+            return "unknown"
+        negative = (
+            re.search(r"\bno\s+(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)|"
+                      r"(?:va|van)|(?:se\s+)?(?:transmite|emite))\s+por\s+"
+                      + name, sentence, re.I)
+            or re.search(name + r"\s+no\s+(?:(?:lo|la)\s+)?(?:pasa|transmite|emite)\b", sentence, re.I)
+            or re.search(r"\bno\s+es\s+por\s+" + name, sentence, re.I)
+            # Argentine colloquial corrections often put the outlet first:
+            # "No, por Telefe no" / "Por Telefe no lo pasan".
+            # Do not confuse "por Telefe no creo" with a factual denial.
+            or re.search(
+                r"\bpor\s+" + name
+                + r"\s+no\b(?=\s*(?:$|[,;:]|(?:(?:lo|la)\s+)?"
+                r"(?:pasan|transmiten|emiten|dan|va|van)\b))",
+                sentence, re.I,
+            )
+        )
+        if negative:
+            return "no"
+        positive = (
+            re.search(r"\b(?:(?:lo|la)\s+(?:pasan|transmiten|emiten|dan)|"
+                      r"(?:va|van)|(?:se\s+)?(?:transmite|emite))\s+por\s+"
+                      + name, sentence, re.I)
+            or re.search(name + r"\s+(?:(?:lo|la)\s+)?(?:pasa|transmite|emite)\b", sentence, re.I)
+        )
+        if positive:
+            return "yes"
+    return None
+
+
+# Do not let a correction about one fixture contaminate a later fixture in
+# the same conversation. Deliberately require two named sides and a sports
+# cue (or an explicit versus separator); ambiguous topics retain the guard.
+_EVENT_PAIR = re.compile(
+    r"\b([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ]{2,})\s*"
+    r"(?:(?i:vs\.?|versus|contra)|[-–—]|(?i:y))\s*"
+    r"([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ]{2,})\b"
+)
+_EVENT_CUE = re.compile(
+    r"\b(?:partido|juega|juegan|enfrentan|cl[aá]sico|final)\b", re.I,
+)
+_EVENT_VERSUS = re.compile(r"(?i:vs\.?|versus|contra)|[-–—]")
+
+
+# An explicit correction of the *topic* ends implicit fixture inheritance.
+# A later explicit fixture name can still revisit an earlier dispute.
+_TOPIC_RESET = re.compile(
+    r"^\s*(?:(?:no[,;:.!]?\s+){1,2}(?:era|hablaba(?:mos)?\s+de|me\s+refer[ií]a\s+a)\b|"
+    r"(?:cambiemos|cambiar)\s+de\s+tema\b|"
+    r"(?:ahora|mejor)\s+(?:hablemos|hablar)\s+de\b)", re.I,
+)
+
+
+
+def _broadcast_fixture(text: str) -> tuple[str, str] | None:
+    match = _EVENT_PAIR.search(text)
+    if not match or not (_EVENT_CUE.search(text) or _EVENT_VERSUS.search(match.group(0))):
+        return None
+    return tuple(sorted((match.group(1).casefold(), match.group(2).casefold())))
+
+
+def _current_fixture_history(question: str, history: list[dict]) -> list[dict]:
+    """Scope a channel dispute to its fixture, without losing older corrections.
+
+    A bare follow-up uses the latest named fixture. An explicit fixture query
+    can revisit an older fixture and recover its corrections even after a
+    different match was discussed. Unknown fixture identity keeps the old
+    conservative behavior instead of inventing a match.
+    """
+    # Keep fixture identities across long-lived conversations. The old 20-turn
+    # window silently discarded corrections after ordinary follow-ups.
+    # Bound the scan to protect chat latency on exceptionally long histories.
+    recent = history[-1000:]
+    segments: list[tuple[tuple[str, str], int, int]] = []
+    active: tuple[str, str] | None = None
+    start = 0
+    last_reset = 0
+    for index, turn in enumerate(recent):
+        if turn.get("role") != "user":
+            continue
+        text = str(turn.get("content", ""))
+        fixture = _broadcast_fixture(text)
+        if fixture is not None and fixture != active:
+            if active is not None:
+                segments.append((active, start, index))
+            active = fixture
+            start = index
+        elif fixture is None and _TOPIC_RESET.search(text):
+            if active is not None:
+                segments.append((active, start, index))
+            active = None
+            last_reset = index + 1
+    if active is not None:
+        segments.append((active, start, len(recent)))
+    current = _broadcast_fixture(question)
+    if current is not None:
+        matches = [recent[begin:end] for fixture, begin, end in segments if fixture == current]
+        if matches:
+            return [turn for segment in matches for turn in segment]
+        if segments:
+            return []
+    return recent[start:] if active is not None else recent[last_reset:]
+
+
+def guard_unverified_broadcast_claim(
+    question: str, answer: str, history: list[dict], sources: list[dict],
+) -> str:
+    """Abstain when a named channel is asserted against unresolved prior turns.
+
+    Only the current user's named-channel question selects the channel. Prior
+    assistant claims and user corrections are conversational data, not facts.
+    A newly read page is NOT proof that its content corroborates the answer.
+    Do not waive the conflict guard merely because an unrelated page was read.
+    """
+    history = _current_fixture_history(question, history)
+    for channel in _broadcast_channels(question, answer):
+        stance = _channel_stance(answer, channel, allow_short_answer=True)
+        if stance not in ("yes", "no"):
+            continue
+        # A previous bare reply ("Telefe.") is a channel assertion only
+        # when it answered an actual broadcast question. Without the
+        # preceding user turn, treating any proper noun as a channel claim
+        # would contaminate unrelated discussions.
+        prior: list[str] = []
+        previous_user = ""
+        for turn in history:
+            role = turn.get("role")
+            if role == "user":
+                previous_user = str(turn.get("content", ""))
+            elif role == "assistant":
+                value = _channel_stance(
+                    str(turn.get("content", "")), channel,
+                    allow_short_answer=bool(_BROADCAST_QUESTION.search(previous_user)),
+                )
+                if value:
+                    prior.append(value)
+        # Uncertainty is not a factual stance. A previous "no sé" must
+        # not block a later answer, nor erase an earlier actual contradiction.
+        asserted = {value for value in prior if value in ("yes", "no")}
+        contradiction = bool(asserted - {stance})
+        for turn in history:
+            if turn.get("role") != "user":
+                continue
+            text = str(turn.get("content", ""))
+            if _USER_CORRECTION.search(text):
+                corrected = _channel_stance(text, channel)
+                if corrected in ("yes", "no") and corrected != stance:
+                    contradiction = True
+        if not contradiction:
+            continue
+        # A page_read flag means transport succeeded, not that the page
+        # corroborated the disputed channel. Abstain until a separate,
+        # claim-specific verification path exists.
+        return (
+            f"En esta conversación hubo información contradictoria o sin confirmar "
+            f"sobre la transmisión por {channel}. No tengo una fuente nueva "
+            "suficientemente verificable para resolverlo, así que no voy a "
+            "afirmar ni negar ese canal."
+        )
+    return answer
