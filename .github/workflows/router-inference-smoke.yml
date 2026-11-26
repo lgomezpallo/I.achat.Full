@@ -1,0 +1,104 @@
+name: Router — prueba mínima de inferencia
+# Una sola llamada real al Router. Se dispara a mano y sólo reporta estado,
+# proveedor y modelo: nunca imprime la credencial ni el texto de la respuesta.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: oracle-production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ejecutar una inferencia mínima en 127.0.0.1:8010
+        shell: bash
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
+          test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          keyfile="$(mktemp "$HOME/.ssh/router-smoke-key.XXXXXXXX")"
+          knownfile="$(mktemp "$HOME/.ssh/router-smoke-known.XXXXXXXX")"
+          trap 'rm -f "$keyfile" "$knownfile"' EXIT
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$keyfile"
+          chmod 600 "$keyfile"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$knownfile"
+          test -s "$knownfile"
+          actual="$(ssh-keygen -lf "$knownfile" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = 'SHA256:UDVMx6HCL8d412N+TaY4O0Ob1rGVTWI6vKmz0Dm3yyY' || {
+            echo "::error::La huella SSH no coincide con la VM esperada. No se ejecuta inferencia."
+            exit 1
+          }
+          chmod 600 "$knownfile"
+          ssh -i "$keyfile" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$knownfile" -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          echo "ROUTER_SMOKE_MODE=single_request"
+          # El token se lee como root desde el EnvironmentFile del unit y se usa
+          # dentro de este proceso: no viaja por argv ni aparece en el log.
+          sudo -n python3 - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          cfg = {}
+          for raw in Path("/etc/iachat-router.env").read_text().splitlines():
+              line = raw.strip()
+              if not line or line.startswith("#"):
+                  continue
+              if line.startswith("export "):
+                  line = line[7:]
+              key, sep, value = line.partition("=")
+              if sep:
+                  cfg[key.strip()] = value.strip().strip('"').strip("'")
+          token = cfg.get("ROUTER_TOKEN", "")
+          base = cfg.get("ROUTER_URL", "http://127.0.0.1:8010").rstrip("/")
+          if not token:
+              raise SystemExit("ROUTER_SMOKE=no_token")
+
+          payload = {
+              "task": "Respondé únicamente con la palabra ok.",
+              "required_capabilities": ["chat"],
+              "application_name": "iachat",
+              "decompose": False,
+          }
+          request = urllib.request.Request(
+              base + "/route",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json",
+                       "Authorization": "Bearer " + token},
+              method="POST",
+          )
+          started = time.monotonic()
+          try:
+              with urllib.request.urlopen(request, timeout=90) as response:
+                  status = response.status
+                  body = response.read()
+          except urllib.error.HTTPError as error:
+              status = error.code
+              body = error.read()
+          elapsed = int((time.monotonic() - started) * 1000)
+          print("ROUTER_SMOKE_HTTP=" + str(status))
+          print("ROUTER_SMOKE_ELAPSED_MS=" + str(elapsed))
+          if status == 200:
+              data = json.loads(body)
+              text = str(data.get("text") or "")
+              print("ROUTER_SMOKE_OK=" + str(bool(data.get("ok"))))
+              print("ROUTER_SMOKE_PROVIDER=" + str(data.get("provider") or "none")[:80])
+              print("ROUTER_SMOKE_MODEL=" + str(data.get("model") or "none")[:120])
+              print("ROUTER_SMOKE_CHARS=" + str(len(text)))
+              print("ROUTER_SMOKE_DECOMPOSED=" + str(bool(data.get("decomposed"))))
+          else:
+              detail = body.decode("utf-8", "replace")[:300].replace("\n", " ").replace("\r", " ")
+              print("ROUTER_SMOKE_DETAIL=" + detail)
+          raise SystemExit(0 if status == 200 else 1)
+          PY
+          REMOTE
