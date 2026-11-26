@@ -83,6 +83,9 @@ jobs:
           if [ -n "$wd" ]; then
             echo "ROUTER_STATE_FILES=$(sudo -n find "$wd" -maxdepth 3 \( -name '*.db' -o -name '*.sqlite*' -o -name 'data' -o -name '.data' -o -name '*.env' -o -name 'config*' \) -not -path '*/.venv/*' -not -path '*/.git/*' 2>/dev/null | sed "s|$wd|<wd>|" | head -25 | paste -sd, - || true)"
             echo "ROUTER_WD_LISTING=$(sudo -n ls -la "$wd" 2>/dev/null | awk '{print $1" "$9}' | head -25 | paste -sd';' - || true)"
+            echo "ROUTER_KEY_FILES=$(sudo -n grep -rl 'GROQ_API_KEY' "$wd" /etc/systemd/system/router.service.d /etc/iachat-router.env 2>/dev/null --exclude-dir=.venv --exclude-dir=.git | head -10 | paste -sd, - || true)"
+            echo "ROUTER_DROPINS=$(sudo -n ls /etc/systemd/system/router.service.d 2>/dev/null | paste -sd, - || true)"
+            echo "ROUTER_DROPIN_ENVFILES=$(sudo -n grep -hoE 'EnvironmentFile=[^ ]+' /etc/systemd/system/router.service.d/*.conf 2>/dev/null | paste -sd, - || true)"
           fi
           echo "ROUTER_UNIT_KEY_NAMES=$(sudo -n grep -hoE '[A-Za-z0-9_]+_API_KEY' /etc/systemd/system/router.service.d/*.conf /etc/systemd/system/router.service /etc/router/*.env 2>/dev/null | sort -u | paste -sd, - || true)"
           echo "IACHAT_UNIT_EXEC=$(systemctl show iachat -p ExecStart --value 2>/dev/null | head -c 300 || true)"
