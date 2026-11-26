@@ -1,6 +1,14 @@
 name: Router — verificar servicio y puerto 8010 (solo lectura)
 on:
   workflow_dispatch:
+    inputs:
+      inferencia_minima:
+        description: "Ejecutar 1 inferencia real en /route para verificar credenciales de proveedor"
+        type: choice
+        options:
+          - "no"
+          - "si"
+        default: "no"
 permissions:
   contents: read
 jobs:
@@ -160,5 +168,70 @@ jobs:
           assert authorized in (400, 422), "IAchat token was not accepted by Router"
           print("ROUTER_AUTH_PROBE=ok_no_inference")
           PYAUTH
+          # Prueba de inferencia real: sólo cuando se pide explícitamente en el
+          # dispatch. Una única llamada a /route; informa estado, proveedor y
+          # modelo, nunca la credencial ni el texto completo de la respuesta.
+          if [ "${{ inputs.inferencia_minima }}" = "si" ]; then
+            echo "ROUTER_SMOKE_MODE=single_request"
+            sudo -n python3 - <<'PYSMOKE'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          cfg = {}
+          for raw in Path("/etc/iachat-router.env").read_text().splitlines():
+              line = raw.strip()
+              if not line or line.startswith("#"):
+                  continue
+              if line.startswith("export "):
+                  line = line[7:]
+              key, sep, value = line.partition("=")
+              if sep:
+                  cfg[key.strip()] = value.strip().strip('"').strip("'")
+          token = cfg.get("ROUTER_TOKEN", "")
+          base = cfg.get("ROUTER_URL", "http://127.0.0.1:8010").rstrip("/")
+          if not token:
+              raise SystemExit("ROUTER_SMOKE=no_token")
+
+          payload = {
+              "task": "Respondé únicamente con la palabra ok.",
+              "required_capabilities": ["chat"],
+              "application_name": "iachat",
+              "decompose": False,
+          }
+          request = urllib.request.Request(
+              base + "/route",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json",
+                       "Authorization": "Bearer " + token},
+              method="POST",
+          )
+          started = time.monotonic()
+          try:
+              with urllib.request.urlopen(request, timeout=90) as response:
+                  status = response.status
+                  body = response.read()
+          except urllib.error.HTTPError as error:
+              status = error.code
+              body = error.read()
+          elapsed = int((time.monotonic() - started) * 1000)
+          print("ROUTER_SMOKE_HTTP=" + str(status))
+          print("ROUTER_SMOKE_ELAPSED_MS=" + str(elapsed))
+          if status == 200:
+              data = json.loads(body)
+              text = str(data.get("text") or "")
+              print("ROUTER_SMOKE_OK=" + str(bool(data.get("ok"))))
+              print("ROUTER_SMOKE_PROVIDER=" + str(data.get("provider") or "none")[:80])
+              print("ROUTER_SMOKE_MODEL=" + str(data.get("model") or "none")[:120])
+              print("ROUTER_SMOKE_CHARS=" + str(len(text)))
+              print("ROUTER_SMOKE_DECOMPOSED=" + str(bool(data.get("decomposed"))))
+          else:
+              detail = body.decode("utf-8", "replace")[:300].replace("\n", " ").replace("\r", " ")
+              print("ROUTER_SMOKE_DETAIL=" + detail)
+          raise SystemExit(0 if status == 200 else 1)
+          PYSMOKE
+          fi
           echo "ROUTER_AUDIT_COMPLETE=read_only"
           REMOTE
