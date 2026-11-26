@@ -58,27 +58,26 @@ jobs:
           set -Eeuo pipefail
           src="$1"
           [[ "$src" =~ ^/tmp/router-providers-[0-9]+\.env$ ]]
-          dir="$HOME/.config/router"
-          target="$dir/providers.env"
-          install -d -m 700 "$dir"
+          # El unit del Router usa EnvironmentFile=/etc/iachat-router.env: se fusiona
+          # ahí mismo para que systemd no cargue un segundo archivo que lo pise.
+          target=/etc/iachat-router.env
+          sudo -n test -s "$target" || { echo "::error::No existe $target en la VM; no se toca nada."; exit 1; }
           umask 077
-          base="/dev/null"
-          [[ -f "$target" ]] && base="$target"
-          tmp="$(mktemp "$dir/.providers.env.XXXXXX")"
-          # Fusiona: conserva las claves que ya estaban y reemplaza solo las que llegan ahora.
+          base="$(mktemp)"
+          tmp="$(mktemp)"
+          sudo -n cat "$target" > "$base"
+          # Fusiona: conserva lo que ya estaba y reemplaza solo las claves que llegan ahora.
           awk 'NR==FNR { if (match($0, /^[A-Za-z_][A-Za-z0-9_]*=/)) over[substr($0, 1, RLENGTH - 1)] = 1; next }
                { if (match($0, /^[A-Za-z_][A-Za-z0-9_]*=/)) { k = substr($0, 1, RLENGTH - 1); if (k in over) next } print }' \
             "$src" "$base" > "$tmp"
           cat "$src" >> "$tmp"
           chmod 600 "$tmp"
-          updated="$(grep -c '_API_KEY=' "$src" || true)"
-          mv -f "$tmp" "$target"
-          total="$(grep -c '_API_KEY=' "$target" || true)"
-          rm -f "$src"
-          sudo -n mkdir -p /etc/systemd/system/router.service.d
-          printf '[Service]\nEnvironmentFile=%s\n' "$dir/providers.env" \
-            | sudo -n tee /etc/systemd/system/router.service.d/10-providers.conf >/dev/null
-          sudo -n systemctl daemon-reload
+          updated="$(wc -l < "$src" | tr -d ' ')"
+          owner="$(sudo -n stat -c %U "$target")"
+          group="$(sudo -n stat -c %G "$target")"
+          sudo -n install -m 600 -o "$owner" -g "$group" "$tmp" "$target"
+          total="$(sudo -n grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' "$target" || true)"
+          rm -f "$tmp" "$base" "$src"
           sudo -n systemctl restart router.service
           ready=0
           for attempt in $(seq 1 20); do
@@ -92,7 +91,7 @@ jobs:
             echo "::error::Router no respondió /health tras reiniciar con las claves nuevas."
             exit 1
           fi
-          echo "Router activo: $total claves en providers.env ($updated actualizadas en esta corrida)"
+          echo "Router activo: $total claves en /etc/iachat-router.env ($updated actualizadas en esta corrida)"
           REMOTE
       - name: Limpiar material SSH y claves temporales
         if: always()

@@ -89,7 +89,7 @@ jobs:
           done
           if [ -n "$ROUTER_ENV_FILE" ]; then
             echo "IACHAT_ROUTER_ENV=present:$ROUTER_ENV_FILE"
-            echo "ROUTER_ENV_KEY_NAMES=$(sudo -n awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/{print $1}' "$ROUTER_ENV_FILE" | grep -E '_API_KEY$|_API_TOKEN$' | sort -u | paste -sd, - || true)"
+            echo "ROUTER_ENV_KEY_NAMES=$(sudo -n sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' "$ROUTER_ENV_FILE" | sort -u | paste -sd, - || true)"
           else
             echo "IACHAT_ROUTER_ENV=absent_or_unreadable"
             echo "ROUTER_AUTH_PROBE=unavailable"
