@@ -87,6 +87,10 @@ jobs:
             echo "ROUTER_DROPINS=$(sudo -n ls /etc/systemd/system/router.service.d 2>/dev/null | paste -sd, - || true)"
             echo "ROUTER_DROPIN_ENVFILES=$(sudo -n grep -hoE 'EnvironmentFile=[^ ]+' /etc/systemd/system/router.service.d/*.conf 2>/dev/null | paste -sd, - || true)"
           fi
+          # Inventario admin: dice si cada proveedor tiene credencial cargada.
+          sudo -n bash -c 'set -a; . /etc/iachat-router.env >/dev/null 2>&1; set +a; curl -s --max-time 6 -H "Authorization: Bearer $ROUTER_TOKEN" http://127.0.0.1:8010/diagnostics/inventory' > /tmp/router-inventory.json 2>/dev/null || true
+          echo "ROUTER_INVENTORY_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8010/diagnostics/inventory || true)"
+          echo "ROUTER_INVENTORY=$(head -c 1200 /tmp/router-inventory.json 2>/dev/null | tr '\n\r' '  ' || true)"
           echo "ROUTER_UNIT_KEY_NAMES=$(sudo -n grep -hoE '[A-Za-z0-9_]+_API_KEY' /etc/systemd/system/router.service.d/*.conf /etc/systemd/system/router.service /etc/router/*.env 2>/dev/null | sort -u | paste -sd, - || true)"
           echo "IACHAT_UNIT_EXEC=$(systemctl show iachat -p ExecStart --value 2>/dev/null | head -c 300 || true)"
           echo "PORT_8001_READY=$(curl -s --max-time 5 http://127.0.0.1:8001/ready 2>/dev/null | head -c 200 || true)"
