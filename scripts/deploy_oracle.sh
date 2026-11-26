@@ -17,6 +17,15 @@ stage="$recovery_dir/stage"
 backup="$recovery_dir/backup"
 mkdir -m 700 "$stage" "$backup"
 deployed=0
+# The unit pins the listen port (currently 8001); every local check must follow
+# the unit instead of assuming uvicorn's default port.
+app_port="$(sudo -n systemctl show iachat -p ExecStart --value 2>/dev/null |
+  grep -oE -- '--port[= ][0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+app_port="${app_port:-8000}"
+[[ "$app_port" =~ ^[0-9]+$ ]] || { echo "::error::IAchat listen port could not be determined."; exit 1; }
+base="http://127.0.0.1:$app_port"
+export IACHAT_CHECK_BASE="$base"
+echo "IAchat loopback check port: $app_port"
 # Keep the previous systemd override for a real configuration rollback.
 # The file name is historical: this drop-in now selects the Router backend.
 dropin="/etc/systemd/system/iachat.service.d/20-integrated-providers.conf"
@@ -75,7 +84,7 @@ rollback() {
     # actual readiness instead of declaring rollback broken on the first curl.
     rollback_ready=0
     for attempt in $(seq 1 25); do
-      if sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 3 http://127.0.0.1:8000/health >/dev/null 2>&1; then
+      if sudo -n systemctl is-active --quiet iachat && curl -fsS --max-time 3 "$base/health" >/dev/null 2>&1; then
         rollback_ready=1
         break
       fi
@@ -155,14 +164,14 @@ rsync -a --checksum --exclude='.git/' --exclude='.venv/' --exclude='*.db' --excl
 # A literal newline, not a backslash-n, is required in a systemd drop-in.
 # IAchat talks only to Router: it must never receive direct provider keys.
 router_env=""
-for candidate in /etc/iachat/router.env /etc/router-iachat.env; do
+for candidate in /etc/iachat-router.env /etc/iachat/router.env /etc/router-iachat.env; do
   if sudo -n test -s "$candidate"; then
     router_env="$candidate"
     break
   fi
 done
 if [[ -z "$router_env" ]]; then
-  echo "::error::No Router credential file found (/etc/iachat/router.env)."
+  echo "::error::No Router credential file found (/etc/iachat-router.env)."
   exit 1
 fi
 # Validate permissions and required keys without printing secret values.
@@ -192,6 +201,30 @@ curl -fsS --max-time 5 http://127.0.0.1:8010/health >/dev/null || {
   echo "::error::Router health check failed; IAchat was not switched."
   exit 1
 }
+# Session signing key for browser cookies. Provisioned once as root 0600 and
+# never printed: rotating it would silently log every user out. Google login
+# and the password fallback both require it.
+sudo -n python3 - <<'PYAUTH'
+import os, secrets, stat
+from pathlib import Path
+path = Path("/etc/iachat/auth.env")
+if not path.exists():
+    path.touch(mode=0o600)
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_TRUNC), "w") as handle:
+        handle.write("IACHAT_AUTH_SECRET=%s\n" % secrets.token_urlsafe(48))
+    os.chown(path, 0, 0)
+path.chmod(0o600)
+st = path.stat()
+assert stat.S_IMODE(st.st_mode) == 0o600 and st.st_uid == 0 and st.st_gid == 0, "auth_env_permissions_invalid"
+cfg = {}
+for raw in path.read_text().splitlines():
+    line = raw.strip()
+    if line and not line.startswith("#") and "=" in line:
+        key, _, value = line.partition("=")
+        cfg[key.strip()] = value.strip().strip('"').strip("'")
+assert len(cfg.get("IACHAT_AUTH_SECRET", "")) >= 32, "auth_secret_missing_or_short"
+print("AUTH_SECRET_FILE: present, root 0600, value withheld")
+PYAUTH
 sudo -n install -d -m 755 /etc/systemd/system/iachat.service.d
 # This file changes service behavior and must be reverted together with code.
 # The private staging directory is removed by the EXIT trap; never log content.
@@ -200,17 +233,18 @@ if sudo -n test -e "$dropin"; then
   dropin_existed=1
 fi
 dropin_changed=1
-printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=/etc/iachat/google-oidc.env\nEnvironment=IACHAT_BACKEND=router\n' "$router_env" | sudo -n tee "$dropin" >/dev/null
+printf '[Service]\nEnvironmentFile=%s\nEnvironmentFile=/etc/iachat/google-oidc.env\nEnvironmentFile=/etc/iachat/auth.env\nEnvironment=IACHAT_BACKEND=router\n' "$router_env" | sudo -n tee "$dropin" >/dev/null
 sudo -n systemctl daemon-reload
 sudo -n systemctl restart iachat
 sudo -n systemctl is-active --quiet iachat
 # /health checks process availability; no inference request is made.
 "$app/.venv/bin/python" - <<'PY'
+import os
 import time
 import urllib.request
 for attempt in range(12):
     try:
-        with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3) as response:
+        with urllib.request.urlopen(os.environ["IACHAT_CHECK_BASE"] + "/health", timeout=3) as response:
             if response.status == 200:
                 print("IAchat deployment: health OK")
                 break
@@ -221,14 +255,15 @@ else:
     raise SystemExit("IAchat health check failed")
 PY
 # Readiness must verify that credentials reached IAchat, not only process health.
-curl -fsS --max-time 10 http://127.0.0.1:8000/ready | grep -q '"mode":"router"'
-test "$(curl -fsS http://127.0.0.1:8000/ | grep -c 'id="projectScope"')" -ge 1 || { echo "Project selector missing from served app"; exit 1; }
+curl -fsS --max-time 10 "$base/ready" | grep -q '"mode":"router"'
+test "$(curl -fsS "$base/" | grep -c 'id="projectScope"')" -ge 1 || { echo "Project selector missing from served app"; exit 1; }
 # Explicit postdeploy checks: ensure the configured Router backend is active.
 "$app/.venv/bin/python" - <<'PY'
 import json
+import os
 import urllib.error
 import urllib.request
-base = "http://127.0.0.1:8000"
+base = os.environ["IACHAT_CHECK_BASE"]
 def probe(path):
     try:
         with urllib.request.urlopen(base + path, timeout=10) as response:
@@ -248,10 +283,11 @@ PY
 # Report Google configuration without printing any credentials or claiming consent completed.
 "$app/.venv/bin/python" - <<'PY'
 import json
+import os
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
-base = "http://127.0.0.1:8000"
+base = os.environ["IACHAT_CHECK_BASE"]
 with urllib.request.urlopen(base + "/auth/status", timeout=5) as response:
     status = json.load(response)
 assert status["authenticated"] is False

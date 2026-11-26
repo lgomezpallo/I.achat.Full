@@ -51,6 +51,25 @@ def test_deploy_selects_router_backend_without_direct_provider_keys():
     assert "http://127.0.0.1:8010/health" in script
 
 
+def test_deploy_provisions_session_signing_key_without_printing_it():
+    """No login can succeed without IACHAT_AUTH_SECRET; it is created once."""
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "deploy_oracle.sh").read_text(encoding="utf-8")
+    assert '/etc/iachat/auth.env' in script
+    assert 'IACHAT_AUTH_SECRET=%s' in script
+    assert 'EnvironmentFile=/etc/iachat/auth.env' in script
+    assert 'AUTH_SECRET_FILE' in script
+    for leak in ('echo "$IACHAT_AUTH_SECRET', "print(cfg", 'print(secret'):
+        assert leak not in script
+
+
+def test_deploy_uses_the_unit_port_and_the_real_router_env_path():
+    """The VM runs uvicorn on 8001 and keeps Router credentials in /etc/iachat-router.env."""
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "deploy_oracle.sh").read_text(encoding="utf-8")
+    assert '/etc/iachat-router.env' in script
+    assert '--port[= ][0-9]+' in script
+    assert 'http://127.0.0.1:8000' not in script
+
+
 def test_postdeploy_endpoint_contract_with_router_backend(monkeypatch):
     """Reproduce the release preflight offline, without credentials or inference."""
     from fastapi.testclient import TestClient

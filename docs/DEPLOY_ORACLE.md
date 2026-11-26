@@ -17,11 +17,13 @@ La acción **Desplegar IAchat en Oracle** se ejecuta únicamente con `workflow_d
 
 El despliegue usa `rsync`, `tar`, `python`, entorno `.venv` ya existente, y `sudo -n systemctl restart iachat` y `sudo -n systemctl is-active iachat`. Verificar permisos no interactivos de sudo para esas operaciones, sin dar privilegios adicionales.
 
-Ruta esperada: `~/Proyecto/Aplicaciones/IAchat`. Servicio: `iachat.service`. API local: `127.0.0.1:8000/health`.
+Ruta esperada: `~/Proyecto/Aplicaciones/IAchat`. Servicio: `iachat.service`. El despliegue toma el puerto local del propio unit (`ExecStart --port`), así que funciona igual con `8000` o `8001`.
+
+Antes de reiniciar, el despliegue crea `/etc/iachat/auth.env` (root:root, 0600) con `IACHAT_AUTH_SECRET` si todavía no existe, y lo carga por systemd junto con las credenciales de Google. Nunca imprime el valor y jamás lo rota: si el archivo existe, se respeta.
 
 ### Backend Router (obligatorio)
 
-IAchat no recibe claves de proveedores: toda la inferencia pasa por Router. Crear en la VM `/etc/iachat/router.env` (`root:root`, `0600`):
+IAchat no recibe claves de proveedores: toda la inferencia pasa por Router. Crear en la VM `/etc/iachat-router.env` (`root:root`, `0600`) —es el archivo que declara el unit actual—; también se acepta la ruta heredada `/etc/iachat/router.env`:
 
 ```ini
 ROUTER_URL=http://127.0.0.1:8010
