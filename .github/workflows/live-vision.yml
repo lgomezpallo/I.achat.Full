@@ -12,6 +12,7 @@ jobs:
     timeout-minutes: 8
     environment: oracle-production
     steps:
+      - uses: actions/checkout@v4
       - name: Verificar Router visión con imagen sintética en Oracle
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -19,6 +20,7 @@ jobs:
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           install -d -m 700 "$HOME/.ssh"
           printf '%s\n' "$ORACLE_SSH_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"

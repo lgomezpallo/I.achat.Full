@@ -6,39 +6,100 @@ permissions:
 jobs:
   migrate:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
+    environment: oracle-production
     steps:
-      - name: Transferir claves existentes por SSH
+      - uses: actions/checkout@v4
+      - name: Preparar SSH y comprobar acceso
         env:
-          ORACLE_HOST: ${{ vars.ORACLE_SSH_HOST }}
-          ORACLE_USER: ${{ vars.ORACLE_SSH_USER }}
-          ORACLE_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
-          ORACLE_SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          ssh-keyscan -T 10 -t ed25519 "$ORACLE_HOST" 2>/dev/null > "$HOME/.ssh/known_hosts"
+          actual="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" -E sha256 | awk '{print $2}' | head -1)"
+          test "$actual" = "SHA256:UDVMx6HCL8d412N+TaY4O0Ob1rGVTWI6vKmz0Dm3yyY"
+          chmod 600 "$HOME/.ssh/known_hosts"
+      - name: Fusionar claves de proveedores en la VM y reiniciar Router
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
-        shell: bash
         run: |
           set -euo pipefail
-          : "${ORACLE_HOST:?Missing ORACLE_SSH_HOST}"
-          : "${ORACLE_USER:?Missing ORACLE_SSH_USER}"
-          : "${ORACLE_KNOWN_HOSTS:?Missing host key}"
-          : "${ORACLE_SSH_PRIVATE_KEY:?Missing SSH private key}"
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$ORACLE_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          printf '%s\n' "$ORACLE_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/known_hosts ~/.ssh/id_ed25519
-          python3 - <<'PY' | ssh -T -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 "$ORACLE_USER@$ORACLE_HOST" 'python3 -c '"'"'import sys,json,pathlib,os,tempfile; d=pathlib.Path.home()/".config/router"; d.mkdir(mode=0o700,parents=True,exist_ok=True); obj=json.load(sys.stdin); assert obj, "No provider keys in this repository"; f=tempfile.NamedTemporaryFile(mode="w",dir=d,delete=False,prefix=".providers-",encoding="utf-8"); os.chmod(f.name,0o600); f.write("".join(k+"="+json.dumps(v)+"\n" for k,v in obj.items())); f.close(); os.replace(f.name,d/"providers.env"); print("Migrated provider keys:",", ".join(obj))'"'"''
-          import os, json, sys
-          names=("GROQ","NVIDIA","OPENROUTER","MISTRAL","CEREBRAS","SAMBANOVA")
-          keys={n+"_API_KEY":os.environ[n+"_API_KEY"] for n in names if os.environ.get(n+"_API_KEY")}
+          providers_file="$RUNNER_TEMP/router-providers.env"
+          umask 077
+          python3 - "$providers_file" <<'PY'
+          import json, os, pathlib, sys
+          names = ("GROQ", "NVIDIA", "OPENROUTER", "MISTRAL", "CEREBRAS", "SAMBANOVA")
+          keys = {f"{n}_API_KEY": os.environ[f"{n}_API_KEY"] for n in names if os.environ.get(f"{n}_API_KEY")}
           if not keys:
-              sys.stderr.write("No provider API key secrets are defined in IAchat repository. No remote changes.\n")
+              sys.stderr.write("Ningún secreto de proveedor está definido en el entorno. No se modificó la VM.\n")
               sys.exit(1)
-          json.dump(keys,sys.stdout)
+          pathlib.Path(sys.argv[1]).write_text(
+              "".join(f"{k}={json.dumps(v)}\n" for k, v in keys.items()), encoding="utf-8"
+          )
+          print("Proveedores a cargar: " + ", ".join(k.split("_API_KEY")[0] for k in keys))
           PY
-          echo "=== Migración recibida; activar entorno en Router ==="
-          ssh -T -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes "$ORACLE_USER@$ORACLE_HOST" 'sudo -n mkdir -p /etc/systemd/system/router.service.d && printf "[Service]\\nEnvironmentFile=/home/ubuntu/.config/router/providers.env\\n" | sudo -n tee /etc/systemd/system/router.service.d/10-providers.conf >/dev/null && sudo -n systemctl daemon-reload && sudo -n systemctl restart router.service && sleep 3 && curl -fsS --max-time 15 http://127.0.0.1:8100/health'
+          remote="/tmp/router-providers-$GITHUB_RUN_ID.env"
+          SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15"
+          scp $SSH_OPTS "$providers_file" "$ORACLE_USER@$ORACLE_HOST:$remote"
+          ssh $SSH_OPTS "$ORACLE_USER@$ORACLE_HOST" "bash -s -- $remote" <<'REMOTE'
+          set -Eeuo pipefail
+          src="$1"
+          [[ "$src" =~ ^/tmp/router-providers-[0-9]+\.env$ ]]
+          # Ruta real del contrato vigente: el unit ya declara
+          # /etc/router-providers.env (ignore_errors=yes), así que no hace falta
+          # drop-in ni archivo en el home del servicio.
+          target="/etc/router-providers.env"
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir" "$src"' EXIT
+          umask 077
+          base="$workdir/base.env"
+          if sudo -n test -s "$target"; then
+            sudo -n cat "$target" > "$base"
+          else
+            : > "$base"
+          fi
+          tmp="$workdir/merged.env"
+          # Fusiona: conserva las claves que ya estaban y reemplaza solo las que llegan ahora.
+          awk 'NR==FNR { if (match($0, /^[A-Za-z_][A-Za-z0-9_]*=/)) over[substr($0, 1, RLENGTH - 1)] = 1; next }
+               { if (match($0, /^[A-Za-z_][A-Za-z0-9_]*=/)) { k = substr($0, 1, RLENGTH - 1); if (k in over) next } print }' \
+            "$src" "$base" > "$tmp"
+          cat "$src" >> "$tmp"
+          chmod 600 "$tmp"
+          updated="$(grep -c '_API_KEY=' "$src" || true)"
+          sudo -n install -o root -g root -m 600 "$tmp" "$target"
+          total="$(sudo -n grep -c '_API_KEY=' "$target" || true)"
+          sudo -n systemctl restart router.service
+          ready=0
+          for attempt in $(seq 1 20); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8010/health >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" -ne 1 ]]; then
+            echo "::error::Router no respondió /health tras reiniciar con las claves nuevas."
+            exit 1
+          fi
+          rid="$(systemctl show router -p MainPID --value)"
+          loaded="$(sudo -n tr '\0' '\n' < "/proc/$rid/environ" \
+            | grep -oE '^[A-Za-z0-9_]+_API_KEY' | sort -u | paste -sd, - || true)"
+          echo "Router activo: $total claves en $target ($updated actualizadas en esta corrida)"
+          echo "Router con credenciales cargadas: ${loaded:-ninguna}"
+          REMOTE
+      - name: Limpiar material SSH y claves temporales
+        if: always()
+        run: rm -f "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts" "$RUNNER_TEMP/router-providers.env"

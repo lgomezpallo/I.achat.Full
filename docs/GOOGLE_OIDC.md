@@ -12,7 +12,8 @@ La implementación usa el flujo oficial **OpenID Connect Authorization Code + PK
    IACHAT_GOOGLE_CLIENT_SECRET=CLIENT_SECRET
    IACHAT_PUBLIC_ORIGIN=https://DOMINIO-DE-IACHAT
    \`\`\`
-   No copiar esos valores a chats, repositorios ni logs. El deploy carga el EnvironmentFile opcional desde systemd; tras instalar credenciales reiniciar solamente \`iachat.service\`.
-4. \`GET /auth/status\` debe indicar \`google_enabled: true\`. El botón **Continuar con Google** aparecerá en la pantalla de inicio. Probar una sesión real con consentimiento y una segunda sesión del mismo usuario; no confundir la prueba simulada de OIDC con un login real.
+   No copiar esos valores a chats, repositorios ni logs. Son obligatorios para iniciar sesión: el deploy valida ambos archivos y los carga por systemd; tras instalar credenciales en una VM ya desplegada, reiniciar solamente \`iachat.service\`.
+4. La clave de firma de sesión \`IACHAT_AUTH_SECRET\` **no** se configura a mano: el despliegue la crea una sola vez en \`/etc/iachat/auth.env\` (root:root, 0600) y la carga por systemd. Si ya existe, se conserva: rotarla cierra todas las sesiones abiertas. Sin ella no se puede iniciar sesión por ningún método.
+5. \`GET /auth/status\` debe indicar \`google_enabled: true\`. El botón **Continuar con Google** aparecerá en la pantalla de inicio. Probar una sesión real con consentimiento y una segunda sesión del mismo usuario; no confundir la prueba simulada de OIDC con un login real.
 
-Si faltan credenciales, Google permanece deshabilitado de forma explícita. La autenticación anterior con contraseña queda disponible para recuperación, sin borrar datos. Las cuentas Google se crean automáticamente y sus historiales/archivos permanecen separados por usuario.
+Si faltan credenciales, Google permanece deshabilitado de forma explícita y el sitio queda sin acceso: el login por contraseña sólo sirve como recuperación cuando ya existe una cuenta y \`IACHAT_PASSWORD\` está definido, y también necesita \`IACHAT_AUTH_SECRET\` para emitir la cookie de sesión. La autenticación anterior con contraseña queda disponible para recuperación, sin borrar datos. Las cuentas Google se crean automáticamente y sus historiales/archivos permanecen separados por usuario.

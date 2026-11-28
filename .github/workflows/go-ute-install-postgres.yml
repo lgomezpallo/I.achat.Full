@@ -12,6 +12,7 @@ jobs:
     environment: oracle-production
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
       - name: Instalar PostgreSQL y base G.O. con verificaciones
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -20,6 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
           install -d -m 700 "$HOME/.ssh"
           keyfile="$(mktemp "$HOME/.ssh/go-db-key.XXXXXXXX")"

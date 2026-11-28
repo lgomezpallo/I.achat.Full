@@ -12,6 +12,7 @@ jobs:
     environment: oracle-production
     timeout-minutes: 8
     steps:
+      - uses: actions/checkout@v4
       - name: Verificar DNS y agregar host G.O. con rollback
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -20,6 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           install -d -m 700 ~/.ssh
           keyfile="$(mktemp ~/.ssh/go-https-key.XXXXXXXX)"
           knownfile="$(mktemp ~/.ssh/go-https-host.XXXXXXXX)"

@@ -12,6 +12,7 @@ jobs:
     environment: oracle-production
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
       - name: Leer estado de Router sin cambiar archivos
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -19,6 +20,7 @@ jobs:
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           install -d -m 700 "$HOME/.ssh"
           printf '%s\n' "$ORACLE_SSH_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"

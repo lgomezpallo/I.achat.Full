@@ -1,6 +1,14 @@
 name: Router — verificar servicio y puerto 8010 (solo lectura)
 on:
   workflow_dispatch:
+    inputs:
+      inferencia_minima:
+        description: "Ejecutar 1 inferencia real en /route para verificar credenciales de proveedor"
+        type: choice
+        options:
+          - "no"
+          - "si"
+        default: "no"
 permissions:
   contents: read
 jobs:
@@ -9,6 +17,7 @@ jobs:
     timeout-minutes: 5
     environment: oracle-production
     steps:
+      - uses: actions/checkout@v4
       - name: Auditar router.service y 127.0.0.1:8010 sin escribir
         shell: bash
         env:
@@ -17,6 +26,7 @@ jobs:
           ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
         run: |
           set -euo pipefail
+          bash scripts/oracle_ssh_preflight.sh --connect
           test -n "$ORACLE_HOST" && test -n "$ORACLE_USER" && test -n "$ORACLE_SSH_KEY"
           install -d -m 700 "$HOME/.ssh"
           keyfile="$(mktemp "$HOME/.ssh/router-probe-key.XXXXXXXX")"
@@ -48,23 +58,116 @@ jobs:
           echo "IACHAT_SERVICE_ACTIVE=$(systemctl is-active iachat 2>/dev/null || true)"
           echo "IACHAT_READY_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8000/ready || true)"
           echo "IACHAT_READY_MODE=$(curl -fsS --max-time 5 http://127.0.0.1:8000/ready 2>/dev/null | sed -n 's/.*"mode":"\([a-z]*\)".*/\1/p' || true)"
-          if sudo -n test -s /etc/iachat/router.env 2>/dev/null; then
-            echo "IACHAT_ROUTER_ENV=present"
+          # Inventario del Router: sólo nombres de claves de proveedor, nunca valores.
+          echo "SUDO_NOPASSWD=$(sudo -n true 2>/dev/null && echo yes || echo no)"
+          echo "LISTEN_PORTS=$(ss -ltnH | awk '{print $4}' | sort -u | paste -sd, -)"
+          echo "PUBLIC_SELF_READY=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H 'Host: ia-chat.duckdns.org' http://127.0.0.1/ready || true)"
+          echo "PUBLIC_SELF_READY_BODY=$(curl -s --max-time 5 -H 'Host: ia-chat.duckdns.org' http://127.0.0.1/ready 2>/dev/null | head -c 200 || true)"
+          echo "PROXY_TARGETS=$(sudo -n grep -rhoE 'proxy_pass[[:space:]]+[^;]+' /etc/nginx /etc/caddy 2>/dev/null | sort -u | paste -sd, - || true)"
+          ruser=$(systemctl show router -p User --value 2>/dev/null || true)
+          ruser=${ruser:-root}
+          rhome=$(getent passwd "$ruser" | cut -d: -f6 || true)
+          rhome=${rhome:-/root}
+          penv="$rhome/.config/router/providers.env"
+          if sudo -n test -s "$penv" 2>/dev/null; then
+            echo "ROUTER_PROVIDERS_FILE=present"
+            echo "ROUTER_PROVIDERS_COUNT=$(sudo -n awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/{n++} END{print n+0}' "$penv")"
+            echo "ROUTER_PROVIDERS_KEYS=$(sudo -n awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/{print $1}' "$penv" | sort -u | paste -sd, -)"
+          else
+            echo "ROUTER_PROVIDERS_FILE=absent_or_unreadable"
+            echo "ROUTER_PROVIDERS_COUNT=0"
+            echo "ROUTER_PROVIDERS_KEYS="
+          fi
+          echo "ROUTER_CATALOG_HTTP=$(curl -s -o /tmp/router-catalog.json -w '%{http_code}' --max-time 5 http://127.0.0.1:8010/catalog || true)"
+          echo "ROUTER_CATALOG=$(head -c 900 /tmp/router-catalog.json 2>/dev/null | tr '\n\r' '  ' || true)"
+          echo "ROUTER_UNIT_USER=$(systemctl show router -p User --value 2>/dev/null || true)"
+          echo "ROUTER_UNIT_ENV_FILES=$(systemctl show router -p EnvironmentFiles --value 2>/dev/null || true)"
+          echo "ROUTER_UNIT_EXEC=$(systemctl show router -p ExecStart --value 2>/dev/null | head -c 300 || true)"
+          echo "ROUTER_ENV_FILES_FOUND=$(sudo -n find /etc /opt /root /home -maxdepth 6 -name 'providers.env' 2>/dev/null | paste -sd, - || true)"
+          echo "ROUTER_UNIT_WORKDIR=$(systemctl show router -p WorkingDirectory -p StateDirectory -p ReadWritePaths --value 2>/dev/null | paste -sd, - || true)"
+          echo "ROUTER_CONFIG_TREE=$(sudo -n find "$rhome/.config/router" -maxdepth 2 -printf '%M %u %f;' 2>/dev/null | head -c 600 || true)"
+          echo "ROUTER_VAR_LIB=$(sudo -n ls -la /var/lib/router 2>/dev/null | head -8 | tr '\n' ';' || true)"
+          wd="$(systemctl show router -p WorkingDirectory --value 2>/dev/null || true)"
+          if [ -n "$wd" ]; then
+            echo "ROUTER_STATE_FILES=$(sudo -n find "$wd" -maxdepth 3 \( -name '*.db' -o -name '*.sqlite*' -o -name 'data' -o -name '.data' -o -name '*.env' -o -name 'config*' \) -not -path '*/.venv/*' -not -path '*/.git/*' 2>/dev/null | sed "s|$wd|<wd>|" | head -25 | paste -sd, - || true)"
+            echo "ROUTER_WD_LISTING=$(sudo -n ls -la "$wd" 2>/dev/null | awk '{print $1" "$9}' | head -25 | paste -sd';' - || true)"
+            echo "ROUTER_KEY_FILES=$(sudo -n grep -rl 'GROQ_API_KEY' "$wd" /etc/systemd/system/router.service.d /etc/iachat-router.env 2>/dev/null --exclude-dir=.venv --exclude-dir=.git | head -10 | paste -sd, - || true)"
+            echo "ROUTER_DROPINS=$(sudo -n ls /etc/systemd/system/router.service.d 2>/dev/null | paste -sd, - || true)"
+            echo "ROUTER_DROPIN_ENVFILES=$(sudo -n grep -hoE 'EnvironmentFile=[^ ]+' /etc/systemd/system/router.service.d/*.conf 2>/dev/null | paste -sd, - || true)"
+          fi
+          # Inventario admin: dice si cada proveedor tiene credencial cargada.
+          sudo -n bash -c 'set -a; . /etc/iachat-router.env >/dev/null 2>&1; set +a; curl -s --max-time 6 -H "Authorization: Bearer $ROUTER_TOKEN" http://127.0.0.1:8010/diagnostics/inventory' > /tmp/router-inventory.json 2>/dev/null || true
+          echo "ROUTER_INVENTORY_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8010/diagnostics/inventory || true)"
+          echo "ROUTER_INVENTORY=$(head -c 1200 /tmp/router-inventory.json 2>/dev/null | tr '\n\r' '  ' || true)"
+          echo "ROUTER_UNIT_KEY_NAMES=$(sudo -n grep -hoE '[A-Za-z0-9_]+_API_KEY' /etc/systemd/system/router.service.d/*.conf /etc/systemd/system/router.service /etc/router/*.env 2>/dev/null | sort -u | paste -sd, - || true)"
+          echo "IACHAT_UNIT_EXEC=$(systemctl show iachat -p ExecStart --value 2>/dev/null | head -c 300 || true)"
+          echo "PORT_8001_READY=$(curl -s --max-time 5 http://127.0.0.1:8001/ready 2>/dev/null | head -c 200 || true)"
+          echo "PUBLIC_HTTPS_READY=$(curl -sk --max-time 8 --resolve ia-chat.duckdns.org:443:127.0.0.1 https://ia-chat.duckdns.org/ready 2>/dev/null | head -c 200 || true)"
+          echo "CADDY_TARGETS=$(sudo -n grep -hoE 'reverse_proxy[^#]*' /etc/caddy/Caddyfile 2>/dev/null | head -3 | tr '\n' ';' || true)"
+          # Readiness de acceso: presencia de configuración y conteo de cuentas.
+          # Sólo nombres de variables; nunca valores ni hashes.
+          ipid=$(systemctl show iachat -p MainPID --value 2>/dev/null || true)
+          echo "IACHAT_MAIN_PID_SET=$([ -n "$ipid" ] && [ "$ipid" != "0" ] && echo yes || echo no)"
+          if [ -n "$ipid" ] && [ "$ipid" != "0" ]; then
+            echo "IACHAT_PROC_ENV_KEYS=$(sudo -n cat "/proc/$ipid/environ" 2>/dev/null | tr '\0' '\n' | sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' | grep -E '^(IACHAT_|ROUTER_)' | sort -u | paste -sd, - || true)"
+            echo "IACHAT_PROC_CWD=$(sudo -n readlink "/proc/$ipid/cwd" 2>/dev/null || true)"
+          fi
+          echo "IACHAT_UNIT_ENV_FILES=$(systemctl show iachat -p EnvironmentFiles --value 2>/dev/null || true)"
+          echo "IACHAT_GOOGLE_ENV_PRESENT=$(sudo -n test -s /etc/iachat/google-oidc.env 2>/dev/null && echo yes || echo no)"
+          echo "IACHAT_GOOGLE_JSON_PRESENT=$(sudo -n test -s /etc/iachat/google-client.json 2>/dev/null && echo yes || echo no)"
+          echo "IACHAT_GOOGLE_ENV_KEYS=$(sudo -n sed -nE 's/^(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' /etc/iachat/google-oidc.env 2>/dev/null | sort -u | paste -sd, - || true)"
+          echo "IACHAT_AUTH_STATUS=$(curl -s --max-time 5 http://127.0.0.1:8001/auth/status 2>/dev/null | head -c 300 || true)"
+          idb=""
+          if [ -n "$ipid" ] && [ "$ipid" != "0" ]; then
+            icwd="$(sudo -n readlink "/proc/$ipid/cwd" 2>/dev/null || true)"
+            for cand in "$icwd/iachat.db" "/home/ubuntu/Proyecto/Aplicaciones/IAchat/iachat.db"; do
+              if sudo -n test -s "$cand" 2>/dev/null; then idb="$cand"; break; fi
+            done
+          fi
+          echo "IACHAT_DB_PRESENT=$([ -n "$idb" ] && echo yes || echo no)"
+          if [ -n "$idb" ]; then
+            sudo -n python3 - "$idb" <<'PYUSERS'
+          import sqlite3
+          import sys
+          try:
+              con = sqlite3.connect("file:%s?mode=ro" % sys.argv[1], uri=True)
+              print("IACHAT_USERS_TOTAL=%d" % con.execute("select count(*) from users").fetchone()[0])
+              print("IACHAT_ADMINS_ENABLED=%d" % con.execute("select count(*) from users where admin=1 and enabled=1").fetchone()[0])
+          except Exception as exc:
+              print("IACHAT_USERS_TOTAL=error:%s" % type(exc).__name__)
+          PYUSERS
+          fi
+          # El contrato vigente en la VM es /etc/iachat-router.env (EnvironmentFiles
+          # del unit). Se acepta también la ruta documentada por compatibilidad.
+          ROUTER_ENV_FILE=""
+          for candidate in /etc/iachat-router.env /etc/iachat/router.env; do
+            if sudo -n test -s "$candidate" 2>/dev/null; then ROUTER_ENV_FILE="$candidate"; break; fi
+          done
+          if [ -n "$ROUTER_ENV_FILE" ]; then
+            echo "IACHAT_ROUTER_ENV=present:$ROUTER_ENV_FILE"
+            echo "ROUTER_ENV_KEY_NAMES=$(sudo -n sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' "$ROUTER_ENV_FILE" | sort -u | paste -sd, - || true)"
           else
             echo "IACHAT_ROUTER_ENV=absent_or_unreadable"
             echo "ROUTER_AUTH_PROBE=unavailable"
             exit 1
           fi
+          python3 - <<'PYCAT' | sed 's/^/ROUTER_CATALOG_PROVIDERS=/'
+          import json
+          data = json.load(open("/tmp/router-catalog.json"))
+          providers = data.get("providers") or []
+          print(",".join("%s(%d)" % (p.get("id", "?"), len(p.get("models") or [])) for p in providers))
+          PYCAT
           # Auth contract only: an invalid body must be rejected before any model
           # runs. The IAchat token is read as root and never printed or passed as
           # an argument, so it cannot leak into the job log or process list.
-          sudo -n python3 - <<'PYAUTH'
+          sudo -n ROUTER_ENV_FILE="$ROUTER_ENV_FILE" python3 - <<'PYAUTH'
+          import os
           import urllib.request
           from pathlib import Path
           from urllib.error import HTTPError
 
           cfg = {}
-          for raw in Path("/etc/iachat/router.env").read_text().splitlines():
+          for raw in Path(os.environ["ROUTER_ENV_FILE"]).read_text().splitlines():
               line = raw.strip()
               if not line or line.startswith("#"):
                   continue
@@ -98,5 +201,70 @@ jobs:
           assert authorized in (400, 422), "IAchat token was not accepted by Router"
           print("ROUTER_AUTH_PROBE=ok_no_inference")
           PYAUTH
+          # Prueba de inferencia real: sólo cuando se pide explícitamente en el
+          # dispatch. Una única llamada a /route; informa estado, proveedor y
+          # modelo, nunca la credencial ni el texto completo de la respuesta.
+          if [ "${{ inputs.inferencia_minima }}" = "si" ]; then
+            echo "ROUTER_SMOKE_MODE=single_request"
+            sudo -n python3 - <<'PYSMOKE'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          cfg = {}
+          for raw in Path("/etc/iachat-router.env").read_text().splitlines():
+              line = raw.strip()
+              if not line or line.startswith("#"):
+                  continue
+              if line.startswith("export "):
+                  line = line[7:]
+              key, sep, value = line.partition("=")
+              if sep:
+                  cfg[key.strip()] = value.strip().strip('"').strip("'")
+          token = cfg.get("ROUTER_TOKEN", "")
+          base = cfg.get("ROUTER_URL", "http://127.0.0.1:8010").rstrip("/")
+          if not token:
+              raise SystemExit("ROUTER_SMOKE=no_token")
+
+          payload = {
+              "task": "Respondé únicamente con la palabra ok.",
+              "required_capabilities": ["chat"],
+              "application_name": "iachat",
+              "decompose": False,
+          }
+          request = urllib.request.Request(
+              base + "/route",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json",
+                       "Authorization": "Bearer " + token},
+              method="POST",
+          )
+          started = time.monotonic()
+          try:
+              with urllib.request.urlopen(request, timeout=90) as response:
+                  status = response.status
+                  body = response.read()
+          except urllib.error.HTTPError as error:
+              status = error.code
+              body = error.read()
+          elapsed = int((time.monotonic() - started) * 1000)
+          print("ROUTER_SMOKE_HTTP=" + str(status))
+          print("ROUTER_SMOKE_ELAPSED_MS=" + str(elapsed))
+          if status == 200:
+              data = json.loads(body)
+              text = str(data.get("text") or "")
+              print("ROUTER_SMOKE_OK=" + str(bool(data.get("ok"))))
+              print("ROUTER_SMOKE_PROVIDER=" + str(data.get("provider") or "none")[:80])
+              print("ROUTER_SMOKE_MODEL=" + str(data.get("model") or "none")[:120])
+              print("ROUTER_SMOKE_CHARS=" + str(len(text)))
+              print("ROUTER_SMOKE_DECOMPOSED=" + str(bool(data.get("decomposed"))))
+          else:
+              detail = body.decode("utf-8", "replace")[:300].replace("\n", " ").replace("\r", " ")
+              print("ROUTER_SMOKE_DETAIL=" + detail)
+          raise SystemExit(0 if status == 200 else 1)
+          PYSMOKE
+          fi
           echo "ROUTER_AUDIT_COMPLETE=read_only"
           REMOTE
